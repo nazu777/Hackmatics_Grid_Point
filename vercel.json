@@ -1,14 +1,8 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
+  "installCommand": "bash -c 'pip install -r api/requirements.txt && pnpm install'",
   "buildCommand": "pnpm run build",
   "outputDirectory": "frontend/dist",
-  "installCommand": "pnpm install",
-  "framework": "vite",
-  "functions": {
-    "api/index.py": {
-      "includeFiles": "backend/**"
-    }
-  },
   "rewrites": [
     {
       "source": "/api/(.*)",
