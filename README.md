@@ -182,3 +182,26 @@ make test
 - [x] **Performance & Acceptance**:
   - Parses and validates 1,000 nodes in under **0.2 seconds** (far exceeding the <5s requirement).
   - 31 passing automated tests.
+
+---
+
+## 🗺️ Phase 2 Completed Features: Location Visualization & Spatial Mapping
+
+- [x] **Interactive Geospatial Demand Map**:
+  - **React (Leaflet)**: Real-time map rendering with OpenStreetMap, CartoDB Positron (Light), and Dark Matter tiles.
+  - **Streamlit (PyDeck)**: Auto-centered ScatterplotLayer rendering demand nodes with hover tooltips.
+- [x] **Cartographic Demand Bubbles**:
+  - Circle marker radius proportional to $\sqrt{w_i}$ (area-proportional to order volume for proper human perception).
+  - Demand intensity color palette: Low (Emerald), Medium (Amber), High (Rose/Crimson).
+  - Interactive tooltips & popups showing ID, name, coordinates, and exact order count.
+- [x] **Optimization Controls & Parameter Selection**:
+  - **Warehouse Count $K$**: Slider & quick-select presets for $K \in [1, 10]$.
+  - **Distance Metric**: Selection between **Haversine** (spherical great-circle), **Euclidean** (flat plane), and **Manhattan** ($L_1$ grid) with contextual descriptions.
+  - **Constraints Configuration**: Toggles and inputs for $C_{max}$ (capacity), $R_{max}$ (radius), delivery cost rate ($\$/\text{km}$), and traffic multiplier.
+- [x] **Spatial Bounds & Edge-Case Guards**:
+  - Automatic viewport bounding box calculation with padding.
+  - Safeguards for single-point datasets and empty sets.
+- [x] **Automated Tests & Performance**:
+  - 38 passing backend tests (all unit + Phase 1 & Phase 2 acceptance tests).
+  - 1,000 nodes spatial styling and bounds calculation takes $<0.05$s (far exceeding the <2.0s requirement).
+

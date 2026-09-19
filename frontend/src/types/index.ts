@@ -133,3 +133,38 @@ export interface SyntheticConfig {
   orders_max: number;
   seed: number;
 }
+
+export type DistanceMetric = 'haversine' | 'euclidean' | 'manhattan';
+
+export interface VehicleType {
+  vehicle_type: string;
+  capacity: number;
+  cost_per_km: number;
+  fuel_type?: string;
+  avg_speed_kmph?: number;
+}
+
+export interface OptimizationConfig {
+  K: number;
+  distance_metric: DistanceMetric;
+  capacity_enabled: boolean;
+  C_max?: number | null;
+  radius_enabled: boolean;
+  R_max_km?: number | null;
+  cost_per_km: number;
+  fuel_cost_per_km: number;
+  infra_cost_per_warehouse: number;
+  traffic_factor: number;
+  vehicle_fleet: VehicleType[];
+  random_seed: number;
+  baseline_mode: 'centroid' | 'mean' | 'single_center' | 'custom';
+}
+
+export type BasemapStyle = 'osm' | 'positron' | 'dark';
+
+export interface MapLayerOptions {
+  showBubbles: boolean;
+  showLabels: boolean;
+  basemap: BasemapStyle;
+}
+

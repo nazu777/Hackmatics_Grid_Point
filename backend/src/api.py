@@ -16,7 +16,7 @@ from .schema import (
     OptimizationConfig,
     OptimizationResult
 )
-from .validation import validate_neighborhoods
+from .validation import validate_neighborhoods, validate_optimization_config
 from .data_ingestion import (
     parse_csv_content,
     parse_json_content,
@@ -26,6 +26,7 @@ from .data_ingestion import (
 )
 from .synthetic import generate_synthetic_dataset
 from .optimization import run_optimization
+from .mapping import prepare_map_layer_data, compute_map_bounds
 
 app = FastAPI(
     title="GridPoint API",
@@ -56,9 +57,39 @@ class ExportRequest(BaseModel):
     neighborhoods: List[Dict[str, Any]]
 
 
+class ConfigValidateRequest(BaseModel):
+    config: OptimizationConfig
+    neighborhoods: List[Dict[str, Any]]
+
+
+class MapSummaryRequest(BaseModel):
+    neighborhoods: List[Dict[str, Any]]
+
+
 @app.get("/api/health")
 def health_check():
     return {"status": "ok", "service": "GridPoint Backend", "version": "1.0.0"}
+
+
+@app.post("/api/map/summary")
+def get_map_summary(payload: MapSummaryRequest):
+    """
+    Computes map bounds, center, zoom, and bubble styling for neighborhood nodes (Phase 2).
+    """
+    return prepare_map_layer_data(payload.neighborhoods)
+
+
+@app.post("/api/config/validate")
+def validate_config(payload: ConfigValidateRequest):
+    """
+    Validates OptimizationConfig against active neighborhood records (Phase 2/3).
+    """
+    is_valid, errors, warnings = validate_optimization_config(payload.config, payload.neighborhoods)
+    return {
+        "valid": is_valid,
+        "errors": [e.model_dump() for e in errors],
+        "warnings": [w.model_dump() for w in warnings]
+    }
 
 
 @app.post("/api/validate", response_model=ValidationResult)

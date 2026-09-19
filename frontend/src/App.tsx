@@ -6,7 +6,9 @@ import { DataTable } from './components/DataTable';
 import { SyntheticModal } from './components/SyntheticModal';
 import { ErrorDrawer } from './components/ErrorDrawer';
 import { OptimizationPanel } from './components/OptimizationPanel';
-import { Neighborhood, ValidationResult, DatasetSummary, OptimizationResult } from './types';
+import { MapVisualizer } from './components/MapVisualizer';
+import { OptimizationControls } from './components/OptimizationControls';
+import { Neighborhood, ValidationResult, DatasetSummary, OptimizationConfig, OptimizationResult, MapLayerOptions } from './types';
 import { validateData, localValidate } from './services/api';
 
 // Initial Hyderabad seed dataset per schema.md
@@ -23,6 +25,22 @@ const INITIAL_DATASET: Neighborhood[] = [
   { neighborhood_id: 'N010', name: 'Ameerpet', latitude: 17.437460, longitude: 78.448290, daily_orders: 195, zone: 'Central' }
 ];
 
+const DEFAULT_CONFIG: OptimizationConfig = {
+  K: 2,
+  distance_metric: 'haversine',
+  capacity_enabled: false,
+  C_max: null,
+  radius_enabled: false,
+  R_max_km: null,
+  cost_per_km: 1.0,
+  fuel_cost_per_km: 0.0,
+  infra_cost_per_warehouse: 0.0,
+  traffic_factor: 0.0,
+  vehicle_fleet: [],
+  random_seed: 42,
+  baseline_mode: 'centroid'
+};
+
 export const App: React.FC = () => {
   const [activePhase, setActivePhase] = useState<number>(1);
   const [neighborhoods, setNeighborhoods] = useState<Neighborhood[]>(() => {
@@ -38,6 +56,26 @@ export const App: React.FC = () => {
   const [optimizationResult, setOptimizationResult] = useState<OptimizationResult | null>(null);
   const [isSyntheticModalOpen, setIsSyntheticModalOpen] = useState(false);
   const [isErrorDrawerOpen, setIsErrorDrawerOpen] = useState(false);
+
+  // Phase 2 Config & Map Layer state
+  const [optimizationConfig, setOptimizationConfig] = useState<OptimizationConfig>(() => {
+    const saved = localStorage.getItem('gridpoint_opt_config');
+    if (saved) {
+      try { return JSON.parse(saved); } catch (e) {}
+    }
+    return DEFAULT_CONFIG;
+  });
+
+  const [mapLayerOptions, setMapLayerOptions] = useState<MapLayerOptions>({
+    showBubbles: true,
+    showLabels: true,
+    basemap: 'osm'
+  });
+
+  const handleConfigChange = (updated: OptimizationConfig) => {
+    setOptimizationConfig(updated);
+    localStorage.setItem('gridpoint_opt_config', JSON.stringify(updated));
+  };
 
   // Compute summary stats
   function computeSummary(nodes: Neighborhood[]): DatasetSummary {
@@ -114,8 +152,8 @@ export const App: React.FC = () => {
           onOpenErrors={() => setIsErrorDrawerOpen(true)}
         />
 
-        {/* Phase Views */}
-        {activePhase === 1 ? (
+        {/* Phase 1 Main View */}
+        {activePhase === 1 && (
           <div>
             <FileUploader
               onDataLoaded={handleDataLoaded}
@@ -128,39 +166,60 @@ export const App: React.FC = () => {
               onChange={(updated) => setNeighborhoods(updated)}
             />
           </div>
-        ) : activePhase === 3 ? (
+        )}
+
+        {/* Phase 2 Map Visualizer & Controls */}
+        {activePhase === 2 && (
+          <div className="space-y-6">
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-start">
+              {/* Left Column: Interactive Controls */}
+              <div className="lg:col-span-1 space-y-4">
+                <OptimizationControls
+                  config={optimizationConfig}
+                  onChange={handleConfigChange}
+                  neighborhoods={neighborhoods}
+                  onProceedToOptimization={() => setActivePhase(3)}
+                />
+
+                <div className="bg-emerald-50/70 border border-emerald-200/80 rounded-3xl p-4 text-xs text-emerald-900 space-y-2">
+                  <div className="font-bold flex items-center gap-1.5">
+                    <span>Spatial Insights</span>
+                  </div>
+                  <p className="text-emerald-800">
+                    The map plots circle markers scaled by daily orders. Hover or click on any node to view exact coordinates and demand intensity.
+                  </p>
+                  <button
+                    onClick={() => setActivePhase(1)}
+                    className="text-emerald-700 underline font-semibold hover:text-emerald-900 block pt-1"
+                  >
+                    &larr; Need to modify coordinates or orders? Edit in Phase 1
+                  </button>
+                </div>
+              </div>
+
+              {/* Right Column: Leaflet Map */}
+              <div className="lg:col-span-2">
+                <MapVisualizer
+                  neighborhoods={neighborhoods}
+                  layerOptions={mapLayerOptions}
+                  setLayerOptions={setMapLayerOptions}
+                />
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Phase 3 Optimization */}
+        {activePhase === 3 && (
           <OptimizationPanel
             neighborhoods={neighborhoods}
             onOptimizationComplete={setOptimizationResult}
             lastResult={optimizationResult}
           />
-        ) : activePhase === 2 ? (
-          <div className="bg-white rounded-3xl p-12 text-center border border-slate-200 shadow-sm my-8">
-            <div className="w-16 h-16 rounded-2xl bg-blue-50 text-blue-600 flex items-center justify-center mx-auto mb-4 text-2xl font-bold">
-              🗺️
-            </div>
-            <h3 className="text-xl font-bold text-slate-800">
-              Phase 2: Location Visualization & Mapping
-            </h3>
-            <p className="text-xs text-slate-500 max-w-md mx-auto mt-2">
-              Currently in progress by teammate. You can proceed directly to <strong>Phase 3: Warehouse Optimizer</strong> to configure and run the Weiszfeld, Weighted K-Means, and PuLP MILP solvers!
-            </p>
-            <div className="mt-6 flex justify-center gap-3">
-              <button
-                onClick={() => setActivePhase(1)}
-                className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-semibold transition cursor-pointer"
-              >
-                &larr; Phase 1 Ingestion
-              </button>
-              <button
-                onClick={() => setActivePhase(3)}
-                className="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition cursor-pointer"
-              >
-                Go to Phase 3 Optimizer &rarr;
-              </button>
-            </div>
-          </div>
-        ) : (
+        )}
+
+        {/* Phase 4+ Placeholders */}
+        {activePhase > 3 && (
           <div className="bg-white rounded-3xl p-12 text-center border border-slate-200 shadow-sm my-8">
             <div className="w-16 h-16 rounded-2xl bg-emerald-50 text-emerald-600 flex items-center justify-center mx-auto mb-4 text-2xl font-bold">
               🚀
@@ -169,8 +228,23 @@ export const App: React.FC = () => {
               Phase {activePhase} Upcoming
             </h3>
             <p className="text-xs text-slate-500 max-w-md mx-auto mt-2">
-              Phase 1 and Phase 3 are fully operational.
+              Phase 1, Phase 2 & Phase 3 are fully operational with {neighborhoods.length} verified nodes and K={optimizationConfig.K}.
+              Proceeding sequentially to Phase {activePhase} per phases.md.
             </p>
+            <div className="mt-6 flex justify-center gap-3">
+              <button
+                onClick={() => setActivePhase(3)}
+                className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-semibold transition cursor-pointer"
+              >
+                &larr; Back to Phase 3 Optimizer
+              </button>
+              <button
+                onClick={() => setActivePhase(1)}
+                className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-semibold transition cursor-pointer"
+              >
+                Phase 1 Ingestion
+              </button>
+            </div>
           </div>
         )}
       </main>

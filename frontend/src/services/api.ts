@@ -15,6 +15,46 @@ import {
 // For split deployments, set VITE_API_URL to backend URL (e.g., https://hackmatics-grid-point-backend.vercel.app)
 const API_BASE = (import.meta.env.VITE_API_URL as string) || '/api';
 
+export async function validateOptimizationConfig(
+  config: OptimizationConfig,
+  neighborhoods: Neighborhood[]
+): Promise<{ valid: boolean; errors: any[]; warnings: any[] }> {
+  try {
+    const res = await fetch(`${API_BASE}/config/validate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ config, neighborhoods })
+    });
+    if (res.ok) {
+      return await res.json();
+    }
+  } catch (e) {
+    // Fallback to local validation
+  }
+
+  // Local fallback
+  const errors: any[] = [];
+  const warnings: any[] = [];
+  if (config.K < 1 || config.K > 10) {
+    errors.push({ field: 'K', error: 'K must be between 1 and 10', code: 'INVALID_K' });
+  }
+  if (neighborhoods.length > 0 && config.K > neighborhoods.length) {
+    errors.push({ field: 'K', error: `K (${config.K}) cannot exceed dataset count (${neighborhoods.length})`, code: 'K_EXCEEDS_NODES' });
+  }
+  if (config.capacity_enabled && config.C_max != null) {
+    const totalCap = config.K * config.C_max;
+    const totalDemand = neighborhoods.reduce((sum, n) => sum + (Number(n.daily_orders) || 0), 0);
+    if (totalCap < totalDemand) {
+      errors.push({
+        field: 'C_max',
+        error: `Total capacity (${totalCap}) is less than total demand (${totalDemand}). Infeasible.`,
+        code: 'TOTAL_CAPACITY_INSUFFICIENT'
+      });
+    }
+  }
+  return { valid: errors.length === 0, errors, warnings };
+}
+
 export async function validateData(neighborhoods: Neighborhood[]): Promise<ValidationResult> {
   try {
     const res = await fetch(`${API_BASE}/validate`, {

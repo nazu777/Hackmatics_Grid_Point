@@ -5,9 +5,10 @@ Phase 1: Data Ingestion & Setup (Streamlit UI)
 import streamlit as st
 import pandas as pd
 import json
+import pydeck as pdk
 
 from src.schema import SyntheticGenerationConfig, OptimizationConfig
-from src.validation import validate_neighborhoods
+from src.validation import validate_neighborhoods, validate_optimization_config
 from src.data_ingestion import (
     parse_csv_content,
     parse_json_content,
@@ -17,6 +18,7 @@ from src.data_ingestion import (
 )
 from src.synthetic import generate_synthetic_dataset
 from src.optimization import run_optimization
+from src.mapping import prepare_map_layer_data, compute_map_bounds
 
 st.set_page_config(
     page_title="GridPoint — Warehouse Location Optimization",
@@ -72,27 +74,65 @@ if "validation_result" not in st.session_state:
     val_res, _ = validate_neighborhoods(st.session_state.neighborhoods)
     st.session_state.validation_result = val_res
 
+if "active_phase" not in st.session_state:
+    st.session_state.active_phase = "Phase 2: Location Visualization & Spatial Mapping"
+
 # Title & Pipeline Banner
 st.markdown('<div class="main-header">📍 GRIDPOINT</div>', unsafe_allow_html=True)
 st.markdown(
     '<div class="sub-header">Warehouse Location & Assignment Optimization Platform &bull; '
-    '<strong>Phase 1: Data Ingestion & Validation</strong></div>',
+    '<strong>Phase 1: Ingestion</strong> &bull; <strong>Phase 2: Spatial Mapping</strong></div>',
     unsafe_allow_html=True
 )
 
-st.info(
-    "🔄 **Pipeline Flow**: `Neighborhood Data (Active)` ➔ `Location Visualization (Phase 2)` ➔ "
-    "`Warehouse Optimization (Phase 3)` ➔ `Neighborhood Assignment (Phase 3)` ➔ `Delivery Cost Comparison (Phase 4)`"
+# Pipeline Flow Navigation Bar
+phase_selection = st.radio(
+    "Active Pipeline Stage:",
+    [
+        "Phase 1: Data Ingestion & Validation",
+        "Phase 2: Location Visualization & Spatial Mapping"
+    ],
+    horizontal=True,
+    index=1 if st.session_state.active_phase.startswith("Phase 2") else 0
 )
+st.session_state.active_phase = phase_selection
 
 # Sidebar Controls
 with st.sidebar:
-    st.header("⚙️ Data Source")
-    input_mode = st.radio(
-        "Choose Ingestion Method:",
-        ["🎲 Synthetic Generator", "📁 File Upload (CSV/JSON)", "✏️ Manual Data Table"],
-        index=0
-    )
+    st.header("⚙️ Pipeline Stage & Config")
+
+    if st.session_state.active_phase.startswith("Phase 1"):
+        input_mode = st.radio(
+            "Choose Ingestion Method:",
+            ["🎲 Synthetic Generator", "📁 File Upload (CSV/JSON)", "✏️ Manual Data Table"],
+            index=0
+        )
+    else:
+        st.subheader("🗺️ Optimization Controls (K & Metric)")
+        k_val = st.slider("Warehouses to Place (K)", min_value=1, max_value=10, value=2, help="Number of facilities K to optimize")
+        metric_val = st.selectbox(
+            "Distance Metric",
+            ["haversine", "euclidean", "manhattan"],
+            index=0,
+            help="Haversine = spherical Earth km; Euclidean = flat coordinate; Manhattan = grid block"
+        )
+
+        with st.expander("🛡️ Constraints & Costs", expanded=False):
+            cap_enabled = st.checkbox("Enable Capacity Constraint (C_max)", value=False)
+            c_max = st.number_input("Max Orders per Warehouse (C_max)", value=1000, min_value=1) if cap_enabled else None
+            rad_enabled = st.checkbox("Enable Radius Constraint (R_max)", value=False)
+            r_max = st.number_input("Max Radius in km (R_max)", value=25.0, min_value=0.5) if rad_enabled else None
+            cost_km = st.number_input("Cost per km ($)", value=1.0, min_value=0.0)
+
+        st.session_state.opt_config = OptimizationConfig(
+            K=k_val,
+            distance_metric=metric_val,
+            capacity_enabled=cap_enabled,
+            C_max=c_max,
+            radius_enabled=rad_enabled,
+            R_max_km=r_max,
+            cost_per_km=cost_km
+        )
 
     st.divider()
     st.markdown("### 📥 Quick Load Samples")
@@ -112,111 +152,186 @@ with st.sidebar:
                 st.session_state.validation_result = val
                 st.rerun()
 
-# Main Ingestion Logic
-if input_mode == "🎲 Synthetic Generator":
-    st.subheader("🎲 Synthetic Dataset Generator (schema.md §2.8)")
-    st.caption("Generate realistic, seedable geographic demand clusters for instant simulation.")
+# Main Pipeline Stage Views
+if st.session_state.active_phase.startswith("Phase 1"):
+    if input_mode == "🎲 Synthetic Generator":
+        st.subheader("🎲 Synthetic Dataset Generator (schema.md §2.8)")
+        st.caption("Generate realistic, seedable geographic demand clusters for instant simulation.")
 
-    with st.expander("🛠️ Generator Parameters", expanded=True):
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            n_nodes = st.slider("Neighborhoods Count (N)", min_value=5, max_value=1000, value=25, step=5)
-            dist_type = st.selectbox("Distribution Type", ["clustered", "uniform", "gaussian"], index=0)
-            clusters_count = st.slider("Number of Clusters", min_value=1, max_value=8, value=3) if dist_type == "clustered" else 1
+        with st.expander("🛠️ Generator Parameters", expanded=True):
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                n_nodes = st.slider("Neighborhoods Count (N)", min_value=5, max_value=1000, value=25, step=5)
+                dist_type = st.selectbox("Distribution Type", ["clustered", "uniform", "gaussian"], index=0)
+                clusters_count = st.slider("Number of Clusters", min_value=1, max_value=8, value=3) if dist_type == "clustered" else 1
 
-        with col2:
-            lat_c = st.number_input("Center Latitude", value=17.385044, format="%.6f")
-            lon_c = st.number_input("Center Longitude", value=78.486671, format="%.6f")
-            spread_km = st.slider("Spread Radius (km)", min_value=5.0, max_value=100.0, value=20.0, step=2.5)
+            with col2:
+                lat_c = st.number_input("Center Latitude", value=17.385044, format="%.6f")
+                lon_c = st.number_input("Center Longitude", value=78.486671, format="%.6f")
+                spread_km = st.slider("Spread Radius (km)", min_value=5.0, max_value=100.0, value=20.0, step=2.5)
 
-        with col3:
-            min_ord = st.number_input("Min Daily Orders", value=20, min_value=0, max_value=500)
-            max_ord = st.number_input("Max Daily Orders", value=250, min_value=1, max_value=2000)
-            seed_val = st.number_input("Random Seed", value=42, min_value=1, max_value=99999)
+            with col3:
+                min_ord = st.number_input("Min Daily Orders", value=20, min_value=0, max_value=500)
+                max_ord = st.number_input("Max Daily Orders", value=250, min_value=1, max_value=2000)
+                seed_val = st.number_input("Random Seed", value=42, min_value=1, max_value=99999)
 
-        if st.button("✨ Generate Synthetic Dataset", type="primary"):
-            if min_ord > max_ord:
-                st.error("Min Daily Orders cannot be greater than Max Daily Orders!")
+            if st.button("✨ Generate Synthetic Dataset", type="primary"):
+                if min_ord > max_ord:
+                    st.error("Min Daily Orders cannot be greater than Max Daily Orders!")
+                else:
+                    synth_config = SyntheticGenerationConfig(
+                        N=n_nodes,
+                        lat_center=lat_c,
+                        lon_center=lon_c,
+                        spread_km=spread_km,
+                        distribution=dist_type, # type: ignore
+                        num_clusters=clusters_count,
+                        orders_min=min_ord,
+                        orders_max=max_ord,
+                        seed=seed_val
+                    )
+                    generated = generate_synthetic_dataset(synth_config)
+                    val_res, clean_nodes = validate_neighborhoods(generated)
+                    st.session_state.neighborhoods = clean_nodes
+                    st.session_state.validation_result = val_res
+                    st.success(f"Generated {len(clean_nodes)} synthetic neighborhoods successfully!")
+                    st.rerun()
+
+    elif input_mode == "📁 File Upload (CSV/JSON)":
+        st.subheader("📁 Upload Neighborhood Dataset (schema.md §3)")
+        st.caption("Supports CSV and JSON files with automatic header detection and alias normalization.")
+
+        uploaded_file = st.file_uploader(
+            "Upload CSV or JSON File",
+            type=["csv", "json", "txt"],
+            help="Required fields: neighborhood_id, latitude, longitude, daily_orders. Optional: name, zone."
+        )
+
+        if uploaded_file is not None:
+            file_bytes = uploaded_file.read()
+            try:
+                content_str = file_bytes.decode("utf-8")
+            except UnicodeDecodeError:
+                content_str = file_bytes.decode("latin-1")
+
+            if uploaded_file.name.endswith(".json"):
+                val_res, clean_records = parse_json_content(content_str)
             else:
-                synth_config = SyntheticGenerationConfig(
-                    N=n_nodes,
-                    lat_center=lat_c,
-                    lon_center=lon_c,
-                    spread_km=spread_km,
-                    distribution=dist_type, # type: ignore
-                    num_clusters=clusters_count,
-                    orders_min=min_ord,
-                    orders_max=max_ord,
-                    seed=seed_val
-                )
-                generated = generate_synthetic_dataset(synth_config)
-                val_res, clean_nodes = validate_neighborhoods(generated)
-                st.session_state.neighborhoods = clean_nodes
-                st.session_state.validation_result = val_res
-                st.success(f"Generated {len(clean_nodes)} synthetic neighborhoods successfully!")
-                st.rerun()
+                val_res, clean_records = parse_csv_content(content_str)
 
-elif input_mode == "📁 File Upload (CSV/JSON)":
-    st.subheader("📁 Upload Neighborhood Dataset (schema.md §3)")
-    st.caption("Supports CSV and JSON files with automatic header detection and alias normalization.")
+            st.session_state.validation_result = val_res
+            if val_res.valid:
+                st.session_state.neighborhoods = clean_records
+                st.success(f"Successfully loaded and validated {len(clean_records)} records from `{uploaded_file.name}`!")
+            else:
+                st.session_state.neighborhoods = clean_records
+                st.error(f"Validation failed on `{uploaded_file.name}` with {len(val_res.errors)} errors. See diagnostics below.")
 
-    uploaded_file = st.file_uploader(
-        "Upload CSV or JSON File",
-        type=["csv", "json", "txt"],
-        help="Required fields: neighborhood_id, latitude, longitude, daily_orders. Optional: name, zone."
-    )
+    elif input_mode == "✏️ Manual Data Table":
+        st.subheader("✏️ Interactive Tabular Data Editor")
+        st.caption("Add, edit, or delete neighborhood demand records interactively.")
 
-    if uploaded_file is not None:
-        file_bytes = uploaded_file.read()
-        try:
-            content_str = file_bytes.decode("utf-8")
-        except UnicodeDecodeError:
-            content_str = file_bytes.decode("latin-1")
+        current_df = pd.DataFrame(st.session_state.neighborhoods)
+        if current_df.empty:
+            current_df = pd.DataFrame(columns=["neighborhood_id", "name", "latitude", "longitude", "daily_orders", "zone"])
 
-        if uploaded_file.name.endswith(".json"):
-            val_res, clean_records = parse_json_content(content_str)
-        else:
-            val_res, clean_records = parse_csv_content(content_str)
+        edited_df = st.data_editor(
+            current_df,
+            num_rows="dynamic",
+            use_container_width=True,
+            column_config={
+                "neighborhood_id": st.column_config.TextColumn("Neighborhood ID (PK)", required=True),
+                "name": st.column_config.TextColumn("Name / Label"),
+                "latitude": st.column_config.NumberColumn("Latitude (°)", min_value=-90.0, max_value=90.0, format="%.6f", required=True),
+                "longitude": st.column_config.NumberColumn("Longitude (°)", min_value=-180.0, max_value=180.0, format="%.6f", required=True),
+                "daily_orders": st.column_config.NumberColumn("Daily Orders (w_i)", min_value=0, step=1, required=True),
+                "zone": st.column_config.TextColumn("Zone / Cluster")
+            }
+        )
 
-        st.session_state.validation_result = val_res
-        if val_res.valid:
+        if st.button("💾 Apply & Validate Changes", type="primary"):
+            val_res, clean_records = validate_neighborhoods(edited_df)
+            st.session_state.validation_result = val_res
             st.session_state.neighborhoods = clean_records
-            st.success(f"Successfully loaded and validated {len(clean_records)} records from `{uploaded_file.name}`!")
-        else:
-            st.session_state.neighborhoods = clean_records
-            st.error(f"Validation failed on `{uploaded_file.name}` with {len(val_res.errors)} errors. See diagnostics below.")
+            if val_res.valid:
+                st.success(f"Saved and validated {len(clean_records)} records successfully!")
+            else:
+                st.warning(f"Validation found {len(val_res.errors)} issues in edited records.")
+            st.rerun()
 
-elif input_mode == "✏️ Manual Data Table":
-    st.subheader("✏️ Interactive Tabular Data Editor")
-    st.caption("Add, edit, or delete neighborhood demand records interactively.")
+else:
+    # Phase 2: Location Visualization & Spatial Mapping View
+    st.subheader("🗺️ Geographic Demand Map & Spatial Distribution (Phase 2)")
+    st.caption("Interactive demand bubbles sized by order volume (radius ∝ √w_i) with PyDeck auto-fit viewport.")
 
-    current_df = pd.DataFrame(st.session_state.neighborhoods)
-    if current_df.empty:
-        current_df = pd.DataFrame(columns=["neighborhood_id", "name", "latitude", "longitude", "daily_orders", "zone"])
+    layer_data = prepare_map_layer_data(st.session_state.neighborhoods)
+    nodes = layer_data["nodes"]
+    bounds_info = layer_data["bounds_info"]
 
-    edited_df = st.data_editor(
-        current_df,
-        num_rows="dynamic",
-        use_container_width=True,
-        column_config={
-            "neighborhood_id": st.column_config.TextColumn("Neighborhood ID (PK)", required=True),
-            "name": st.column_config.TextColumn("Name / Label"),
-            "latitude": st.column_config.NumberColumn("Latitude (°)", min_value=-90.0, max_value=90.0, format="%.6f", required=True),
-            "longitude": st.column_config.NumberColumn("Longitude (°)", min_value=-180.0, max_value=180.0, format="%.6f", required=True),
-            "daily_orders": st.column_config.NumberColumn("Daily Orders (w_i)", min_value=0, step=1, required=True),
-            "zone": st.column_config.TextColumn("Zone / Cluster")
-        }
-    )
+    if nodes:
+        map_df = pd.DataFrame(nodes)
 
-    if st.button("💾 Apply & Validate Changes", type="primary"):
-        val_res, clean_records = validate_neighborhoods(edited_df)
-        st.session_state.validation_result = val_res
-        st.session_state.neighborhoods = clean_records
-        if val_res.valid:
-            st.success(f"Saved and validated {len(clean_records)} records successfully!")
-        else:
-            st.warning(f"Validation found {len(val_res.errors)} issues in edited records.")
-        st.rerun()
+        # PyDeck ScatterplotLayer for demand bubbles
+        scatterplot_layer = pdk.Layer(
+            "ScatterplotLayer",
+            data=map_df,
+            get_position=["longitude", "latitude"],
+            get_radius="visual_radius * 45", # Scale in meters for geographical visibility
+            get_fill_color="color_rgb",
+            pickable=True,
+            auto_highlight=True,
+            opacity=0.75,
+            stroked=True,
+            filled=True,
+            get_line_color=[255, 255, 255],
+            line_width_min_pixels=1.5
+        )
+
+        # View state centered on dataset bounding box
+        view_state = pdk.ViewState(
+            latitude=bounds_info["center"]["lat"],
+            longitude=bounds_info["center"]["lon"],
+            zoom=bounds_info["suggested_zoom"],
+            pitch=0
+        )
+
+        # PyDeck deck rendering
+        deck = pdk.Deck(
+            layers=[scatterplot_layer],
+            initial_view_state=view_state,
+            map_style="light",
+            tooltip={
+                "html": "<b>{name}</b> ({neighborhood_id})<br/>"
+                        "Daily Orders: <b>{daily_orders}</b> ({demand_category})<br/>"
+                        "Coords: {latitude}°, {longitude}°",
+                "style": {"backgroundColor": "#1E293B", "color": "#FFFFFF", "fontSize": "12px", "borderRadius": "8px"}
+            }
+        )
+
+        col_map, col_info = st.columns([3, 1])
+        with col_map:
+            st.pydeck_chart(deck, use_container_width=True)
+
+        with col_info:
+            st.markdown("### 📍 Map Insights")
+            st.metric("Total Mapped Nodes", len(nodes))
+            st.metric("Min Daily Orders", layer_data["min_orders"])
+            st.metric("Max Daily Orders", layer_data["max_orders"])
+            st.metric("Geographic Span", f"{bounds_info['span_km']} km")
+
+            st.divider()
+            st.markdown("""
+            **Bubble Palette Legend**:
+            - 🟢 **Emerald**: Low Demand ($<33\%$)
+            - 🟡 **Amber**: Medium Demand ($33–66\%$)
+            - 🔴 **Rose**: High Demand ($>66\%$)
+            """)
+
+            opt_cfg = st.session_state.get("opt_config")
+            if opt_cfg:
+                st.info(f"Target Warehouses: **K={opt_cfg.K}**\n\nMetric: **{opt_cfg.distance_metric.title()}**")
+    else:
+        st.warning("No valid coordinate records available to render on the map.")
 
 st.divider()
 
