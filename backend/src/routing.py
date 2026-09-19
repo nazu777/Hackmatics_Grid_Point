@@ -25,7 +25,7 @@ import numpy as np
 
 from .distance import haversine_distance_matrix
 
-TOMTOM_MATRIX_URL = "https://api.tomtom.com/routing/2/matrix/summary/json"
+TOMTOM_MATRIX_URL = "https://api.tomtom.com/routing/matrix/2/summary/json"
 OSRM_TABLE_URL = "https://router.project-osrm.org/table/v1/driving"
 MATRIX_TTL_S = 15 * 60
 MAX_COORDS_PER_CALL = 95  # stay under OSRM's 100-coordinate request limit
