@@ -95,7 +95,7 @@ export const OptimizationControls: React.FC<OptimizationControlsProps> = ({
           <span>Distance Metric</span>
           <span className="text-[10px] text-slate-400 font-normal">d(n_i, w_k)</span>
         </label>
-        <div className="grid grid-cols-3 gap-2">
+        <div className="grid grid-cols-2 gap-2">
           <button
             type="button"
             onClick={() => handleMetricChange('haversine')}
@@ -149,11 +149,30 @@ export const OptimizationControls: React.FC<OptimizationControlsProps> = ({
             </div>
             <div className="text-[10px] text-slate-400 mt-0.5">L1 grid distance</div>
           </button>
+
+          <button
+            type="button"
+            onClick={() => handleMetricChange('road')}
+            className={`p-2.5 rounded-xl border text-left transition ${
+              config.distance_metric === 'road'
+                ? 'bg-emerald-50 border-emerald-500 text-emerald-900 shadow-xs'
+                : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
+            }`}
+          >
+            <div className="text-xs font-bold flex items-center justify-between">
+              <span>Road network</span>
+              {config.distance_metric === 'road' && (
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-600"></span>
+              )}
+            </div>
+            <div className="text-[10px] text-slate-400 mt-0.5">Real driving km + ETA</div>
+          </button>
         </div>
         <p className="text-[11px] text-slate-500 italic">
           {config.distance_metric === 'haversine' && '✓ Accurate spherical earth distance accounting for earth curvature.'}
           {config.distance_metric === 'euclidean' && 'Straight-line flat coordinate distance (geometric centroid baseline).'}
           {config.distance_metric === 'manhattan' && 'Grid/city-block distance |Δlat| + |Δlon| in km.'}
+          {config.distance_metric === 'road' && 'Real road distances via TomTom (live) with OSRM fallback; slower on large datasets.'}
         </p>
       </div>
 

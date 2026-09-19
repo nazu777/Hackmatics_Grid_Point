@@ -47,7 +47,7 @@ class VehicleType(BaseModel):
 class OptimizationConfig(BaseModel):
     """Configuration parameters for warehouse placement and assignment."""
     K: int = Field(2, ge=1, le=10, description="Number of warehouses to place")
-    distance_metric: Literal["haversine", "euclidean", "manhattan"] = Field("haversine")
+    distance_metric: Literal["haversine", "euclidean", "manhattan", "road"] = Field("haversine")
     capacity_enabled: bool = Field(False)
     C_max: Optional[int] = Field(None, gt=0)
     radius_enabled: bool = Field(False)
@@ -77,6 +77,7 @@ class Assignment(BaseModel):
     within_radius: bool = True
     is_feasible: bool = True
     congestion_pct: Optional[float] = Field(None, ge=0.0, description="Corridor congestion applied (delay ratio)")
+    travel_time_min: Optional[float] = Field(None, ge=0.0, description="Road travel time when distance_metric=road")
 
 
 class SyntheticGenerationConfig(BaseModel):
@@ -174,4 +175,5 @@ class OptimizationResult(BaseModel):
     infeasibility_reason: Optional[str] = None
     fuel_note: Optional[str] = None
     traffic_note: Optional[str] = None
+    routing_note: Optional[str] = None
 

@@ -31,11 +31,12 @@ export interface Assignment {
   within_radius: boolean;
   is_feasible: boolean;
   congestion_pct?: number | null;
+  travel_time_min?: number | null;
 }
 
 export interface OptimizationConfig {
   K: number;
-  distance_metric: 'haversine' | 'euclidean' | 'manhattan';
+  distance_metric: 'haversine' | 'euclidean' | 'manhattan' | 'road';
   capacity_enabled: boolean;
   C_max?: number | null;
   radius_enabled: boolean;
@@ -100,6 +101,7 @@ export interface OptimizationResult {
   infeasibility_reason?: string | null;
   fuel_note?: string | null;
   traffic_note?: string | null;
+  routing_note?: string | null;
 }
 
 export interface ValidationErrorItem {
@@ -140,7 +142,7 @@ export interface SyntheticConfig {
   seed: number;
 }
 
-export type DistanceMetric = 'haversine' | 'euclidean' | 'manhattan';
+export type DistanceMetric = 'haversine' | 'euclidean' | 'manhattan' | 'road';
 
 export interface VehicleType {
   vehicle_type: string;

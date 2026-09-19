@@ -125,7 +125,7 @@ export const DetailCard: React.FC<DetailCardProps> = ({
               <div className="space-y-2">
                 {[
                   ['Warehouse', assignment.warehouse_id],
-                  ['Distance', `${assignment.distance_km} km`],
+                  ['Distance', `${assignment.distance_km} km${assignment.travel_time_min != null ? ` (≈${assignment.travel_time_min} min by road)` : ''}`],
                   ['Weighted distance', `${assignment.weighted_distance.toLocaleString()} km·orders`],
                   ['Delivery cost', `$${assignment.cost.toLocaleString()}`],
                   ['Status', assignment.is_feasible ? 'Feasible' : 'Radius exceeded']

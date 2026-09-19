@@ -652,7 +652,10 @@ function localOptimizeNetwork(
     metrics,
     comparison,
     is_feasible: infeasibleCount === 0,
-    infeasibility_reason: infeasibleCount > 0 ? `${infeasibleCount} assignments exceed radius limit` : null
+    infeasibility_reason: infeasibleCount > 0 ? `${infeasibleCount} assignments exceed radius limit` : null,
+    routing_note: config.distance_metric === 'road'
+      ? 'Offline fallback: straight-line distances (backend unreachable)'
+      : undefined
   };
 }
 

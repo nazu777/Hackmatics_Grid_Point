@@ -113,7 +113,13 @@ export const OptimizationPanel: React.FC<OptimizationPanelProps> = ({
                 <option value="haversine">Haversine (Great-Circle / Spherical)</option>
                 <option value="euclidean">Euclidean (Planar Equirectangular)</option>
                 <option value="manhattan">Manhattan (Grid / City-Block Routing)</option>
+                <option value="road">Road network (TomTom live / OSRM)</option>
               </select>
+              {config.distance_metric === 'road' && (
+                <p className="text-[10px] text-ink-faint mt-1">
+                  Real driving distances + travel times. Slower on large datasets; falls back to straight-line per segment if unreachable.
+                </p>
+              )}
             </div>
           </div>
 
@@ -307,6 +313,17 @@ export const OptimizationPanel: React.FC<OptimizationPanelProps> = ({
               </span>
             </div>
           </div>
+
+          {/* Road routing provenance line */}
+          {lastResult.routing_note && (
+            <div className="p-4 bg-sky-50/60 border border-sky-200/70 rounded-2xl flex items-start gap-3">
+              <span className="text-lg leading-none">🛣️</span>
+              <div className="text-xs">
+                <span className="font-bold text-slate-800">Road distances: </span>
+                <span className="text-slate-600">{lastResult.routing_note} — assignments carry per-route travel times.</span>
+              </div>
+            </div>
+          )}
 
           {/* Infeasibility Warning if any */}
           {!lastResult.is_feasible && lastResult.infeasibility_reason && (
