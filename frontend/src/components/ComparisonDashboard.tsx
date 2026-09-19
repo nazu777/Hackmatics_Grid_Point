@@ -1,12 +1,18 @@
 import React, { useMemo } from 'react';
 import { Scale, Download, TrendingDown, DollarSign, Route } from 'lucide-react';
-import { OptimizationResult } from '../types';
+import { Neighborhood, OptimizationResult, ZoneColorMap } from '../types';
+import { WarehouseExpansion } from './WarehouseExpansion';
 
 interface Props {
   result: OptimizationResult;
+  /** When provided, show the incremental "add warehouses" card + before/after map slider. */
+  neighborhoods?: Neighborhood[];
+  zoneColors?: ZoneColorMap;
+  /** Called with the final layout after user confirms — parent applies it to the main map. */
+  onApply?: (result: OptimizationResult) => void;
 }
 
-export const ComparisonDashboard: React.FC<Props> = ({ result }) => {
+export const ComparisonDashboard: React.FC<Props> = ({ result, neighborhoods, zoneColors = {}, onApply }) => {
   const comp = result.comparison;
   const rows = useMemo(() => {
     if (!comp) return [];
@@ -151,6 +157,11 @@ export const ComparisonDashboard: React.FC<Props> = ({ result }) => {
           </table>
         </div>
       </div>
+
+      {/* Incremental expansion: add warehouses + before/after map slider */}
+      {neighborhoods && neighborhoods.length > 0 && (
+        <WarehouseExpansion neighborhoods={neighborhoods} before={result} zoneColors={zoneColors} onApply={onApply} />
+      )}
 
       {/* Distance distribution */}
       <div className="card p-5">

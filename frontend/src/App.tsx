@@ -403,7 +403,7 @@ export const App: React.FC = () => {
           <div className="p-4 space-y-4">
             <h2 className="font-display font-semibold text-[24px] text-ink px-1">Compare Shipments</h2>
             {optimizationResult ? (
-              <ComparisonDashboard result={optimizationResult} />
+              <ComparisonDashboard result={optimizationResult} neighborhoods={neighborhoods} zoneColors={zoneColors} onApply={setOptimizationResult} />
             ) : (
               <div className="card p-8 text-center">
                 <p className="text-[13px] text-ink-faint">No result yet — run the optimizer first.</p>

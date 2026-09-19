@@ -4,6 +4,7 @@ import { Neighborhood, OptimizationConfig, OptimizationResult } from '../types';
 import { optimizeNetwork } from '../services/api';
 import { FuelCard } from './FuelCard';
 import { TrafficCard } from './TrafficCard';
+import { WarehouseExpansion } from './WarehouseExpansion';
 
 interface OptimizationPanelProps {
   neighborhoods: Neighborhood[];
@@ -335,6 +336,9 @@ export const OptimizationPanel: React.FC<OptimizationPanelProps> = ({
               </div>
             </div>
           )}
+
+          {/* Incremental expansion: add warehouses without removing existing ones */}
+          <WarehouseExpansion neighborhoods={neighborhoods} before={lastResult} onApply={onOptimizationComplete} />
 
           {/* Optimized Warehouse Cards */}
           <div className="card p-5">
