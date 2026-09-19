@@ -217,6 +217,7 @@ export const App: React.FC = () => {
             neighborhoods={neighborhoods}
             onOptimizationComplete={setOptimizationResult}
             lastResult={optimizationResult}
+            onGoToComparison={() => setActivePhase(4)}
           />
         )}
 

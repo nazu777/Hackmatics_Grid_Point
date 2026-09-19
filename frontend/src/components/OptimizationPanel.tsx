@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Cpu, CheckCircle2, AlertTriangle, Zap, TrendingDown, DollarSign } from 'lucide-react';
+import { Cpu, CheckCircle2, AlertTriangle, Zap, TrendingDown, DollarSign, ArrowRight } from 'lucide-react';
 import { Neighborhood, OptimizationConfig, OptimizationResult } from '../types';
 import { optimizeNetwork } from '../services/api';
 
@@ -7,12 +7,14 @@ interface OptimizationPanelProps {
   neighborhoods: Neighborhood[];
   onOptimizationComplete: (result: OptimizationResult) => void;
   lastResult: OptimizationResult | null;
+  onGoToComparison?: () => void;
 }
 
 export const OptimizationPanel: React.FC<OptimizationPanelProps> = ({
   neighborhoods,
   onOptimizationComplete,
-  lastResult
+  lastResult,
+  onGoToComparison
 }) => {
   const [config, setConfig] = useState<OptimizationConfig>({
     K: 2,
@@ -214,6 +216,15 @@ export const OptimizationPanel: React.FC<OptimizationPanelProps> = ({
       {/* Optimization Results Section */}
       {lastResult && (
         <div className="space-y-6 animate-in fade-in duration-300">
+          {lastResult.comparison && onGoToComparison && (
+            <button
+              onClick={onGoToComparison}
+              className="w-full flex items-center justify-center gap-2 px-6 py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-2xl text-sm font-bold shadow-md shadow-indigo-600/20 transition cursor-pointer"
+            >
+              View Full Phase 4 Cost Comparison — Map, Metrics Table & Exports
+              <ArrowRight className="w-4 h-4" />
+            </button>
+          )}
           {/* Comparison Delta Highlights */}
           {lastResult.comparison && (
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
