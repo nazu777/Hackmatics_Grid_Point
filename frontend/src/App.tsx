@@ -5,7 +5,8 @@ import { FileUploader } from './components/FileUploader';
 import { DataTable } from './components/DataTable';
 import { SyntheticModal } from './components/SyntheticModal';
 import { ErrorDrawer } from './components/ErrorDrawer';
-import { Neighborhood, ValidationResult, DatasetSummary } from './types';
+import { OptimizationPanel } from './components/OptimizationPanel';
+import { Neighborhood, ValidationResult, DatasetSummary, OptimizationResult } from './types';
 import { validateData, localValidate } from './services/api';
 
 // Initial Hyderabad seed dataset per schema.md
@@ -34,6 +35,7 @@ export const App: React.FC = () => {
 
   const [validation, setValidation] = useState<ValidationResult>(() => localValidate(neighborhoods));
   const [summary, setSummary] = useState<DatasetSummary>(() => computeSummary(neighborhoods));
+  const [optimizationResult, setOptimizationResult] = useState<OptimizationResult | null>(null);
   const [isSyntheticModalOpen, setIsSyntheticModalOpen] = useState(false);
   const [isErrorDrawerOpen, setIsErrorDrawerOpen] = useState(false);
 
@@ -112,7 +114,7 @@ export const App: React.FC = () => {
           onOpenErrors={() => setIsErrorDrawerOpen(true)}
         />
 
-        {/* Phase 1 Main View */}
+        {/* Phase Views */}
         {activePhase === 1 ? (
           <div>
             <FileUploader
@@ -126,24 +128,49 @@ export const App: React.FC = () => {
               onChange={(updated) => setNeighborhoods(updated)}
             />
           </div>
+        ) : activePhase === 3 ? (
+          <OptimizationPanel
+            neighborhoods={neighborhoods}
+            onOptimizationComplete={setOptimizationResult}
+            lastResult={optimizationResult}
+          />
+        ) : activePhase === 2 ? (
+          <div className="bg-white rounded-3xl p-12 text-center border border-slate-200 shadow-sm my-8">
+            <div className="w-16 h-16 rounded-2xl bg-blue-50 text-blue-600 flex items-center justify-center mx-auto mb-4 text-2xl font-bold">
+              🗺️
+            </div>
+            <h3 className="text-xl font-bold text-slate-800">
+              Phase 2: Location Visualization & Mapping
+            </h3>
+            <p className="text-xs text-slate-500 max-w-md mx-auto mt-2">
+              Currently in progress by teammate. You can proceed directly to <strong>Phase 3: Warehouse Optimizer</strong> to configure and run the Weiszfeld, Weighted K-Means, and PuLP MILP solvers!
+            </p>
+            <div className="mt-6 flex justify-center gap-3">
+              <button
+                onClick={() => setActivePhase(1)}
+                className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-semibold transition cursor-pointer"
+              >
+                &larr; Phase 1 Ingestion
+              </button>
+              <button
+                onClick={() => setActivePhase(3)}
+                className="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition cursor-pointer"
+              >
+                Go to Phase 3 Optimizer &rarr;
+              </button>
+            </div>
+          </div>
         ) : (
           <div className="bg-white rounded-3xl p-12 text-center border border-slate-200 shadow-sm my-8">
             <div className="w-16 h-16 rounded-2xl bg-emerald-50 text-emerald-600 flex items-center justify-center mx-auto mb-4 text-2xl font-bold">
               🚀
             </div>
             <h3 className="text-xl font-bold text-slate-800">
-              Phase {activePhase} Ready for Sprint
+              Phase {activePhase} Upcoming
             </h3>
             <p className="text-xs text-slate-500 max-w-md mx-auto mt-2">
-              Phase 1 Data Ingestion & Validation is fully operational with {neighborhoods.length} verified nodes.
-              Proceeding sequentially to Phase {activePhase} per phases.md.
+              Phase 1 and Phase 3 are fully operational.
             </p>
-            <button
-              onClick={() => setActivePhase(1)}
-              className="mt-6 px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-semibold transition cursor-pointer"
-            >
-              &larr; Back to Phase 1 Ingestion
-            </button>
           </div>
         )}
       </main>

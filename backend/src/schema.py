@@ -107,3 +107,59 @@ class ValidationResult(BaseModel):
     warnings: List[ValidationErrorItem] = Field(default_factory=list)
     total_rows: int = 0
     valid_rows: int = 0
+
+
+class WarehouseMetric(BaseModel):
+    """Per-warehouse load and utilization metric."""
+    warehouse_id: str
+    assigned_orders: int = 0
+    utilization_pct: Optional[float] = None
+    avg_distance_km: float = 0.0
+    neighborhood_count: int = 0
+
+
+class Metrics(BaseModel):
+    """Network delivery performance metrics (schema.md §2.6)."""
+    total_unweighted_distance_km: float = 0.0
+    total_weighted_distance_km_orders: float = 0.0
+    total_cost: float = 0.0
+    avg_distance_per_order_km: float = 0.0
+    avg_weighted_distance_km: float = 0.0
+    warehouses: List[WarehouseMetric] = Field(default_factory=list)
+    infeasible_assignments: int = 0
+    feasibility_ratio: float = 1.0
+
+
+class ComparisonDelta(BaseModel):
+    """Delta metrics comparing baseline layout vs optimized layout (schema.md §2.7)."""
+    distance_saved_km: float = 0.0
+    weighted_distance_saved: float = 0.0
+    cost_saved: float = 0.0
+    pct_distance_saved: float = 0.0
+    pct_cost_saved: float = 0.0
+
+
+class LayoutEvaluation(BaseModel):
+    """Metrics and warehouses for a given layout (baseline or optimized)."""
+    metrics: Metrics
+    warehouses: List[Warehouse]
+    assignments: List[Assignment] = Field(default_factory=list)
+
+
+class ComparisonResult(BaseModel):
+    """Comparative evaluation result."""
+    baseline: LayoutEvaluation
+    optimized: LayoutEvaluation
+    delta: ComparisonDelta
+
+
+class OptimizationResult(BaseModel):
+    """Complete output of optimization engine (schema.md §3.3)."""
+    config: OptimizationConfig
+    warehouses: List[Warehouse]
+    assignments: List[Assignment]
+    metrics: Metrics
+    comparison: Optional[ComparisonResult] = None
+    is_feasible: bool = True
+    infeasibility_reason: Optional[str] = None
+

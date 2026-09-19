@@ -6,7 +6,7 @@ import streamlit as st
 import pandas as pd
 import json
 
-from src.schema import SyntheticGenerationConfig
+from src.schema import SyntheticGenerationConfig, OptimizationConfig
 from src.validation import validate_neighborhoods
 from src.data_ingestion import (
     parse_csv_content,
@@ -16,6 +16,7 @@ from src.data_ingestion import (
     compute_dataset_summary
 )
 from src.synthetic import generate_synthetic_dataset
+from src.optimization import run_optimization
 
 st.set_page_config(
     page_title="GridPoint — Warehouse Location Optimization",
@@ -265,3 +266,125 @@ if st.session_state.neighborhoods:
         )
 else:
     st.warning("No neighborhood records currently loaded.")
+
+# ==========================================
+# PHASE 3: WAREHOUSE OPTIMIZATION ENGINE
+# ==========================================
+st.divider()
+st.subheader("⚡ Phase 3: Warehouse Optimization Engine (schema.md §2, PRD §5.4)")
+st.caption("Solves Weiszfeld geometric median (K=1), Weighted K-Means (K>1), or PuLP CFLP with capacity and radius constraints.")
+
+col_opt1, col_opt2, col_opt3 = st.columns(3)
+
+with col_opt1:
+    k_val = st.slider(
+        "Warehouses Count (K)",
+        min_value=1,
+        max_value=min(10, max(1, len(st.session_state.neighborhoods))),
+        value=min(2, max(1, len(st.session_state.neighborhoods)))
+    )
+    metric_choice = st.selectbox(
+        "Distance Function",
+        ["haversine", "euclidean", "manhattan"],
+        format_func=lambda m: f"{m.capitalize()} ({'Great-circle km' if m=='haversine' else 'Planar km' if m=='euclidean' else 'Grid routing km'})"
+    )
+
+with col_opt2:
+    cap_on = st.checkbox("Enforce Capacity Constraint (C_max)", value=False)
+    c_max_val = st.number_input(
+        "Max Orders / Warehouse",
+        min_value=10,
+        value=500,
+        step=50,
+        disabled=not cap_on
+    )
+    rad_on = st.checkbox("Enforce Service Radius (R_max)", value=False)
+    r_max_val = st.number_input(
+        "Max Service Radius (km)",
+        min_value=1.0,
+        value=15.0,
+        step=1.0,
+        disabled=not rad_on
+    )
+
+with col_opt3:
+    rate_val = st.number_input("Cost Rate ($/km·order)", min_value=0.1, value=1.0, step=0.1)
+    base_mode = st.selectbox("Baseline Layout Mode", ["centroid", "mean", "single_center"])
+
+if st.button("🚀 Run Warehouse Optimization", type="primary"):
+    if not st.session_state.neighborhoods:
+        st.error("Cannot run optimization with 0 demand nodes.")
+    else:
+        with st.spinner("Executing mathematical optimization algorithms..."):
+            opt_config = OptimizationConfig(
+                K=k_val,
+                distance_metric=metric_choice, # type: ignore
+                capacity_enabled=cap_on,
+                C_max=int(c_max_val) if cap_on else None,
+                radius_enabled=rad_on,
+                R_max_km=float(r_max_val) if rad_on else None,
+                cost_per_km=float(rate_val),
+                baseline_mode=base_mode, # type: ignore
+                random_seed=42
+            )
+            opt_res = run_optimization(st.session_state.neighborhoods, opt_config)
+            st.session_state.opt_result = opt_res
+
+if "opt_result" in st.session_state and st.session_state.opt_result is not None:
+    opt_res = st.session_state.opt_result
+    st.markdown("### 📊 Optimization Results & Evaluation")
+
+    if not opt_res.is_feasible:
+        st.warning(f"⚠️ **Feasibility Notice**: {opt_res.infeasibility_reason}")
+
+    # Delta savings cards
+    if opt_res.comparison:
+        c_res1, c_res2, c_res3 = st.columns(3)
+        delta = opt_res.comparison.delta
+        c_res1.metric(
+            "Weighted Distance Saved",
+            f"{delta.pct_distance_saved}%",
+            f"{delta.weighted_distance_saved:,.1f} km·orders"
+        )
+        c_res2.metric(
+            "Delivery Cost Reduction",
+            f"{delta.pct_cost_saved}%",
+            f"${delta.cost_saved:,.2f}"
+        )
+        c_res3.metric(
+            "Avg Distance / Order",
+            f"{opt_res.metrics.avg_distance_per_order_km:.2f} km",
+            f"Baseline: {opt_res.comparison.baseline.metrics.avg_distance_per_order_km:.2f} km",
+            delta_color="inverse"
+        )
+
+    # Warehouse locations table
+    st.markdown(f"#### 📍 Optimized Warehouses (K = {len(opt_res.warehouses)})")
+    wh_data = []
+    for w in opt_res.warehouses:
+        m = next((wm for wm in opt_res.metrics.warehouses if wm.warehouse_id == w.warehouse_id), None)
+        wh_data.append({
+            "Warehouse ID": w.warehouse_id,
+            "Latitude": w.latitude,
+            "Longitude": w.longitude,
+            "Assigned Orders": w.assigned_orders,
+            "Assigned Nodes": m.neighborhood_count if m else 0,
+            "Utilization %": f"{w.utilization_pct}%" if w.utilization_pct is not None else "N/A"
+        })
+    st.dataframe(pd.DataFrame(wh_data), use_container_width=True)
+
+    # Assignments table preview
+    st.markdown(f"#### 📋 Neighborhood Assignments (Top 10 of {len(opt_res.assignments)})")
+    asgn_data = [
+        {
+            "Neighborhood ID": a.neighborhood_id,
+            "Warehouse ID": a.warehouse_id,
+            "Distance (km)": a.distance_km,
+            "Weighted Distance (km·orders)": a.weighted_distance,
+            "Delivery Cost ($)": f"${a.cost:.2f}",
+            "Within Radius": "✅ Yes" if a.within_radius else "❌ Exceeded"
+        }
+        for a in opt_res.assignments[:10]
+    ]
+    st.dataframe(pd.DataFrame(asgn_data), use_container_width=True)
+

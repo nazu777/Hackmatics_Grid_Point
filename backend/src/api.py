@@ -12,7 +12,9 @@ from .schema import (
     Neighborhood,
     ValidationResult,
     SyntheticGenerationConfig,
-    ValidationErrorItem
+    ValidationErrorItem,
+    OptimizationConfig,
+    OptimizationResult
 )
 from .validation import validate_neighborhoods
 from .data_ingestion import (
@@ -23,6 +25,7 @@ from .data_ingestion import (
     compute_dataset_summary
 )
 from .synthetic import generate_synthetic_dataset
+from .optimization import run_optimization
 
 app = FastAPI(
     title="GridPoint API",
@@ -44,6 +47,11 @@ class ValidateRequest(BaseModel):
     neighborhoods: List[Dict[str, Any]]
 
 
+class OptimizeRequest(BaseModel):
+    neighborhoods: List[Dict[str, Any]]
+    config: Optional[OptimizationConfig] = None
+
+
 class ExportRequest(BaseModel):
     neighborhoods: List[Dict[str, Any]]
 
@@ -58,6 +66,26 @@ def validate_dataset(payload: ValidateRequest):
     """Validate a list of neighborhood records against schema rules."""
     result, _ = validate_neighborhoods(payload.neighborhoods)
     return result
+
+
+@app.post("/api/optimize", response_model=OptimizationResult)
+def optimize_network(payload: OptimizeRequest):
+    """
+    Computes optimal warehouse locations (Weiszfeld for K=1, Weighted K-Means for K>1,
+    or PuLP MILP for constrained CFLP) and assigns neighborhoods to optimal facilities (schema.md §6).
+    """
+    val_res, clean_records = validate_neighborhoods(payload.neighborhoods)
+    if not val_res.valid or not clean_records:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "message": "Cannot optimize invalid neighborhood dataset",
+                "errors": [e.model_dump() for e in val_res.errors]
+            }
+        )
+    cfg = payload.config or OptimizationConfig()
+    return run_optimization(clean_records, cfg)
+
 
 
 @app.get("/api/synthetic", response_model=List[Neighborhood])

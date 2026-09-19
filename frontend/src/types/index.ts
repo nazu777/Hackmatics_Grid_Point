@@ -11,6 +11,91 @@ export interface Neighborhood {
   zone?: string | null;
 }
 
+export interface Warehouse {
+  warehouse_id: string;
+  latitude: number;
+  longitude: number;
+  capacity?: number | null;
+  radius_km?: number | null;
+  infra_cost?: number;
+  assigned_orders?: number;
+  utilization_pct?: number | null;
+}
+
+export interface Assignment {
+  neighborhood_id: string;
+  warehouse_id: string;
+  distance_km: number;
+  weighted_distance: number;
+  cost: number;
+  within_radius: boolean;
+  is_feasible: boolean;
+}
+
+export interface OptimizationConfig {
+  K: number;
+  distance_metric: 'haversine' | 'euclidean' | 'manhattan';
+  capacity_enabled: boolean;
+  C_max?: number | null;
+  radius_enabled: boolean;
+  R_max_km?: number | null;
+  cost_per_km: number;
+  fuel_cost_per_km: number;
+  infra_cost_per_warehouse: number;
+  traffic_factor: number;
+  random_seed: number;
+  baseline_mode: 'centroid' | 'mean' | 'single_center' | 'custom';
+}
+
+export interface WarehouseMetric {
+  warehouse_id: string;
+  assigned_orders: number;
+  utilization_pct?: number | null;
+  avg_distance_km: number;
+  neighborhood_count: number;
+}
+
+export interface Metrics {
+  total_unweighted_distance_km: number;
+  total_weighted_distance_km_orders: number;
+  total_cost: number;
+  avg_distance_per_order_km: number;
+  avg_weighted_distance_km: number;
+  warehouses: WarehouseMetric[];
+  infeasible_assignments: number;
+  feasibility_ratio: number;
+}
+
+export interface ComparisonDelta {
+  distance_saved_km: number;
+  weighted_distance_saved: number;
+  cost_saved: number;
+  pct_distance_saved: number;
+  pct_cost_saved: number;
+}
+
+export interface LayoutEvaluation {
+  metrics: Metrics;
+  warehouses: Warehouse[];
+  assignments: Assignment[];
+}
+
+export interface ComparisonResult {
+  baseline: LayoutEvaluation;
+  optimized: LayoutEvaluation;
+  delta: ComparisonDelta;
+}
+
+export interface OptimizationResult {
+  config: OptimizationConfig;
+  warehouses: Warehouse[];
+  assignments: Assignment[];
+  metrics: Metrics;
+  comparison?: ComparisonResult | null;
+  is_feasible: boolean;
+  infeasibility_reason?: string | null;
+}
+
 export interface ValidationErrorItem {
   row?: number | null;
   field: string;

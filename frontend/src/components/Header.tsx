@@ -9,8 +9,8 @@ interface HeaderProps {
 export const Header: React.FC<HeaderProps> = ({ activePhase, setActivePhase }) => {
   const phases = [
     { id: 1, name: '1. Ingestion & Data', icon: Layers, active: true },
-    { id: 2, name: '2. Map Visualizer', icon: MapPin, active: false, tooltip: 'Phase 2' },
-    { id: 3, name: '3. Warehouse Optimizer', icon: Cpu, active: false, tooltip: 'Phase 3' },
+    { id: 2, name: '2. Map Visualizer', icon: MapPin, active: false, tooltip: 'Teammate working in parallel' },
+    { id: 3, name: '3. Warehouse Optimizer', icon: Cpu, active: true },
     { id: 4, name: '4. Cost Comparison', icon: BarChart3, active: false, tooltip: 'Phase 4' },
     { id: 5, name: '5. Scenarios & Fleet', icon: Sliders, active: false, tooltip: 'Phase 5' },
   ];
