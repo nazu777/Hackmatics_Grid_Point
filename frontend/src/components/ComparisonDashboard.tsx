@@ -91,37 +91,49 @@ export const ComparisonDashboard: React.FC<Props> = ({ result, neighborhoods, zo
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4">
       {/* Side-by-side cards */}
       <div className="card p-5">
-        <h3 className="font-bold text-sm text-ink mb-4 flex items-center gap-2">
-          <Scale className="w-4 h-4 text-grape-500" /> Original vs Optimized — Side-by-Side
-        </h3>
+        <h3 className="font-bold text-sm text-ink mb-4">Original vs Optimized</h3>
         <div className="grid grid-cols-1 gap-3">
-          <div className="bg-cream-deep border border-[#E4E1D2] p-5 rounded-2xl">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-bold text-[#14424E] uppercase tracking-wider">Distance Saved</span>
-              <Route className="w-5 h-5 text-[#14424E]" />
-            </div>
-            <h4 className="text-3xl font-extrabold text-ink mt-2">{comp.delta.pct_distance_saved}%</h4>
-            <p className="text-xs text-ink-soft mt-1">{comp.delta.weighted_distance_saved.toLocaleString()} km·orders • {comp.delta.distance_saved_km.toLocaleString()} km</p>
-          </div>
-          <div className="p-5 rounded-2xl bg-grape-100/70 border border-grape-200">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-bold text-grape-600 uppercase tracking-wider">Cost Reduction</span>
-              <DollarSign className="w-5 h-5 text-grape-500" />
-            </div>
-            <h4 className="text-3xl font-extrabold text-ink mt-2">{comp.delta.pct_cost_saved}%</h4>
-            <p className="text-xs text-ink-soft mt-1">${comp.delta.cost_saved.toLocaleString()} saved • Baseline ${comp.baseline.metrics.total_cost.toLocaleString()} → ${comp.optimized.metrics.total_cost.toLocaleString()}</p>
-          </div>
-          <div className="p-5 rounded-2xl bg-gold-100/60 border border-gold-200">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-bold text-gold-600 uppercase tracking-wider">Avg / Order</span>
-              <TrendingDown className="w-5 h-5 text-gold-500" />
-            </div>
-            <h4 className="text-3xl font-extrabold text-ink mt-2">{result.metrics.avg_distance_per_order_km} km</h4>
-            <p className="text-xs text-ink-soft mt-1">Baseline was {comp.baseline.metrics.avg_distance_per_order_km} km • Feasibility {(result.metrics.feasibility_ratio * 100).toFixed(1)}%</p>
-          </div>
+          {[
+            {
+              icon: Route,
+              label: 'Distance saved',
+              value: `${comp.delta.pct_distance_saved}%`,
+              sub: `${comp.delta.weighted_distance_saved.toLocaleString()} km·orders • ${comp.delta.distance_saved_km.toLocaleString()} km`
+            },
+            {
+              icon: DollarSign,
+              label: 'Cost reduction',
+              value: `${comp.delta.pct_cost_saved}%`,
+              sub: `$${comp.delta.cost_saved.toLocaleString()} saved • Baseline $${comp.baseline.metrics.total_cost.toLocaleString()} → $${comp.optimized.metrics.total_cost.toLocaleString()}`
+            },
+            {
+              icon: TrendingDown,
+              label: 'Avg / order',
+              value: `${result.metrics.avg_distance_per_order_km} km`,
+              sub: `Baseline was ${comp.baseline.metrics.avg_distance_per_order_km} km • Feasibility ${(result.metrics.feasibility_ratio * 100).toFixed(1)}%`
+            }
+          ].map((s) => {
+            const Icon = s.icon;
+            return (
+              <div key={s.label} className="panel-well p-4 flex items-center gap-3">
+                <span className="w-10 h-10 rounded-full bg-white flex items-center justify-center text-ink shrink-0 border border-[#E4E1D2]">
+                  <Icon className="w-5 h-5" />
+                </span>
+                <span className="min-w-0">
+                  <span className="block text-[11px] font-bold uppercase tracking-wider text-ink-faint">
+                    {s.label}
+                  </span>
+                  <span className="block text-[22px] font-extrabold text-ink leading-tight">
+                    {s.value}
+                  </span>
+                  <span className="block text-[11px] text-ink-faint truncate">{s.sub}</span>
+                </span>
+              </div>
+            );
+          })}
         </div>
 
         {/* Fuel reduction graph: total cost split into fuel vs non-fuel */}
@@ -191,7 +203,7 @@ export const ComparisonDashboard: React.FC<Props> = ({ result, neighborhoods, zo
         <div className="overflow-x-auto mt-3">
           <table className="w-full text-left text-xs border-collapse">
             <thead>
-              <tr className="bg-cream-deep/60 border-b border-[#E4E1D2] text-ink-faint uppercase tracking-wider">
+              <tr className="bg-cream-deep border-b border-[#E4E1D2] text-ink-faint uppercase tracking-wider">
                 <th className="py-2.5 px-4">Metric</th>
                 <th className="py-2.5 px-4 text-right">Baseline</th>
                 <th className="py-2.5 px-4 text-right">Optimized</th>
@@ -201,12 +213,12 @@ export const ComparisonDashboard: React.FC<Props> = ({ result, neighborhoods, zo
             </thead>
             <tbody className="divide-y divide-slate-100">
               {rows.map((r) => (
-                <tr key={r.label} className="hover:bg-cream-deep/60">
+                <tr key={r.label} className="hover:bg-cream-deep">
                   <td className="py-2 px-4 font-medium text-ink-soft">{r.label}</td>
                   <td className="py-2 px-4 text-right font-mono text-ink-faint">{r.baseline.toLocaleString()}</td>
-                  <td className="py-2 px-4 text-right font-mono font-bold text-[#14424E]">{r.optimized.toLocaleString()}</td>
+                  <td className="py-2 px-4 text-right font-mono font-bold text-ink">{r.optimized.toLocaleString()}</td>
                   <td className="py-2 px-4 text-right font-mono text-ink-soft">{r.saved.toLocaleString()}</td>
-                  <td className="py-2 px-4 text-right font-mono text-[#14424E]">{r.pct}%</td>
+                  <td className="py-2 px-4 text-right font-mono text-ink">{r.pct}%</td>
                 </tr>
               ))}
             </tbody>

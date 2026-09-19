@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Cpu, CheckCircle2, AlertTriangle, Zap, TrendingDown, DollarSign, ArrowRight } from 'lucide-react';
+import { CheckCircle2, AlertTriangle, Zap, TrendingDown, DollarSign, ArrowRight } from 'lucide-react';
 import { Neighborhood, OptimizationConfig, OptimizationResult } from '../types';
 import { optimizeNetwork } from '../services/api';
 import { FuelCard } from './FuelCard';
@@ -67,24 +67,23 @@ export const OptimizationPanel: React.FC<OptimizationPanelProps> = ({
   };
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4">
       {/* Control Configuration Card */}
       <div className="card p-5">
-        <div className="flex flex-col justify-between gap-4 pb-5 border-b border-[#E4E1D2]">
+        <div className="flex flex-col justify-between gap-3 pb-4 border-b border-[#E4E1D2]">
           <div>
-            <h2 className="text-lg font-bold text-ink flex items-center gap-2">
-              <Cpu className="w-5 h-5 text-[#14424E]" />
-              Optimization Engine (Phase 3 &bull; schema.md §2.4)
+            <h2 className="font-display font-semibold text-[20px] text-ink leading-tight">
+              Optimization Engine
             </h2>
-            <p className="text-xs text-ink-faint">
-              Weiszfeld geometric median (K=1), Weighted K-Means (K&gt;1), and PuLP CFLP solver
+            <p className="text-xs text-ink-faint mt-0.5">
+              Weiszfeld (K=1) • Weighted K-Means (K&gt;1) • PuLP CFLP
             </p>
           </div>
 
           <button
             onClick={handleRunOptimization}
             disabled={loading || neighborhoods.length === 0}
-            className="flex items-center justify-center gap-2 px-6 py-2.5 bg-[#14424E] hover:bg-[#0d333d] disabled:opacity-50 text-white rounded-full text-xs font-bold shadow-md transition cursor-pointer"
+            className="flex items-center justify-center gap-2 px-6 py-2.5 bg-[#14424E] hover:bg-[#0d333d] disabled:opacity-50 text-white rounded-full text-xs font-bold transition cursor-pointer"
           >
             <Zap className="w-4 h-4" />
             <span>{loading ? 'Optimizing Network...' : 'Run Warehouse Optimization'}</span>
@@ -92,13 +91,13 @@ export const OptimizationPanel: React.FC<OptimizationPanelProps> = ({
         </div>
 
         {/* Parameters Grid */}
-        <div className="grid grid-cols-1 gap-5 pt-5 text-xs">
+        <div className="grid grid-cols-1 gap-4 pt-4 text-xs">
           {/* Column 1: K & Metric */}
           <div className="space-y-4">
             <div>
               <div className="flex justify-between items-center mb-1">
                 <span className="font-semibold text-ink-soft">Number of Warehouses (K)</span>
-                <span className="font-mono text-[#14424E] font-bold text-sm">{config.K}</span>
+                <span className="font-mono text-ink font-bold text-sm">{config.K}</span>
               </div>
               <input
                 type="range"
@@ -106,10 +105,11 @@ export const OptimizationPanel: React.FC<OptimizationPanelProps> = ({
                 max={Math.min(10, Math.max(1, neighborhoods.length))}
                 value={config.K}
                 onChange={(e) => setConfig({ ...config, K: parseInt(e.target.value) })}
-                className="w-full accent-[#14424E] cursor-pointer"
+                className="slider"
+                aria-label="Number of warehouses"
               />
               <span className="text-[11px] text-ink-faint">
-                {config.K === 1 ? 'K=1: Solves weighted geometric median (Weiszfeld)' : 'K>1: Weighted K-Means + cluster medians'}
+                {config.K === 1 ? 'K=1: weighted geometric median (Weiszfeld)' : 'K>1: Weighted K-Means + cluster medians'}
               </span>
             </div>
 
@@ -118,7 +118,7 @@ export const OptimizationPanel: React.FC<OptimizationPanelProps> = ({
               <select
                 value={config.distance_metric}
                 onChange={(e) => setConfig({ ...config, distance_metric: e.target.value as any })}
-                className="w-full bg-cream-deep border border-[#E4E1D2] rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-gold"
+                className="w-full bg-cream-deep border border-[#E4E1D2] rounded-xl px-3 py-2 text-xs text-ink focus:outline-none focus:border-gold"
               >
                 <option value="haversine">Haversine (Great-Circle / Spherical)</option>
                 <option value="euclidean">Euclidean (Planar Equirectangular)</option>
@@ -134,31 +134,31 @@ export const OptimizationPanel: React.FC<OptimizationPanelProps> = ({
           </div>
 
           {/* Column 2: Capacity & Radius Constraints */}
-          <div className="space-y-3 bg-cream-deep/70 p-4 rounded-2xl border border-[#E4E1D2]">
+          <div className="panel-well p-4 space-y-3">
             <span className="font-bold text-ink uppercase tracking-wider text-[11px] block">
               Operational Constraints (CFLP)
             </span>
 
             {/* Capacity Toggle */}
             <div>
-              <label className="flex items-center space-x-2 cursor-pointer mb-1.5">
+              <label className="flex items-center gap-2 cursor-pointer mb-1.5">
                 <input
                   type="checkbox"
                   checked={config.capacity_enabled}
                   onChange={(e) => setConfig({ ...config, capacity_enabled: e.target.checked })}
-                  className="rounded accent-[#14424E]"
+                  className="check"
                 />
                 <span className="font-medium text-ink-soft">Enforce Warehouse Capacity (C_max)</span>
               </label>
               {config.capacity_enabled && (
-                <div className="pl-5 space-y-1">
+                <div className="pl-6 space-y-1">
                   <div className="flex items-center gap-2">
                     <input
                       type="number"
                       min="10"
                       value={config.C_max || 500}
                       onChange={(e) => setConfig({ ...config, C_max: parseInt(e.target.value) || 100 })}
-                      className="w-24 bg-cream-deep border border-[#E4E1D2] rounded-lg px-2 py-1 font-mono text-xs"
+                      className="w-24 bg-cream-deep border border-[#E4E1D2] rounded-lg px-2 py-1 font-mono text-xs text-ink focus:outline-none focus:border-gold"
                     />
                     <span className="text-[11px] text-ink-faint">orders / warehouse</span>
                   </div>
@@ -169,24 +169,24 @@ export const OptimizationPanel: React.FC<OptimizationPanelProps> = ({
 
             {/* Radius Toggle */}
             <div>
-              <label className="flex items-center space-x-2 cursor-pointer mb-1.5">
+              <label className="flex items-center gap-2 cursor-pointer mb-1.5">
                 <input
                   type="checkbox"
                   checked={config.radius_enabled}
                   onChange={(e) => setConfig({ ...config, radius_enabled: e.target.checked })}
-                  className="rounded accent-[#14424E]"
+                  className="check"
                 />
                 <span className="font-medium text-ink-soft">Max Service Radius (R_max)</span>
               </label>
               {config.radius_enabled && (
-                <div className="pl-5 flex items-center gap-2">
+                <div className="pl-6 flex items-center gap-2">
                   <input
                     type="number"
                     step="0.5"
                     min="1"
                     value={config.R_max_km || 15.0}
                     onChange={(e) => setConfig({ ...config, R_max_km: parseFloat(e.target.value) || 10.0 })}
-                    className="w-24 bg-cream-deep border border-[#E4E1D2] rounded-lg px-2 py-1 font-mono text-xs"
+                    className="w-24 bg-cream-deep border border-[#E4E1D2] rounded-lg px-2 py-1 font-mono text-xs text-ink focus:outline-none focus:border-gold"
                   />
                   <span className="text-[11px] text-ink-faint">km max delivery radius</span>
                 </div>
@@ -204,7 +204,7 @@ export const OptimizationPanel: React.FC<OptimizationPanelProps> = ({
                 min="0.1"
                 value={config.cost_per_km}
                 onChange={(e) => setConfig({ ...config, cost_per_km: parseFloat(e.target.value) || 1.0 })}
-                className="w-full bg-cream-deep border border-[#E4E1D2] rounded-xl px-3 py-1.5 font-mono text-xs"
+                className="w-full bg-cream-deep border border-[#E4E1D2] rounded-xl px-3 py-1.5 font-mono text-xs text-ink focus:outline-none focus:border-gold"
               />
             </div>
 
@@ -213,7 +213,7 @@ export const OptimizationPanel: React.FC<OptimizationPanelProps> = ({
               <select
                 value={config.baseline_mode}
                 onChange={(e) => setConfig({ ...config, baseline_mode: e.target.value as any })}
-                className="w-full bg-cream-deep border border-[#E4E1D2] rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-gold"
+                className="w-full bg-cream-deep border border-[#E4E1D2] rounded-xl px-3 py-2 text-xs text-ink focus:outline-none focus:border-gold"
               >
                 <option value="centroid">Bounding Box Centroid</option>
                 <option value="mean">Unweighted Geometric Mean</option>
@@ -242,57 +242,57 @@ export const OptimizationPanel: React.FC<OptimizationPanelProps> = ({
 
       {/* Optimization Results Section */}
       {lastResult && (
-        <div className="space-y-6 animate-in fade-in duration-300">
+        <div className="space-y-4">
           {lastResult.comparison && onGoToComparison && (
             <button
               onClick={onGoToComparison}
-              className="w-full flex items-center justify-center gap-2 px-6 py-3 bg-grape-500 hover:bg-grape-600 text-white rounded-full text-sm font-bold shadow-md shadow-grape-500/20 transition cursor-pointer"
+              className="w-full flex items-center justify-center gap-2 px-6 py-3 bg-cream-deep hover:bg-gold-100 text-ink rounded-full text-[13px] font-bold transition cursor-pointer"
             >
-              View Full Phase 4 Cost Comparison — Map, Metrics Table & Exports
+              View full cost comparison
               <ArrowRight className="w-4 h-4" />
             </button>
           )}
-          {/* Comparison Delta Highlights */}
+          {/* Comparison Delta Highlights — uniform cards, no color coding */}
           {lastResult.comparison && (
             <div className="grid grid-cols-1 gap-3">
-              <div className="bg-cream-deep border border-[#E4E1D2] p-5 rounded-3xl">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-bold text-[#14424E] uppercase tracking-wider">Distance Saved</span>
-                  <TrendingDown className="w-5 h-5 text-[#14424E]" />
-                </div>
-                <h4 className="text-3xl font-extrabold text-ink mt-2">
-                  {lastResult.comparison.delta.pct_distance_saved}%
-                </h4>
-                <p className="text-xs text-[#14424E] mt-1">
-                  {lastResult.comparison.delta.weighted_distance_saved.toLocaleString()} km&bull;orders saved
-                </p>
-              </div>
-
-              <div className="p-5 rounded-2xl bg-grape-100/70 border border-grape-200">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-bold text-grape-600 uppercase tracking-wider">Cost Reduction</span>
-                  <DollarSign className="w-5 h-5 text-grape-500" />
-                </div>
-                <h4 className="text-3xl font-extrabold text-ink mt-2">
-                  {lastResult.comparison.delta.pct_cost_saved}%
-                </h4>
-                <p className="text-xs text-ink-soft mt-1">
-                  ${lastResult.comparison.delta.cost_saved.toLocaleString()} delivery cost savings
-                </p>
-              </div>
-
-              <div className="p-5 rounded-2xl bg-gold-100/60 border border-gold-200">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-bold text-gold-600 uppercase tracking-wider">Avg Distance / Order</span>
-                  <CheckCircle2 className="w-5 h-5 text-gold-500" />
-                </div>
-                <h4 className="text-3xl font-extrabold text-ink mt-2">
-                  {lastResult.metrics.avg_distance_per_order_km} km
-                </h4>
-                <p className="text-xs text-ink-soft mt-1">
-                  Baseline was {lastResult.comparison.baseline.metrics.avg_distance_per_order_km} km
-                </p>
-              </div>
+              {[
+                {
+                  icon: TrendingDown,
+                  label: 'Distance saved',
+                  value: `${lastResult.comparison.delta.pct_distance_saved}%`,
+                  sub: `${lastResult.comparison.delta.weighted_distance_saved.toLocaleString()} km•orders saved`
+                },
+                {
+                  icon: DollarSign,
+                  label: 'Cost reduction',
+                  value: `${lastResult.comparison.delta.pct_cost_saved}%`,
+                  sub: `$${lastResult.comparison.delta.cost_saved.toLocaleString()} delivery cost savings`
+                },
+                {
+                  icon: CheckCircle2,
+                  label: 'Avg distance / order',
+                  value: `${lastResult.metrics.avg_distance_per_order_km} km`,
+                  sub: `Baseline was ${lastResult.comparison.baseline.metrics.avg_distance_per_order_km} km`
+                }
+              ].map((s) => {
+                const Icon = s.icon;
+                return (
+                  <div key={s.label} className="card p-4 flex items-center gap-3">
+                    <span className="w-10 h-10 rounded-full bg-cream-deep flex items-center justify-center text-ink shrink-0">
+                      <Icon className="w-5 h-5" />
+                    </span>
+                    <span className="min-w-0">
+                      <span className="block text-[11px] font-bold uppercase tracking-wider text-ink-faint">
+                        {s.label}
+                      </span>
+                      <span className="block text-[22px] font-extrabold text-ink leading-tight">
+                        {s.value}
+                      </span>
+                      <span className="block text-[11px] text-ink-faint truncate">{s.sub}</span>
+                    </span>
+                  </div>
+                );
+              })}
             </div>
           )}
 
@@ -358,20 +358,20 @@ export const OptimizationPanel: React.FC<OptimizationPanelProps> = ({
               {lastResult.warehouses.map((w) => {
                 const metric = lastResult.metrics.warehouses.find(wm => wm.warehouse_id === w.warehouse_id);
                 return (
-                  <div key={w.warehouse_id} className="p-4 rounded-2xl border border-[#E4E1D2] bg-cream-deep/50">
+                  <div key={w.warehouse_id} className="p-4 rounded-2xl border border-[#E4E1D2] bg-cream-deep">
                     <div className="flex justify-between items-center mb-2">
-                      <span className="font-extrabold text-[#14424E] font-mono text-sm">{w.warehouse_id}</span>
+                      <span className="font-extrabold text-ink font-mono text-sm">{w.warehouse_id}</span>
                       <span className="text-[11px] text-ink-faint font-semibold">{metric?.neighborhood_count || 0} nodes assigned</span>
                     </div>
                     <p className="font-mono text-xs text-ink-soft">{w.latitude.toFixed(4)}°N, {w.longitude.toFixed(4)}°E</p>
-                    <div className="mt-3 pt-3 border-t border-[#E4E1D2]/60 text-xs flex justify-between items-center">
+                    <div className="mt-3 pt-3 border-t border-[#E4E1D2] text-xs flex justify-between items-center">
                       <span className="text-ink-faint">Daily Demand:</span>
                       <span className="font-bold font-mono text-ink">{w.assigned_orders?.toLocaleString()} orders</span>
                     </div>
                     {w.utilization_pct !== null && w.utilization_pct !== undefined && (
                       <div className="mt-1 text-xs flex justify-between items-center">
                         <span className="text-ink-faint">Utilization:</span>
-                        <span className={`font-bold font-mono ${w.utilization_pct > 100 ? 'text-rose-600' : 'text-[#14424E]'}`}>
+                        <span className={`font-bold font-mono ${w.utilization_pct > 100 ? 'text-rose-500' : 'text-ink'}`}>
                           {w.utilization_pct}%
                         </span>
                       </div>
@@ -401,9 +401,9 @@ export const OptimizationPanel: React.FC<OptimizationPanelProps> = ({
                 </thead>
                 <tbody className="divide-y divide-slate-100">
                   {lastResult.assignments.slice(0, 10).map((a) => (
-                    <tr key={a.neighborhood_id} className="hover:bg-cream-deep/70">
+                    <tr key={a.neighborhood_id} className="hover:bg-cream-deep">
                       <td className="py-2 px-4 font-mono font-medium text-ink">{a.neighborhood_id}</td>
-                      <td className="py-2 px-4 font-mono font-bold text-[#14424E]">{a.warehouse_id}</td>
+                      <td className="py-2 px-4 font-mono font-bold text-ink">{a.warehouse_id}</td>
                       <td className="py-2 px-4 font-mono text-ink-soft">{a.distance_km} km</td>
                       <td className="py-2 px-4 font-mono text-ink-soft">{a.weighted_distance.toLocaleString()}</td>
                       <td className="py-2 px-4 font-mono text-ink font-semibold">${a.cost.toFixed(2)}</td>

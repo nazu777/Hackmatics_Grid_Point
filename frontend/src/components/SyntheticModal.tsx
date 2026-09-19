@@ -66,7 +66,7 @@ export const SyntheticModal: React.FC<SyntheticModalProps> = ({ isOpen, onClose,
       <div className="bg-white rounded-3xl border border-[#E4E1D2] shadow-2xl max-w-xl w-full p-6 animate-in fade-in zoom-in-95 duration-150">
         <div className="flex items-center justify-between pb-4 border-b border-[#E4E1D2] mb-5">
           <div className="flex items-center space-x-2.5">
-            <div className="w-9 h-9 rounded-xl bg-cream-deep text-[#14424E] flex items-center justify-center">
+            <div className="w-9 h-9 rounded-xl bg-cream-deep text-ink flex items-center justify-center">
               <Sparkles className="w-5 h-5" />
             </div>
             <div>
@@ -110,7 +110,7 @@ export const SyntheticModal: React.FC<SyntheticModalProps> = ({ isOpen, onClose,
             <div>
               <div className="flex justify-between items-center mb-1">
                 <span className="font-semibold text-ink-soft">Nodes Count (N)</span>
-                <span className="font-mono text-[#14424E] font-bold">{config.N}</span>
+                <span className="font-mono text-ink font-bold">{config.N}</span>
               </div>
               <input
                 type="range"
@@ -119,7 +119,7 @@ export const SyntheticModal: React.FC<SyntheticModalProps> = ({ isOpen, onClose,
                 step="5"
                 value={config.N}
                 onChange={(e) => setConfig({ ...config, N: parseInt(e.target.value) })}
-                className="w-full accent-[#14424E]"
+                className="slider"
               />
             </div>
 
@@ -151,7 +151,7 @@ export const SyntheticModal: React.FC<SyntheticModalProps> = ({ isOpen, onClose,
                 disabled={config.distribution !== 'clustered'}
                 value={config.num_clusters}
                 onChange={(e) => setConfig({ ...config, num_clusters: parseInt(e.target.value) })}
-                className="w-full accent-[#14424E] disabled:opacity-40"
+                className="slider disabled:opacity-40"
               />
             </div>
 
@@ -167,7 +167,7 @@ export const SyntheticModal: React.FC<SyntheticModalProps> = ({ isOpen, onClose,
                 step="2.5"
                 value={config.spread_km}
                 onChange={(e) => setConfig({ ...config, spread_km: parseFloat(e.target.value) })}
-                className="w-full accent-[#14424E]"
+                className="slider"
               />
             </div>
           </div>

@@ -41,7 +41,7 @@ export const FileUploader: React.FC<FileUploaderProps> = ({ onDataLoaded, onOpen
       <div className="flex flex-col items-start gap-3 mb-4">
         <div>
           <h2 className="text-[15px] font-bold text-ink flex items-center gap-2">
-            <UploadCloud className="w-5 h-5 text-[#14424E]" />
+            <UploadCloud className="w-5 h-5 text-ink" />
             Demand Data
           </h2>
           <p className="text-xs text-ink-faint">
@@ -77,8 +77,8 @@ export const FileUploader: React.FC<FileUploaderProps> = ({ onDataLoaded, onOpen
         onClick={() => fileInputRef.current?.click()}
         className={`border-2 border-dashed rounded-2xl p-6 text-center cursor-pointer transition-all ${
           isDragging
-            ? 'border-[#14424E] bg-grape-100/60'
-            : 'border-[#E4E1D2] hover:border-gold hover:bg-cream-deep/60'
+            ? 'border-[#14424E] bg-cream-deep'
+            : 'border-[#E4E1D2] hover:border-gold'
         }`}
       >
         <input
@@ -93,7 +93,7 @@ export const FileUploader: React.FC<FileUploaderProps> = ({ onDataLoaded, onOpen
           }}
         />
 
-        <div className="w-12 h-12 mx-auto rounded-2xl bg-cream-deep text-[#14424E] flex items-center justify-center mb-2.5">
+        <div className="w-12 h-12 mx-auto rounded-2xl bg-cream-deep text-ink flex items-center justify-center mb-2.5">
           <UploadCloud className="w-6 h-6" />
         </div>
 

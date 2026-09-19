@@ -86,8 +86,7 @@ body {
   background-color: #131316 !important;
   border-color: #2C2C33 !important;
   color: #EAF1F2 !important;
-}
-.dark table thead tr { background-color: #131316 !important; }
+}.dark table thead tr { background-color: #131316 !important; }
 .dark .divide-slate-100 > :not([hidden]) ~ :not([hidden]) { border-color: #2C2C33 !important; }
 .dark .hover\:bg-slate-50\/70:hover { background-color: rgba(20, 48, 56, 0.7) !important; }
 .dark .mapboxgl-canvas-container { background: #131316; }
@@ -109,5 +108,117 @@ body {
   overflow: hidden;
   border: 1px solid #e2e8f0 !important;
   box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05) !important;
+}
+
+.dark .hover\:bg-cream-deep:hover { background-color: #2C2C33 !important; }
+.dark .hover\:bg-gold-100:hover { background-color: #3A352A !important; }
+
+/* ---------- GridPoint form system (works in light + dark) ---------- */
+/* Sunken well for grouped controls — solid tokens only (opacity variants
+   escape the .dark overrides above, so they must not be used here). */
+.panel-well {
+  background-color: #ECE9DB;
+  border: 1px solid #E4E1D2;
+  border-radius: 1rem;
+  color-scheme: light;
+}
+.dark .panel-well {
+  background-color: #232329;
+  border-color: #2C2C33;
+}
+
+/* Bare progress/bar track (no border) for stacked & utilization bars. */
+.bar-track {
+  background-color: #E4E1D2;
+}
+.dark .bar-track {
+  background-color: #2C2C33;
+}
+
+/* Coherent range sliders (native accent-color renders inconsistently). */
+input[type="range"].slider {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 20px;
+  background: transparent;
+  cursor: pointer;
+}
+input[type="range"].slider::-webkit-slider-runnable-track {
+  height: 6px;
+  border-radius: 999px;
+  background: #D8D3BF;
+}
+.dark input[type="range"].slider::-webkit-slider-runnable-track {
+  background: #2C2C33;
+}
+input[type="range"].slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 18px;
+  height: 18px;
+  margin-top: -6px;
+  border-radius: 50%;
+  background: #14424E;
+  border: 3px solid #ffffff;
+  box-shadow: 0 1px 4px rgba(16, 51, 61, 0.35);
+}
+.dark input[type="range"].slider::-webkit-slider-thumb {
+  background: #F2C14E;
+  border-color: #1B1B20;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.6);
+}
+input[type="range"].slider::-moz-range-track {
+  height: 6px;
+  border-radius: 999px;
+  background: #D8D3BF;
+}
+.dark input[type="range"].slider::-moz-range-track {
+  background: #2C2C33;
+}
+input[type="range"].slider::-moz-range-thumb {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #14424E;
+  border: 3px solid #ffffff;
+  box-shadow: 0 1px 4px rgba(16, 51, 61, 0.35);
+}
+.dark input[type="range"].slider::-moz-range-thumb {
+  background: #F2C14E;
+  border-color: #1B1B20;
+}
+
+/* Coherent checkboxes — gold check reads on both themes. */
+input[type="checkbox"].check {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 6px;
+  border: 1.5px solid #B9B49E;
+  background: #ffffff;
+  cursor: pointer;
+  position: relative;
+  flex-shrink: 0;
+}
+.dark input[type="checkbox"].check {
+  border-color: #4a4a52;
+  background: #131316;
+}
+input[type="checkbox"].check:checked {
+  background: #F2C14E;
+  border-color: #F2C14E;
+}
+input[type="checkbox"].check:checked::after {
+  content: '';
+  position: absolute;
+  left: 4.5px;
+  top: 1.5px;
+  width: 4px;
+  height: 8px;
+  border: solid #10333D;
+  border-width: 0 2px 2px 0;
+  transform: rotate(42deg);
 }
 

@@ -157,7 +157,7 @@ export const DataTable: React.FC<DataTableProps> = ({ neighborhoods, errors, onC
       <div className="overflow-x-auto">
         <table className="w-full text-left border-collapse text-xs">
           <thead>
-            <tr className="bg-cream-deep/60 border-b border-[#E4E1D2] text-ink-faint font-semibold uppercase tracking-wider">
+            <tr className="bg-cream-deep border-b border-[#E4E1D2] text-ink-faint font-semibold uppercase tracking-wider">
               <th className="py-3 px-4 w-12 text-center">#</th>
               <th className="py-3 px-4 w-36">ID (Unique PK)</th>
               <th className="py-3 px-4">Name / Label</th>
@@ -185,7 +185,7 @@ export const DataTable: React.FC<DataTableProps> = ({ neighborhoods, errors, onC
                 return (
                   <tr
                     key={row.neighborhood_id || actualIndex}
-                    className={`hover:bg-cream-deep/60 transition-colors ${
+                    className={`hover:bg-cream-deep transition-colors ${
                       hasError ? 'bg-rose-50/40' : ''
                     }`}
                   >

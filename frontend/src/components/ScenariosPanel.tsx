@@ -205,7 +205,7 @@ export const ScenariosPanel: React.FC<ScenariosPanelProps> = ({
                   step="100"
                   value={infraCost}
                   onChange={(e) => setInfraCost(Number(e.target.value))}
-                  className="w-full h-1.5 bg-[#E4E1D2] rounded-lg appearance-none cursor-pointer accent-grape-500"
+                  className="slider"
                 />
                 <span className="text-[10px] text-ink-faint block mt-1">$0 to $3,000 / facility</span>
               </div>
@@ -222,7 +222,7 @@ export const ScenariosPanel: React.FC<ScenariosPanelProps> = ({
                   step="1"
                   value={maxKEval}
                   onChange={(e) => setMaxKEval(Number(e.target.value))}
-                  className="w-full h-1.5 bg-[#E4E1D2] rounded-lg appearance-none cursor-pointer accent-grape-500"
+                  className="slider"
                 />
                 <span className="text-[10px] text-ink-faint block mt-1">Multi-restart K-Means runs</span>
               </div>
@@ -259,14 +259,14 @@ export const ScenariosPanel: React.FC<ScenariosPanelProps> = ({
                     key={pt.K}
                     className={`p-2.5 rounded-xl border transition-all ${
                       isOptimal
-                        ? 'bg-grape-100/60 border-grape-300 ring-1 ring-grape-400'
+                        ? 'bg-cream-deep border-gold ring-1 ring-gold'
                         : 'bg-white border-[#E4E1D2] hover:bg-cream-deep'
                     }`}
                   >
                     <div className="flex items-center justify-between text-xs mb-1.5 font-medium">
                       <div className="flex items-center space-x-2">
                         <span className={`w-6 h-6 rounded-lg flex items-center justify-center font-bold text-xs ${
-                          isOptimal ? 'bg-[#14424E] text-white' : 'bg-[#E4E1D2] text-ink-soft'
+                          isOptimal ? 'bg-[#14424E] text-white' : 'bg-cream-deep text-ink-soft'
                         }`}>
                           {pt.K}
                         </span>
@@ -284,7 +284,7 @@ export const ScenariosPanel: React.FC<ScenariosPanelProps> = ({
                     </div>
 
                     {/* Stacked Cost Bar */}
-                    <div className="w-full bg-[#E4E1D2] h-2.5 rounded-full overflow-hidden flex">
+                    <div className="w-full bar-track h-2.5 rounded-full overflow-hidden flex">
                       <div
                         style={{ width: `${pctDelivery}%` }}
                         className="bg-[#14424E] h-full transition-all duration-500"
@@ -340,7 +340,7 @@ export const ScenariosPanel: React.FC<ScenariosPanelProps> = ({
             <div className="my-5 bg-cream-deep p-4 rounded-2xl border border-[#E4E1D2]">
               <div className="flex items-center justify-between mb-2">
                 <span className="text-xs font-semibold text-ink-soft">Demand Multiplier (Δ%):</span>
-                <span className={`text-sm font-extrabold ${demandShiftPct >= 0 ? 'text-[#14424E]' : 'text-rose-600'}`}>
+                <span className={`text-sm font-extrabold ${demandShiftPct >= 0 ? 'text-ink' : 'text-rose-600'}`}>
                   {demandShiftPct >= 0 ? `+${demandShiftPct}%` : `${demandShiftPct}%`}
                 </span>
               </div>
@@ -351,7 +351,7 @@ export const ScenariosPanel: React.FC<ScenariosPanelProps> = ({
                 step="5"
                 value={demandShiftPct}
                 onChange={(e) => setDemandShiftPct(Number(e.target.value))}
-                className="w-full h-2 bg-[#E4E1D2] rounded-lg appearance-none cursor-pointer accent-[#14424E]"
+                className="slider"
               />
 
               {/* Preset Chips */}
@@ -363,7 +363,7 @@ export const ScenariosPanel: React.FC<ScenariosPanelProps> = ({
                     className={`px-2.5 py-1 rounded-lg text-xs font-medium transition cursor-pointer ${
                       demandShiftPct === p.val
                         ? 'bg-[#14424E] text-white shadow-sm'
-                        : 'bg-white border border-[#E4E1D2] text-ink-soft hover:bg-[#E4E1D2]'
+                        : 'bg-white border border-[#E4E1D2] text-ink-soft hover:bg-cream-deep'
                     }`}
                   >
                     {p.label}
@@ -379,10 +379,10 @@ export const ScenariosPanel: React.FC<ScenariosPanelProps> = ({
                 <span className="text-lg font-extrabold text-ink-soft">{totalDemand.toLocaleString()}</span>
                 <span className="text-[10px] text-ink-faint block mt-0.5">Across {neighborhoods.length} zones</span>
               </div>
-              <div className="p-3.5 rounded-2xl bg-grape-100/60 border border-grape-200">
-                <span className="text-[11px] font-medium text-grape-600 block">Projected Volume</span>
+              <div className="panel-well p-3.5">
+                <span className="text-[11px] font-medium text-ink-faint block">Projected Volume</span>
                 <span className="text-lg font-extrabold text-ink">{shiftedTotalDemand.toLocaleString()}</span>
-                <span className="text-[10px] text-[#14424E] font-semibold block mt-0.5">
+                <span className="text-[10px] text-ink-soft font-semibold block mt-0.5">
                   {demandShiftPct >= 0 ? `+${shiftedTotalDemand - totalDemand}` : `${shiftedTotalDemand - totalDemand}`} orders
                 </span>
               </div>
@@ -412,7 +412,7 @@ export const ScenariosPanel: React.FC<ScenariosPanelProps> = ({
           <div>
             <div className="flex items-center justify-between pb-4 border-b border-[#E4E1D2]">
               <div className="flex items-center space-x-3">
-                <div className="w-10 h-10 rounded-xl bg-cream-deep text-[#14424E] flex items-center justify-center font-bold">
+                <div className="w-10 h-10 rounded-xl bg-cream-deep text-ink flex items-center justify-center font-bold">
                   <Truck className="w-5 h-5" />
                 </div>
                 <div>
@@ -434,7 +434,7 @@ export const ScenariosPanel: React.FC<ScenariosPanelProps> = ({
                   onClick={() => setSelectedVehicle(v.id as any)}
                   className={`p-3 rounded-2xl border text-left transition cursor-pointer ${
                     selectedVehicle === v.id
-                      ? 'bg-grape-100 border-grape-300 ring-1 ring-grape-500'
+                      ? 'bg-cream-deep border-gold ring-1 ring-gold'
                       : 'bg-white border-[#E4E1D2] hover:bg-cream-deep'
                   }`}
                 >
@@ -449,10 +449,10 @@ export const ScenariosPanel: React.FC<ScenariosPanelProps> = ({
               <div>
                 <div className="flex items-center justify-between mb-1">
                   <span className="text-xs font-semibold text-ink-soft flex items-center space-x-1">
-                    <Clock className="w-3.5 h-3.5 text-[#14424E]" />
+                    <Clock className="w-3.5 h-3.5 text-ink-soft" />
                     <span>Rush-Hour Traffic Congestion Factor:</span>
                   </span>
-                  <span className="text-xs font-extrabold text-[#14424E]">+{trafficPct}% Delay</span>
+                  <span className="text-xs font-extrabold text-ink">+{trafficPct}% Delay</span>
                 </div>
                 <input
                   type="range"
@@ -461,7 +461,7 @@ export const ScenariosPanel: React.FC<ScenariosPanelProps> = ({
                   step="5"
                   value={trafficPct}
                   onChange={(e) => setTrafficPct(Number(e.target.value))}
-                  className="w-full h-1.5 bg-[#E4E1D2] rounded-lg appearance-none cursor-pointer accent-[#14424E]"
+                  className="slider"
                 />
                 <div className="flex justify-between text-[10px] text-ink-faint mt-0.5">
                   <span>0% (Free Flow)</span>
@@ -485,7 +485,7 @@ export const ScenariosPanel: React.FC<ScenariosPanelProps> = ({
                   step="0.05"
                   value={fuelCost}
                   onChange={(e) => setFuelCost(Number(e.target.value))}
-                  className="w-full h-1.5 bg-[#E4E1D2] rounded-lg appearance-none cursor-pointer accent-amber-600"
+                  className="slider"
                 />
               </div>
 
@@ -573,7 +573,7 @@ export const ScenariosPanel: React.FC<ScenariosPanelProps> = ({
               <div className="flex items-center space-x-3">
                 <div className={`w-10 h-10 rounded-xl flex items-center justify-center font-bold ${
                   diagnostics?.is_compliant
-                    ? 'bg-cream-deep text-[#14424E]'
+                    ? 'bg-cream-deep text-ink'
                     : 'bg-rose-50 text-rose-600'
                 }`}>
                   {diagnostics?.is_compliant ? (
@@ -615,7 +615,7 @@ export const ScenariosPanel: React.FC<ScenariosPanelProps> = ({
                       </span>
                     </div>
                     {cMax && (
-                      <div className="w-full bg-[#E4E1D2] h-2 rounded-full overflow-hidden">
+                      <div className="w-full bar-track h-2 rounded-full overflow-hidden">
                         <div
                           style={{ width: `${Math.min(100, utilPct || 0)}%` }}
                           className={`h-full transition-all ${

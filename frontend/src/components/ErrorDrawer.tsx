@@ -14,7 +14,7 @@ export const ErrorDrawer: React.FC<ErrorDrawerProps> = ({ isOpen, onClose, error
 
   return (
     <div className="fixed inset-y-0 right-0 z-50 w-full max-w-md bg-white shadow-2xl border-l border-[#E4E1D2] flex flex-col">
-      <div className="p-4 border-b border-[#E4E1D2] flex items-center justify-between bg-cream-deep/60">
+      <div className="p-4 border-b border-[#E4E1D2] flex items-center justify-between bg-cream-deep">
         <div className="flex items-center space-x-2">
           <AlertCircle className="w-5 h-5 text-rose-600" />
           <h3 className="font-bold text-ink text-sm">Validation Diagnostics</h3>
@@ -74,7 +74,7 @@ export const ErrorDrawer: React.FC<ErrorDrawerProps> = ({ isOpen, onClose, error
         )}
       </div>
 
-      <div className="p-4 border-t border-[#E4E1D2] bg-cream-deep/60 flex justify-end">
+      <div className="p-4 border-t border-[#E4E1D2] bg-cream-deep flex justify-end">
         <button
           onClick={onClose}
           className="px-4 py-1.5 text-xs font-bold bg-cream-deep hover:bg-gold-100 text-ink rounded-full transition cursor-pointer"
