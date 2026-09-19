@@ -1,2 +1,11 @@
 # GridPoint Monorepo Python Requirements
--r backend/requirements.txt
+# Inlined (Vercel cannot parse relative "-r" includes) — keep in sync with api/requirements.txt
+fastapi==0.115.12
+python-multipart==0.0.20
+pydantic==2.11.3
+pandas==2.2.3
+numpy==2.2.6
+scipy==1.15.3
+scikit-learn==1.6.1
+pulp==2.9.0
+geopy==2.4.1
