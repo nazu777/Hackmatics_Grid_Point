@@ -253,7 +253,7 @@ export const AskPanel: React.FC<AskPanelProps> = ({
               {m.cta && (
                 <button
                   onClick={m.cta.onClick}
-                  className="mt-2 px-3 py-1.5 rounded-full bg-gold text-ink text-xs font-bold hover:bg-gold-200 transition cursor-pointer"
+                  className="mt-2 px-3 py-1.5 rounded-full bg-gold text-[#10333D] text-xs font-bold hover:bg-gold-200 transition cursor-pointer"
                 >
                   {m.cta.label}
                 </button>
@@ -288,7 +288,7 @@ export const AskPanel: React.FC<AskPanelProps> = ({
           <button
             type="submit"
             disabled={busy}
-            className="w-9 h-9 rounded-full bg-cream-deep text-ink flex items-center justify-center hover:bg-gold transition cursor-pointer disabled:opacity-50"
+            className="w-9 h-9 rounded-full bg-cream-deep text-ink flex items-center justify-center hover:bg-gold-100 transition cursor-pointer disabled:opacity-50"
           >
             <Send className="w-4 h-4" />
           </button>

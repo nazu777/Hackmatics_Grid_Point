@@ -59,7 +59,7 @@ export const ResultRows: React.FC<{
   onClose: () => void;
 }> = ({ nodes, title, onOpen, onClose }) => (
   <div className="flex flex-col h-full">
-    <div className="px-5 pt-5 flex items-center justify-between">
+    <div className="px-5 pr-14 pt-5 flex items-center justify-between">
       <h2 className="font-display font-semibold text-[22px] text-ink leading-tight">{title}</h2>
       <button
         onClick={onClose}

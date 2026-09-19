@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { Search, X, Plus, Download } from 'lucide-react';
 import { GmapsRail, type RailTab } from './components/GmapsRail';
 import { AskPanel } from './components/AskPanel';
@@ -63,6 +63,21 @@ const DEFAULT_CONFIG: OptimizationConfig = {
 const API_BASE = (import.meta.env.VITE_API_URL as string) || '/api (same-origin)';
 
 type PanelMode = RailTab | 'results' | 'detail';
+
+/** Sidebar tab shell — fixed header, only the body scrolls. */
+const SidePanel: React.FC<{ title: string; meta?: string; children: React.ReactNode }> = ({
+  title,
+  meta,
+  children
+}) => (
+  <div className="flex flex-col h-full min-h-0">
+    <div className="shrink-0 pl-5 pr-14 pt-5 pb-3">
+      <h2 className="font-display font-semibold text-[24px] text-ink leading-tight">{title}</h2>
+      {meta && <p className="text-[13px] text-ink-faint mt-0.5">{meta}</p>}
+    </div>
+    <div className="flex-1 min-h-0 overflow-y-auto nice-scroll px-4 pb-4 space-y-4">{children}</div>
+  </div>
+);
 
 export const App: React.FC = () => {
   const [panel, setPanel] = useState<PanelMode>('ask');
@@ -220,6 +235,19 @@ export const App: React.FC = () => {
     setSidebarWidth(SIDEBAR_DEFAULT);
     try {
       localStorage.setItem('gridpoint_sidebar_width', String(SIDEBAR_DEFAULT));
+    } catch { /* ignore */ }
+  }, []);
+
+  // Collapsible panel — hide to reveal the whole map (persisted)
+  const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem('gridpoint_sidebar_collapsed') === '1';
+    } catch { return false; }
+  });
+  const setCollapsedPersist = useCallback((v: boolean) => {
+    setSidebarCollapsed(v);
+    try {
+      localStorage.setItem('gridpoint_sidebar_collapsed', v ? '1' : '0');
     } catch { /* ignore */ }
   }, []);
 
@@ -405,21 +433,53 @@ export const App: React.FC = () => {
   const usingPreviewRadius = layers.radius && enforcedRadiusKm == null && optimizationResult != null;
   const effectiveRadiusKm = enforcedRadiusKm ?? (layers.radius && optimizationResult ? previewRadiusKm : null);
 
+  // Stable refs for the map — `?? []` inline would create a new array every
+  // render and retrigger the map overlay effect (resetting the user's zoom).
+  const mapWarehouses = useMemo(() => optimizationResult?.warehouses ?? [], [optimizationResult]);
+  const mapAssignments = useMemo(() => optimizationResult?.assignments ?? [], [optimizationResult]);
+
   const railTab: RailTab =
     panel === 'results' || panel === 'detail' ? 'ask' : (panel as RailTab);
+
+  // Clicking the already-open tab toggles the panel; switching tabs reveals it.
+  const handleRailTab = useCallback((t: RailTab) => {
+    if (t === railTab) {
+      setCollapsedPersist(!sidebarCollapsed);
+    } else {
+      setPanel(t);
+      if (sidebarCollapsed) setCollapsedPersist(false);
+    }
+  }, [railTab, sidebarCollapsed, setCollapsedPersist]);
 
   const today = new Date().toLocaleDateString(undefined, { day: '2-digit', month: '2-digit', year: 'numeric' });
   const kCount = optimizationResult?.warehouses.length ?? optimizationConfig.K;
 
   return (
     <div className="relative h-screen w-screen flex overflow-hidden bg-cream text-ink">
-      <GmapsRail tab={railTab} onTab={setPanel} theme={theme} onThemeChange={handleThemeChange} />
+      <GmapsRail tab={railTab} onTab={handleRailTab} theme={theme} onThemeChange={handleThemeChange} />
 
       {/* Floating panel — overlays the full-bleed map, never pushes it */}
       <aside
-        style={{ width: sidebarWidth, left: 76 + 16, top: 16, bottom: 16 }}
-        className="absolute z-20 bg-white border border-[#E4E1D2] rounded-3xl shadow-xl shadow-black/10 overflow-y-auto nice-scroll"
+        style={{
+          width: sidebarWidth,
+          left: 76 + 16,
+          top: 16,
+          bottom: 16,
+          display: sidebarCollapsed ? 'none' : undefined
+        }}
+        className="absolute z-20 bg-white border border-[#E4E1D2] rounded-3xl shadow-xl shadow-black/10 overflow-hidden"
       >
+        {/* Close button — pinned top-right above all tab content */}
+        <div className="absolute top-3 right-3 z-30 pointer-events-none">
+          <button
+            onClick={() => setCollapsedPersist(true)}
+            title="Close side panel"
+            aria-label="Close side panel"
+            className="pointer-events-auto w-8 h-8 rounded-full bg-white border border-[#E4E1D2] shadow-lg flex items-center justify-center text-ink hover:bg-cream-deep transition cursor-pointer"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
         {panel === 'ask' && (
           <AskPanel
             neighborhoods={neighborhoods}
@@ -483,19 +543,25 @@ export const App: React.FC = () => {
         )}
 
         {panel === 'optimize' && (
-          <div className="p-4">
+          <SidePanel title="Optimize" meta={`${neighborhoods.length} demand nodes loaded`}>
             <OptimizationPanel
               neighborhoods={neighborhoods}
               onOptimizationComplete={setOptimizationResult}
               lastResult={optimizationResult}
               onGoToComparison={() => setPanel('compare')}
             />
-          </div>
+          </SidePanel>
         )}
 
         {panel === 'compare' && (
-          <div className="p-4 space-y-4">
-            <h2 className="font-display font-semibold text-[24px] text-ink px-1">Compare Shipments</h2>
+          <SidePanel
+            title="Compare Shipments"
+            meta={
+              optimizationResult?.comparison
+                ? `K=${optimizationResult.warehouses.length} • ${optimizationResult.comparison.delta.pct_cost_saved}% saved`
+                : undefined
+            }
+          >
             {optimizationResult ? (
               <ComparisonDashboard result={optimizationResult} neighborhoods={neighborhoods} zoneColors={zoneColors} onApply={setOptimizationResult} />
             ) : (
@@ -509,12 +575,13 @@ export const App: React.FC = () => {
                 </button>
               </div>
             )}
-          </div>
+          </SidePanel>
         )}
 
-        {panel === 'data' && (
-          <div className="p-4 space-y-4">
-            <h2 className="font-display font-semibold text-[24px] text-ink px-1">Demand Data ({neighborhoods.length})</h2>
+          <SidePanel
+            title="Demand Data"
+            meta={`${neighborhoods.length} nodes • ${summary.total_orders.toLocaleString()} daily orders`}
+          >
             <FileUploader
               onDataLoaded={handleDataLoaded}
               onOpenSyntheticModal={() => setIsSyntheticModalOpen(true)}
@@ -529,12 +596,11 @@ export const App: React.FC = () => {
               onApplyZones={handleApplyZones}
               compact
             />
-          </div>
+          </SidePanel>
         )}
 
         {panel === 'lab' && (
-          <div className="p-4 space-y-4">
-            <h2 className="font-display font-semibold text-[24px] text-ink px-1">Scenario Lab</h2>
+          <SidePanel title="Scenario Lab" meta="Trade-offs, demand shifts, fleet ETAs, diagnostics">
             <ScenariosPanel
               neighborhoods={neighborhoods}
               config={optimizationConfig}
@@ -548,18 +614,17 @@ export const App: React.FC = () => {
               onOptimizationComplete={setOptimizationResult}
               onGoToMap={() => setPanel('ask')}
             />
-          </div>
+          </SidePanel>
         )}
 
         {panel === 'export' && (
-          <div className="p-4 space-y-4">
-            <h2 className="font-display font-semibold text-[24px] text-ink px-1">Export</h2>
+          <SidePanel title="Export" meta="Datasets, comparisons and map snapshots">
             <ExportView neighborhoods={neighborhoods} result={optimizationResult} />
-          </div>
+          </SidePanel>
         )}
 
         {panel === 'settings' && (
-          <div className="p-4">
+          <SidePanel title="Settings" meta="Appearance, map defaults, themes, data and support.">
             <SettingsView
               theme={theme}
               onThemeChange={handleThemeChange}
@@ -569,12 +634,11 @@ export const App: React.FC = () => {
               onClearData={clearLocalData}
               apiBase={API_BASE}
             />
-          </div>
+          </SidePanel>
         )}
 
         {panel === 'help' && (
-          <div className="p-5 space-y-3">
-            <h2 className="font-display font-semibold text-[24px] text-ink">Help Center</h2>
+          <SidePanel title="Help Center">
             {[
               { t: 'Ask anything', d: 'Type "optimize for 3 warehouses", "how much will I save?", or a place name. Suggestions and recents appear in Ask.' },
               { t: 'Search places', d: 'Use the map search bar — matching neighborhoods open as detail cards with Overview, Assignment and Nearby.' },
@@ -586,7 +650,7 @@ export const App: React.FC = () => {
                 <p className="text-[13px] text-ink-soft mt-1">{s.d}</p>
               </div>
             ))}
-          </div>
+          </SidePanel>
         )}
         {/* Drag handle: resize panel (double-click resets) */}
         <div
@@ -604,8 +668,8 @@ export const App: React.FC = () => {
         <div className="absolute inset-0">
           <MapView
             neighborhoods={neighborhoods}
-            warehouses={optimizationResult?.warehouses ?? []}
-            assignments={optimizationResult?.assignments ?? []}
+            warehouses={mapWarehouses}
+            assignments={mapAssignments}
             radiusKm={effectiveRadiusKm}
             fill
             minimal
@@ -632,7 +696,7 @@ export const App: React.FC = () => {
         {/* Floating top bar: search + planning actions (starts right of the panel) */}
         <div
           className="absolute top-4 right-4 z-10 flex items-start gap-3"
-          style={{ left: sidebarWidth + 32 }}
+          style={{ left: sidebarCollapsed ? 16 : sidebarWidth + 32 }}
         >
           <form
             onSubmit={(e) => {
@@ -681,7 +745,7 @@ export const App: React.FC = () => {
                 downloadFile('gridpoint_assignments.csv', buildAssignmentsCsv(optimizationResult));
               } else setPanel('export');
             }}
-            className="flex items-center gap-1.5 px-4 py-2.5 rounded-full bg-grape-300 shadow-lg text-[13px] font-bold text-ink hover:bg-grape-200 transition cursor-pointer whitespace-nowrap"
+            className="flex items-center gap-1.5 px-4 py-2.5 rounded-full bg-grape-300 shadow-lg text-[13px] font-bold text-[#10333D] hover:bg-grape-200 transition cursor-pointer whitespace-nowrap"
           >
             <Download className="w-4 h-4" /> Export
           </button>
@@ -690,7 +754,7 @@ export const App: React.FC = () => {
         {/* Layer chips + displacement/roads toggle */}
         <div
           className="absolute top-[76px] z-10 flex flex-wrap items-center gap-2"
-          style={{ left: sidebarWidth + 32 }}
+          style={{ left: sidebarCollapsed ? 16 : sidebarWidth + 32 }}
         >
           <MapChips layers={layers} onToggle={toggleLayer} hasResult={!!optimizationResult} />
           {optimizationResult && layers.routes && (

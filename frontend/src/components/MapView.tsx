@@ -180,6 +180,14 @@ export const MapView: React.FC<MapViewProps> = ({
   const styleRef = useRef<string>('');
   const threeDRef = useRef(false);
   const threeDBtnRef = useRef<HTMLButtonElement | null>(null);
+  // Signature of the last fitted layout — auto-fit runs only when the data
+  // itself changes, never on UI toggles (sidebar, layers, theme), so the
+  // user's pan/zoom is preserved.
+  const fittedRef = useRef<{ n: Neighborhood[] | null; w: Warehouse[] | null; a: Assignment[] | null }>({
+    n: null,
+    w: null,
+    a: null
+  });
   const [styleReady, setStyleReady] = useState(false);
   const token = getMapboxToken();
 
@@ -454,10 +462,14 @@ export const MapView: React.FC<MapViewProps> = ({
     }
 
     if (hasBounds && !focus) {
-      try {
-        map.fitBounds(bounds, { padding: 60, maxZoom: 14 });
-      } catch {
-        /* single-point safe */
+      const prev = fittedRef.current;
+      if (prev.n !== neighborhoods || prev.w !== warehouses || prev.a !== assignments) {
+        fittedRef.current = { n: neighborhoods, w: warehouses, a: assignments };
+        try {
+          map.fitBounds(bounds, { padding: 60, maxZoom: 14 });
+        } catch {
+          /* single-point safe */
+        }
       }
     }
     // Re-apply 3D extrusions after every style swap / overlay refresh.

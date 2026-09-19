@@ -30,11 +30,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   apiBase
 }) => (
   <div className="space-y-5 max-w-3xl">
-    <div>
-      <h2 className="font-display font-semibold text-[32px] text-ink leading-tight">Settings</h2>
-      <p className="text-[13px] text-ink-faint mt-1">Appearance, map defaults, themes, data and support.</p>
-    </div>
-
     {/* Appearance */}
     <div className="card p-5">
       <h3 className="font-bold text-[15px] text-ink flex items-center gap-2">
@@ -129,7 +124,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           <a
             key={c.phone}
             href={`tel:${c.phone.replace(/[^+\d]/g, '')}`}
-            className="flex items-center justify-between rounded-2xl border border-[#ECE9DB] px-4 py-3 hover:border-gold transition cursor-pointer bg-[#FBFAF4]"
+            className="flex items-center justify-between rounded-2xl border border-[#ECE9DB] px-4 py-3 hover:border-gold transition cursor-pointer bg-cream-deep"
           >
             <span>
               <span className="block text-[13px] font-bold text-ink">{c.name}</span>

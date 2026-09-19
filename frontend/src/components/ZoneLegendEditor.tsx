@@ -55,7 +55,7 @@ export const ZoneLegendEditor: React.FC<ZoneLegendEditorProps> = ({
         )}
       </div>
       <p className="text-[11px] text-ink-faint mb-3">
-        Pick a color per category — e.g. Residential green, Commercial blue. Saved automatically.
+        Pick a color per category — saved automatically.
       </p>
 
       <div className="space-y-1.5 max-h-44 overflow-y-auto nice-scroll pr-1">
@@ -83,7 +83,7 @@ export const ZoneLegendEditor: React.FC<ZoneLegendEditorProps> = ({
             onClick={handlePreset}
             className={`w-full flex items-center justify-center gap-2 px-3 py-2 rounded-full text-xs font-bold transition cursor-pointer ${
               confirmPreset
-                ? 'bg-gold hover:bg-gold-200 text-ink'
+                ? 'bg-gold hover:bg-gold-200 text-[#10333D]'
                 : 'bg-grape-100 hover:bg-grape-200 text-grape-600 border border-grape-200'
             }`}
           >

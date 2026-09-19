@@ -112,6 +112,9 @@ body {
 
 .dark .hover\:bg-cream-deep:hover { background-color: #2C2C33 !important; }
 .dark .hover\:bg-gold-100:hover { background-color: #3A352A !important; }
+/* group-hover variants bake literal colors — they need their own dark rules */
+.dark .group:hover .group-hover\:bg-cream-deep { background-color: #2C2C33 !important; }
+.dark .group:hover .group-hover\:text-ink { color: #EAF1F2 !important; }
 
 /* ---------- GridPoint form system (works in light + dark) ---------- */
 /* Sunken well for grouped controls — solid tokens only (opacity variants

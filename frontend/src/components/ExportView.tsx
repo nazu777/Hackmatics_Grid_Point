@@ -95,11 +95,8 @@ export const ExportView: React.FC<ExportViewProps> = ({ neighborhoods, result })
   ];
 
   return (
-    <div className="space-y-5">
-      <div>
-        <h2 className="font-display font-semibold text-[24px] text-ink leading-tight">Export Reports ({cards.filter((c) => c.enabled).length})</h2>
-        <p className="text-[13px] text-ink-faint mt-1">Download datasets, comparisons and map snapshots. Reports unlock as you progress.</p>
-      </div>
+    <div className="space-y-4">
+      <p className="text-[13px] text-ink-faint px-1">Download datasets, comparisons and map snapshots. Reports unlock as you progress.</p>
       <div className="grid grid-cols-1 gap-3">
         {cards.map((c) => {
           const Icon = c.icon;

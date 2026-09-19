@@ -196,7 +196,7 @@ export const ScenariosPanel: React.FC<ScenariosPanelProps> = ({
               <div>
                 <label className="text-xs font-semibold text-ink-soft block mb-1 flex items-center justify-between">
                   <span>Fixed Infra Cost / Hub:</span>
-                  <span className="font-bold text-grape-600">${infraCost}</span>
+                  <span className="font-bold text-ink">${infraCost}</span>
                 </label>
                 <input
                   type="range"
@@ -213,7 +213,7 @@ export const ScenariosPanel: React.FC<ScenariosPanelProps> = ({
               <div>
                 <label className="text-xs font-semibold text-ink-soft block mb-1 flex items-center justify-between">
                   <span>Max K Evaluated:</span>
-                  <span className="font-bold text-grape-600">K={maxKEval}</span>
+                  <span className="font-bold text-ink">K={maxKEval}</span>
                 </label>
                 <input
                   type="range"
