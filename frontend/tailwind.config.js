@@ -41,6 +41,15 @@ export default {
           DEFAULT: '#F3F1E8',
           deep: '#ECE9DB',
         },
+        grape: {
+          50: '#FAF3FE',
+          100: '#F3E6FB',
+          200: '#E7CBF7',
+          300: '#D8A9F5',
+          400: '#C984F0',
+          500: '#B45FE8',
+          600: '#9640CC',
+        },
         gold: {
           50: '#FBF4E0',
           100: '#F6E8C3',

@@ -1,25 +1,32 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { ArrowDownWideNarrow, ChevronLeft, ChevronRight, Plus, ListFilter } from 'lucide-react';
-import { Sidebar, type AppView } from './components/Sidebar';
-import { Topbar, type ThemeMode } from './components/Topbar';
-import { Dashboard } from './components/Dashboard';
-import { SummaryCards } from './components/SummaryCards';
-import { FileUploader } from './components/FileUploader';
+import { Search, X, Plus, Download } from 'lucide-react';
+import { GmapsRail, type RailTab } from './components/GmapsRail';
+import { AskPanel } from './components/AskPanel';
+import { DetailCard } from './components/DetailCard';
+import { SavedPanel } from './components/SavedPanel';
+import { MapChips, ResultRows, type LayerFlags } from './components/MapChrome';
+import { MapView, type MapFocus } from './components/MapView';
+import { OptimizationPanel } from './components/OptimizationPanel';
+import { ComparisonDashboard } from './components/ComparisonDashboard';
 import { DataTable } from './components/DataTable';
+import { FileUploader } from './components/FileUploader';
 import { SyntheticModal } from './components/SyntheticModal';
 import { ErrorDrawer } from './components/ErrorDrawer';
-import { OptimizationPanel } from './components/OptimizationPanel';
-import { MapView } from './components/MapView';
-import { ComparisonDashboard } from './components/ComparisonDashboard';
 import { ScenariosPanel } from './components/ScenariosPanel';
 import { ZoneLegendEditor } from './components/ZoneLegendEditor';
 import { ExportView } from './components/ExportView';
 import { SettingsView } from './components/SettingsView';
-import { UsageDonut } from './components/UsageDonut';
-import { QuickActions, ValidationMini, ResultMini } from './components/SideCards';
 import { useZoneColors } from './components/mapThemes';
+import type { ThemeMode } from './components/Topbar';
+import {
+  buildAssignmentsCsv,
+  buildMetricsCsv,
+  downloadFile,
+  pushRecent,
+  searchNeighborhoods
+} from './components/panelStore';
 import { Neighborhood, ValidationResult, DatasetSummary, OptimizationConfig, OptimizationResult, MapLayerOptions, BasemapStyle } from './types';
-import { validateData, localValidate } from './services/api';
+import { validateData, localValidate, optimizeNetwork, exportCsv } from './services/api';
 
 // Initial Hyderabad seed dataset per schema.md
 const INITIAL_DATASET: Neighborhood[] = [
@@ -53,8 +60,10 @@ const DEFAULT_CONFIG: OptimizationConfig = {
 
 const API_BASE = (import.meta.env.VITE_API_URL as string) || '/api (same-origin)';
 
+type PanelMode = RailTab | 'results' | 'detail';
+
 export const App: React.FC = () => {
-  const [view, setView] = useState<AppView>('dashboard');
+  const [panel, setPanel] = useState<PanelMode>('ask');
   const [neighborhoods, setNeighborhoods] = useState<Neighborhood[]>(() => {
     const saved = localStorage.getItem('gridpoint_neighborhoods');
     if (saved) {
@@ -68,14 +77,22 @@ export const App: React.FC = () => {
   const [optimizationResult, setOptimizationResult] = useState<OptimizationResult | null>(null);
   const [isSyntheticModalOpen, setIsSyntheticModalOpen] = useState(false);
   const [isErrorDrawerOpen, setIsErrorDrawerOpen] = useState(false);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [selectedWh, setSelectedWh] = useState<string | null>(null);
-  const [tabSort, setTabSort] = useState<'id' | 'orders' | 'nodes'>('id');
   const [theme, setTheme] = useState<ThemeMode>(() => {
-    try { return (localStorage.getItem('gridpoint-theme') as ThemeMode) || 'light'; } catch { return 'light'; }
+    try { return (localStorage.getItem('gridpoint-theme') as ThemeMode) || 'dark'; } catch { return 'dark'; }
   });
-  const tabStripRef = useRef<HTMLDivElement>(null);
   const prevBasemap = useRef<BasemapStyle | null>(null);
+
+  // Search / detail state (gmaps place flow)
+  const [searchText, setSearchText] = useState('');
+  const [resultNodes, setResultNodes] = useState<Neighborhood[]>([]);
+  const [resultTitle, setResultTitle] = useState('');
+  const [detailNode, setDetailNode] = useState<Neighborhood | null>(null);
+  const [detailBack, setDetailBack] = useState<PanelMode>('ask');
+  const [focus, setFocus] = useState<MapFocus | null>(null);
+  const [highlightId, setHighlightId] = useState<string | null>(null);
+
+  // Map layer chips
+  const [layers, setLayers] = useState<LayerFlags>({ warehouses: true, routes: true, demand: true, radius: true });
 
   const [optimizationConfig, setOptimizationConfig] = useState<OptimizationConfig>(() => {
     const saved = localStorage.getItem('gridpoint_opt_config');
@@ -88,13 +105,12 @@ export const App: React.FC = () => {
   const [mapLayerOptions, setMapLayerOptions] = useState<MapLayerOptions>({
     showBubbles: true,
     showLabels: true,
-    basemap: 'osm',
-    colorBy: 'demand'
+    basemap: 'dark',
+    colorBy: 'warehouse'
   });
 
   const { zoneColors, setZoneColor, resetZoneColors } = useZoneColors();
 
-  // Website theme: toggle root class + persist + follow map tiles along
   useEffect(() => {
     document.documentElement.classList.toggle('dark', theme === 'dark');
     try { localStorage.setItem('gridpoint-theme', theme); } catch { /* ignore */ }
@@ -164,13 +180,6 @@ export const App: React.FC = () => {
     triggerValidation(neighborhoods);
   }, [neighborhoods, triggerValidation]);
 
-  useEffect(() => {
-    if (optimizationResult && !selectedWh) {
-      setSelectedWh(optimizationResult.warehouses[0]?.warehouse_id ?? null);
-    }
-    if (!optimizationResult) setSelectedWh(null);
-  }, [optimizationResult, selectedWh]);
-
   const handleDataLoaded = (newNodes: Neighborhood[], valResult: ValidationResult, newSummary: DatasetSummary) => {
     setNeighborhoods(newNodes);
     setValidation(valResult);
@@ -188,383 +197,341 @@ export const App: React.FC = () => {
     triggerValidation(updated);
   };
 
-  const handleSearch = (q: string) => {
-    setSearchQuery(q);
-    if (q.trim()) setView('orders');
-  };
-
-  const handleDeleteResult = () => {
-    if (window.confirm('Delete the current optimization result? Demand data is kept.')) {
-      setOptimizationResult(null);
-      setSelectedWh(null);
-    }
-  };
-
   const clearLocalData = () => {
     if (!window.confirm('Reset all saved app data (demand, config, themes)?')) return;
-    ['gridpoint_neighborhoods', 'gridpoint_opt_config', 'gridpoint_zone_colors', 'gridpoint-theme'].forEach((k) => {
+    ['gridpoint_neighborhoods', 'gridpoint_opt_config', 'gridpoint_zone_colors'].forEach((k) => {
       try { localStorage.removeItem(k); } catch { /* ignore */ }
     });
     setNeighborhoods(INITIAL_DATASET);
     setOptimizationConfig(DEFAULT_CONFIG);
     setOptimizationResult(null);
     resetZoneColors();
-    setTheme('light');
   };
 
-  const sortedWarehouses = React.useMemo(() => {
-    const list = [...(optimizationResult?.warehouses ?? [])];
-    if (tabSort === 'orders') list.sort((a, b) => (b.assigned_orders || 0) - (a.assigned_orders || 0));
-    else if (tabSort === 'nodes') {
-      const counts = new Map<string, number>();
-      optimizationResult?.assignments.forEach((x) => counts.set(x.warehouse_id, (counts.get(x.warehouse_id) || 0) + 1));
-      list.sort((a, b) => (counts.get(b.warehouse_id) || 0) - (counts.get(a.warehouse_id) || 0));
-    } else list.sort((a, b) => a.warehouse_id.localeCompare(b.warehouse_id));
-    return list;
-  }, [optimizationResult, tabSort]);
+  // ---- Ask actions ----
+  const runOptimize = useCallback(async (k: number): Promise<OptimizationResult | null> => {
+    try {
+      const res = await optimizeNetwork(neighborhoods, { ...optimizationConfig, K: k });
+      setOptimizationResult(res);
+      setHighlightId(null);
+      return res;
+    } catch {
+      return null;
+    }
+  }, [neighborhoods, optimizationConfig]);
 
-  const mapHeight = view === 'inventory' ? 620 : 500;
+  const handleExportDataset = useCallback(async () => {
+    downloadFile('gridpoint_neighborhoods.csv', await exportCsv(neighborhoods));
+  }, [neighborhoods]);
 
-  const centerMap = (
-    <MapView
-      neighborhoods={neighborhoods}
-      warehouses={optimizationResult?.warehouses ?? []}
-      assignments={optimizationResult?.assignments ?? []}
-      radiusKm={optimizationResult && optimizationResult.config.radius_enabled ? (optimizationResult.config.R_max_km ?? null) : null}
-      height={mapHeight}
-      basemap={mapLayerOptions.basemap}
-      onBasemapChange={(b) => setMapLayerOptions((prev) => ({ ...prev, basemap: b }))}
-      colorBy={mapLayerOptions.colorBy}
-      onColorByChange={(c) => setMapLayerOptions((prev) => ({ ...prev, colorBy: c }))}
-      zoneColors={zoneColors}
-    />
-  );
+  const handleExportComparison = useCallback(() => {
+    if (optimizationResult) downloadFile('gridpoint_metrics_comparison.csv', buildMetricsCsv(optimizationResult));
+  }, [optimizationResult]);
 
-  const zoneEditor = (
-    <ZoneLegendEditor
-      neighborhoods={neighborhoods}
-      zoneColors={zoneColors}
-      onZoneColorChange={setZoneColor}
-      onResetZoneColors={resetZoneColors}
-      onApplyZones={handleApplyZones}
-      compact
-    />
-  );
+  // ---- Search / detail flow ----
+  const openDetail = useCallback((node: Neighborhood, back: PanelMode = 'ask') => {
+    setDetailNode(node);
+    setDetailBack(back);
+    setPanel('detail');
+    setHighlightId(node.neighborhood_id);
+    setFocus({ lat: node.latitude, lon: node.longitude, zoom: 14, key: Date.now() });
+  }, []);
 
-  const usageDonut = (
-    <UsageDonut
-      warehouses={optimizationResult?.warehouses ?? []}
-      assignments={optimizationResult?.assignments ?? []}
-      neighborhoods={neighborhoods}
-      selectedId={selectedWh}
-      capacityPerWarehouse={optimizationResult?.config.capacity_enabled ? (optimizationResult?.config.C_max ?? null) : null}
-    />
-  );
+  const submitSearch = (q: string) => {
+    const query = q.trim();
+    if (!query) return;
+    pushRecent(query);
+    const hits = searchNeighborhoods(neighborhoods, query);
+    if (hits.length === 1) openDetail(hits[0], 'ask');
+    else {
+      setResultNodes(hits.slice(0, 30));
+      setResultTitle(hits.length ? `${hits.length} matches for “${query}”` : `No matches for “${query}”`);
+      setPanel('results');
+    }
+  };
 
-  const quickActions = (
-    <QuickActions
-      onAddRequest={() => setView('orders')}
-      onEdit={() => setView('warehouses')}
-      onRun={() => setView('warehouses')}
-      onDeleteResult={handleDeleteResult}
-      hasResult={!!optimizationResult}
-    />
-  );
+  const demandRank = (node: Neighborhood): number | null => {
+    const sorted = [...neighborhoods].sort((a, b) => Number(b.daily_orders) - Number(a.daily_orders));
+    const i = sorted.findIndex((n) => n.neighborhood_id === node.neighborhood_id);
+    return i >= 0 ? i + 1 : null;
+  };
 
-  const fullWidth = view === 'settings' || view === 'help';
+  const toggleLayer = (key: keyof LayerFlags) => setLayers((prev) => ({ ...prev, [key]: !prev[key] }));
+
+  const railTab: RailTab =
+    panel === 'results' || panel === 'detail' ? 'ask' : (panel as RailTab);
+
+  const today = new Date().toLocaleDateString(undefined, { day: '2-digit', month: '2-digit', year: 'numeric' });
+  const kCount = optimizationResult?.warehouses.length ?? optimizationConfig.K;
 
   return (
-    <div className="min-h-screen bg-cream text-ink flex">
-      <Sidebar view={view} onNavigate={setView} resultReady={!!optimizationResult} />
+    <div className="h-screen w-screen flex overflow-hidden bg-cream text-ink">
+      <GmapsRail tab={railTab} onTab={setPanel} theme={theme} onThemeChange={handleThemeChange} />
 
-      <div className="flex-1 min-w-0 px-6 lg:px-8 pb-10 max-w-[1500px] mx-auto">
-        <Topbar
-          query={searchQuery}
-          onQuery={handleSearch}
-          errorCount={validation.errors.length}
-          onOpenErrors={() => setIsErrorDrawerOpen(true)}
-          theme={theme}
-          onThemeChange={handleThemeChange}
-        />
+      {/* Left panel */}
+      <aside className="w-[400px] shrink-0 h-full overflow-y-auto nice-scroll bg-white border-r border-[#E4E1D2] z-10">
+        {panel === 'ask' && (
+          <AskPanel
+            neighborhoods={neighborhoods}
+            config={optimizationConfig}
+            result={optimizationResult}
+            onOptimize={runOptimize}
+            onOpenCompare={() => setPanel('compare')}
+            onApplyZones={handleApplyZones}
+            onExportDataset={handleExportDataset}
+            onExportComparison={handleExportComparison}
+            onOpenDetail={(n) => openDetail(n, 'ask')}
+            onShowResults={(nodes, title) => {
+              setResultNodes(nodes);
+              setResultTitle(title);
+              setPanel('results');
+            }}
+          />
+        )}
 
-        {fullWidth ? (
-          <>
-            {/* ---------- SETTINGS ---------- */}
-            {view === 'settings' && (
-              <SettingsView
-                theme={theme}
-                onThemeChange={handleThemeChange}
-                mapLayerOptions={mapLayerOptions}
-                setMapLayerOptions={setMapLayerOptions}
-                onResetZoneColors={resetZoneColors}
-                onClearData={clearLocalData}
-                apiBase={API_BASE}
-              />
-            )}
+        {panel === 'results' && (
+          <ResultRows
+            nodes={resultNodes}
+            title={resultTitle}
+            onOpen={(n) => openDetail(n, 'results')}
+            onClose={() => setPanel('ask')}
+          />
+        )}
 
-            {/* ---------- HELP ---------- */}
-            {view === 'help' && (
-              <div className="space-y-5 max-w-3xl">
-                <h2 className="font-display font-semibold text-[32px] text-ink leading-tight">Help Center</h2>
-                <div className="grid gap-4">
-                  {[
-                    { t: '1. Load demand', d: 'Demand Data → upload CSV/JSON, generate synthetic clusters, or edit the table inline. Required columns: neighborhood_id, latitude, longitude, daily_orders.' },
-                    { t: '2. Explore geography', d: 'Demand Map → demand map with Standard / Light / Dark themes; color bubbles by warehouse, zone category or demand intensity.' },
-                    { t: '3. Place warehouses', d: 'Optimize → set K (1–10), distance metric and constraints, then run Weiszfeld / weighted K-Means / MILP optimization.' },
-                    { t: '4. Ship & compare', d: 'Compare → assignment lines on the map plus baseline-vs-optimized cost cards, histogram and CSV exports.' },
-                    { t: '5. What-if scenarios', d: 'Scenarios → demand shifts, fleet ETA, elbow analysis and feasibility diagnostics.' }
-                  ].map((s) => (
-                    <div key={s.t} className="card p-5">
-                      <h3 className="font-bold text-[15px] text-ink">{s.t}</h3>
-                      <p className="text-[13px] text-ink-soft mt-1">{s.d}</p>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-          </>
-        ) : (
-          <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_370px] gap-5 items-start">
-            {/* Center: persistent map + view content */}
-            <div className="space-y-5 min-w-0">
-              {centerMap}
+        {panel === 'detail' && detailNode && (
+          <DetailCard
+            node={detailNode}
+            allNodes={neighborhoods}
+            assignment={optimizationResult?.assignments.find((a) => a.neighborhood_id === detailNode.neighborhood_id) ?? null}
+            demandRank={demandRank(detailNode)}
+            onBack={() => setPanel(detailBack)}
+            onCenter={(n) => {
+              setHighlightId(n.neighborhood_id);
+              setFocus({ lat: n.latitude, lon: n.longitude, zoom: 14, key: Date.now() });
+            }}
+            onOpenDetail={(n) => openDetail(n, 'detail')}
+            zoneColors={zoneColors}
+          />
+        )}
 
-              {/* ---------- OVERVIEW ---------- */}
-              {view === 'dashboard' && (
-                <Dashboard
-                  neighborhoods={neighborhoods}
-                  summary={summary}
-                  result={optimizationResult}
-                  selectedWh={selectedWh}
-                  onSelectWh={setSelectedWh}
-                  onAddRequest={() => setView('orders')}
-                  onEditSection={() => setView('warehouses')}
-                  onDeleteResult={handleDeleteResult}
-                  onRunOptimizer={() => setView('warehouses')}
-                />
-              )}
+        {panel === 'saved' && (
+          <SavedPanel
+            neighborhoods={neighborhoods}
+            result={optimizationResult}
+            zoneColors={zoneColors}
+            onLoadList={(nodes) => {
+              setNeighborhoods(nodes);
+              triggerValidation(nodes);
+              setPanel('ask');
+            }}
+            onLoadResult={(res) => {
+              setOptimizationResult(res);
+              setPanel('compare');
+            }}
+          />
+        )}
 
-              {/* ---------- OPTIMIZE ---------- */}
-              {view === 'warehouses' && (
-                <div className="space-y-5">
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <h2 className="font-display font-semibold text-[26px] text-ink leading-tight">
-                      Optimize — Warehouses ({optimizationResult?.warehouses.length ?? optimizationConfig.K})
-                    </h2>
-                    <div className="flex items-center gap-2 text-[11px] font-semibold">
-                      <button
-                        onClick={() => setTabSort((s) => (s === 'id' ? 'orders' : s === 'orders' ? 'nodes' : 'id'))}
-                        title="Cycle tab sort: id → orders → nodes"
-                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-white border border-[#E4E1D2] text-ink hover:border-gold transition cursor-pointer"
-                      >
-                        <ArrowDownWideNarrow className="w-3.5 h-3.5" /> Sort: {tabSort}
-                      </button>
-                      <button
-                        onClick={() => setView('shipments')}
-                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-white border border-[#E4E1D2] text-ink hover:border-gold transition cursor-pointer"
-                      >
-                        <ListFilter className="w-3.5 h-3.5" /> Compare
-                      </button>
-                    </div>
-                  </div>
-
-                  <div className="flex items-center gap-2">
-                    <button
-                      onClick={() => tabStripRef.current?.scrollBy({ left: -220, behavior: 'smooth' })}
-                      className="w-9 h-9 shrink-0 rounded-full bg-white border border-[#E4E1D2] flex items-center justify-center text-ink hover:border-gold transition cursor-pointer"
-                    >
-                      <ChevronLeft className="w-4 h-4" />
-                    </button>
-                    <div ref={tabStripRef} className="flex gap-2 overflow-x-auto nice-scroll flex-1 py-0.5">
-                      {sortedWarehouses.length === 0 && (
-                        <span className="text-xs text-ink-faint px-2 py-2">
-                          No warehouses yet — run the optimizer below.
-                        </span>
-                      )}
-                      {sortedWarehouses.map((w) => (
-                        <button
-                          key={w.warehouse_id}
-                          onClick={() => setSelectedWh(w.warehouse_id)}
-                          className={`px-8 py-2.5 rounded-full text-[13px] font-medium whitespace-nowrap transition cursor-pointer border ${
-                            selectedWh === w.warehouse_id
-                              ? 'bg-[#14424E] text-white border-[#14424E] font-semibold'
-                              : 'bg-white text-ink border-[#E4E1D2] hover:border-gold'
-                          }`}
-                        >
-                          Warehouse {w.warehouse_id.replace(/^W/i, '')}
-                        </button>
-                      ))}
-                    </div>
-                    <button
-                      onClick={() => tabStripRef.current?.scrollBy({ left: 220, behavior: 'smooth' })}
-                      className="w-9 h-9 shrink-0 rounded-full bg-white border border-[#E4E1D2] flex items-center justify-center text-ink hover:border-gold transition cursor-pointer"
-                    >
-                      <ChevronRight className="w-4 h-4" />
-                    </button>
-                    <button
-                      onClick={() => setView('shipments')}
-                      title="Open comparison"
-                      className="w-9 h-9 shrink-0 rounded-full bg-[#14424E] flex items-center justify-center text-white hover:bg-pine-800 transition cursor-pointer"
-                    >
-                      <Plus className="w-4 h-4" />
-                    </button>
-                  </div>
-
-                  <OptimizationPanel
-                    neighborhoods={neighborhoods}
-                    onOptimizationComplete={setOptimizationResult}
-                    lastResult={optimizationResult}
-                    onGoToComparison={() => setView('shipments')}
-                  />
-                </div>
-              )}
-
-              {/* ---------- DEMAND DATA ---------- */}
-              {view === 'orders' && (
-                <div className="space-y-5">
-                  <div>
-                    <h2 className="font-display font-semibold text-[26px] text-ink leading-tight">Demand Data ({neighborhoods.length})</h2>
-                    <p className="text-[13px] text-ink-faint mt-1">Upload, generate or edit neighborhood orders. Top-bar search filters this table.</p>
-                  </div>
-                  <DataTable
-                    neighborhoods={neighborhoods}
-                    errors={validation.errors}
-                    onChange={(updated) => setNeighborhoods(updated)}
-                    externalQuery={searchQuery}
-                  />
-                </div>
-              )}
-
-              {/* ---------- COMPARE ---------- */}
-              {view === 'shipments' && (
-                <div className="space-y-5">
-                  <div>
-                    <h2 className="font-display font-semibold text-[26px] text-ink leading-tight">Compare Shipments</h2>
-                    <p className="text-[13px] text-ink-faint mt-1">Neighborhood → warehouse assignments and baseline vs optimized comparison.</p>
-                  </div>
-                  {optimizationResult ? (
-                    <ComparisonDashboard result={optimizationResult} />
-                  ) : (
-                    <div className="card p-12 text-center">
-                      <h3 className="font-display text-xl font-semibold text-ink">No shipments yet</h3>
-                      <p className="text-xs text-ink-faint max-w-md mx-auto mt-2">
-                        Run the optimizer in Optimize first — assignment lines and cost comparison will appear here.
-                      </p>
-                      <button
-                        onClick={() => setView('warehouses')}
-                        className="mt-6 px-5 py-2 bg-pine-700 hover:bg-pine-800 text-white rounded-full text-xs font-bold transition cursor-pointer"
-                      >
-                        Go to Optimize &rarr;
-                      </button>
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {/* ---------- DEMAND MAP ---------- */}
-              {view === 'inventory' && (
-                <div className="space-y-5">
-                  <SummaryCards
-                    summary={summary}
-                    validation={validation}
-                    onOpenErrors={() => setIsErrorDrawerOpen(true)}
-                  />
-                  <p className="text-[13px] text-ink-faint">
-                    Demand health above; use the map themes and zone editor in the side panel to recolor the centered map.
-                  </p>
-                </div>
-              )}
-
-              {/* ---------- SCENARIOS ---------- */}
-              {view === 'tracking' && (
-                <div className="space-y-5">
-                  <div>
-                    <h2 className="font-display font-semibold text-[26px] text-ink leading-tight">Scenarios</h2>
-                    <p className="text-[13px] text-ink-faint mt-1">Demand shifts, fleet ETA and what-if diagnostics.</p>
-                  </div>
-                  <ScenariosPanel
-                    neighborhoods={neighborhoods}
-                    config={optimizationConfig}
-                    lastResult={optimizationResult}
-                    onUpdateNeighborhoods={(updated) => {
-                      setNeighborhoods(updated);
-                      localStorage.setItem('gridpoint_neighborhoods', JSON.stringify(updated));
-                      setSummary(computeSummary(updated));
-                    }}
-                    onUpdateConfig={handleConfigChange}
-                    onOptimizationComplete={(res) => {
-                      setOptimizationResult(res);
-                    }}
-                    onGoToMap={() => setView('inventory')}
-                  />
-                </div>
-              )}
-
-              {/* ---------- EXPORT ---------- */}
-              {view === 'export' && (
-                <ExportView neighborhoods={neighborhoods} result={optimizationResult} />
-              )}
-            </div>
-
-            {/* Right rail: contextual panel */}
-            <div className="space-y-5">
-              {view === 'dashboard' && (
-                <>
-                  {quickActions}
-                  {usageDonut}
-                </>
-              )}
-              {view === 'warehouses' && (
-                <>
-                  {usageDonut}
-                  {zoneEditor}
-                </>
-              )}
-              {view === 'orders' && (
-                <>
-                  <div className="card p-4">
-                    <h4 className="font-bold text-xs text-ink mb-2">Load data</h4>
-                    <FileUploader
-                      onDataLoaded={handleDataLoaded}
-                      onOpenSyntheticModal={() => setIsSyntheticModalOpen(true)}
-                    />
-                  </div>
-                  <ValidationMini validation={validation} onOpenErrors={() => setIsErrorDrawerOpen(true)} />
-                </>
-              )}
-              {view === 'shipments' && (
-                <>
-                  {zoneEditor}
-                  <ResultMini result={optimizationResult} />
-                </>
-              )}
-              {view === 'inventory' && (
-                <>
-                  {zoneEditor}
-                  <ValidationMini validation={validation} onOpenErrors={() => setIsErrorDrawerOpen(true)} />
-                </>
-              )}
-              {view === 'tracking' && (
-                <>
-                  <ResultMini result={optimizationResult} />
-                  {quickActions}
-                </>
-              )}
-              {view === 'export' && (
-                <>
-                  <ResultMini result={optimizationResult} />
-                  <div className="card p-4">
-                    <h4 className="font-bold text-xs text-ink">Tips</h4>
-                    <p className="text-[11px] text-ink-faint mt-1">
-                      Reports unlock as you progress: dataset exports work now, comparison exports need an optimization result.
-                    </p>
-                  </div>
-                </>
-              )}
-            </div>
+        {panel === 'optimize' && (
+          <div className="p-4">
+            <OptimizationPanel
+              neighborhoods={neighborhoods}
+              onOptimizationComplete={setOptimizationResult}
+              lastResult={optimizationResult}
+              onGoToComparison={() => setPanel('compare')}
+            />
           </div>
         )}
-      </div>
+
+        {panel === 'compare' && (
+          <div className="p-4 space-y-4">
+            <h2 className="font-display font-semibold text-[24px] text-ink px-1">Compare Shipments</h2>
+            {optimizationResult ? (
+              <ComparisonDashboard result={optimizationResult} />
+            ) : (
+              <div className="card p-8 text-center">
+                <p className="text-[13px] text-ink-faint">No result yet — run the optimizer first.</p>
+                <button
+                  onClick={() => setPanel('optimize')}
+                  className="mt-4 px-5 py-2 rounded-full bg-[#14424E] text-white text-xs font-bold cursor-pointer"
+                >
+                  Go to Optimize
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+
+        {panel === 'data' && (
+          <div className="p-4 space-y-4">
+            <h2 className="font-display font-semibold text-[24px] text-ink px-1">Demand Data ({neighborhoods.length})</h2>
+            <FileUploader onDataLoaded={handleDataLoaded} onOpenSyntheticModal={() => setIsSyntheticModalOpen(true)} />
+            <DataTable neighborhoods={neighborhoods} errors={validation.errors} onChange={setNeighborhoods} externalQuery="" />
+            <ZoneLegendEditor
+              neighborhoods={neighborhoods}
+              zoneColors={zoneColors}
+              onZoneColorChange={setZoneColor}
+              onResetZoneColors={resetZoneColors}
+              onApplyZones={handleApplyZones}
+              compact
+            />
+          </div>
+        )}
+
+        {panel === 'lab' && (
+          <div className="p-4 space-y-4">
+            <h2 className="font-display font-semibold text-[24px] text-ink px-1">Scenario Lab</h2>
+            <ScenariosPanel
+              neighborhoods={neighborhoods}
+              config={optimizationConfig}
+              lastResult={optimizationResult}
+              onUpdateNeighborhoods={(updated) => {
+                setNeighborhoods(updated);
+                localStorage.setItem('gridpoint_neighborhoods', JSON.stringify(updated));
+                setSummary(computeSummary(updated));
+              }}
+              onUpdateConfig={handleConfigChange}
+              onOptimizationComplete={setOptimizationResult}
+              onGoToMap={() => setPanel('ask')}
+            />
+          </div>
+        )}
+
+        {panel === 'export' && (
+          <div className="p-4 space-y-4">
+            <h2 className="font-display font-semibold text-[24px] text-ink px-1">Export</h2>
+            <ExportView neighborhoods={neighborhoods} result={optimizationResult} />
+          </div>
+        )}
+
+        {panel === 'settings' && (
+          <div className="p-4">
+            <SettingsView
+              theme={theme}
+              onThemeChange={handleThemeChange}
+              mapLayerOptions={mapLayerOptions}
+              setMapLayerOptions={setMapLayerOptions}
+              onResetZoneColors={resetZoneColors}
+              onClearData={clearLocalData}
+              apiBase={API_BASE}
+            />
+          </div>
+        )}
+
+        {panel === 'help' && (
+          <div className="p-5 space-y-3">
+            <h2 className="font-display font-semibold text-[24px] text-ink">Help Center</h2>
+            {[
+              { t: 'Ask anything', d: 'Type "optimize for 3 warehouses", "how much will I save?", or a place name. Suggestions and recents appear in Ask.' },
+              { t: 'Search places', d: 'Use the map search bar — matching neighborhoods open as detail cards with Overview, Assignment and Nearby.' },
+              { t: 'Save lists & runs', d: 'Saved → snapshot datasets as lists and optimization runs for later. Zones tab shows every category.' },
+              { t: 'Map layers', d: 'Chips above the map toggle warehouses, routes, demand bubbles and service-radius circles.' }
+            ].map((s) => (
+              <div key={s.t} className="card p-4">
+                <h3 className="font-bold text-sm text-ink">{s.t}</h3>
+                <p className="text-[13px] text-ink-soft mt-1">{s.d}</p>
+              </div>
+            ))}
+          </div>
+        )}
+      </aside>
+
+      {/* Map area */}
+      <main className="flex-1 relative min-w-0 h-full">
+        <div className="absolute inset-0">
+          <MapView
+            neighborhoods={neighborhoods}
+            warehouses={optimizationResult?.warehouses ?? []}
+            assignments={optimizationResult?.assignments ?? []}
+            radiusKm={optimizationResult && optimizationResult.config.radius_enabled ? (optimizationResult.config.R_max_km ?? null) : null}
+            fill
+            minimal
+            basemap={mapLayerOptions.basemap}
+            onBasemapChange={(b) => setMapLayerOptions((prev) => ({ ...prev, basemap: b }))}
+            colorBy={mapLayerOptions.colorBy}
+            onColorByChange={(c) => setMapLayerOptions((prev) => ({ ...prev, colorBy: c }))}
+            zoneColors={zoneColors}
+            showWarehouses={layers.warehouses}
+            showRoutes={layers.routes}
+            showDemand={layers.demand}
+            showRadius={layers.radius}
+            focus={focus}
+            routeColor={theme === 'dark' ? '#F0A0EA' : undefined}
+            theme={theme}
+            highlightId={highlightId}
+          />
+        </div>
+
+        {/* Floating top bar: search + planning actions */}
+        <div className="absolute top-4 left-4 right-4 z-10 flex items-start gap-3">
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              submitSearch(searchText);
+            }}
+            className="flex items-center gap-2 bg-white rounded-full pl-5 pr-2 py-2 shadow-lg border border-black/5 w-[380px] max-w-[45%]"
+          >
+            <input
+              value={searchText}
+              onChange={(e) => setSearchText(e.target.value)}
+              placeholder="Search GridPoint maps"
+              className="flex-1 bg-transparent text-[13px] text-ink placeholder:text-ink-faint focus:outline-none"
+            />
+            {searchText && (
+              <button type="button" onClick={() => setSearchText('')} className="text-ink-faint hover:text-ink cursor-pointer">
+                <X className="w-4 h-4" />
+              </button>
+            )}
+            <button type="submit" className="w-8 h-8 rounded-full bg-cream-deep flex items-center justify-center text-ink cursor-pointer">
+              <Search className="w-4 h-4" />
+            </button>
+          </form>
+
+          <div className="flex-1" />
+
+          <div className="hidden lg:flex items-center gap-2 bg-white/95 rounded-full px-4 py-2 shadow-lg border border-black/5 text-[11px] font-semibold text-ink-soft whitespace-nowrap">
+            Planning for {today} • {summary.count} nodes • K={kCount} • {summary.total_orders.toLocaleString()} orders
+          </div>
+          <button
+            onClick={() => {
+              if (window.confirm('Start a new planning run? This discards the current optimization result (data is kept).')) {
+                setOptimizationResult(null);
+                setHighlightId(null);
+                setPanel('optimize');
+              }
+            }}
+            className="hidden sm:flex items-center gap-1.5 px-4 py-2.5 rounded-full bg-white shadow-lg border border-black/5 text-[13px] font-bold text-ink hover:bg-cream-deep transition cursor-pointer whitespace-nowrap"
+          >
+            <Plus className="w-4 h-4" /> New planning
+          </button>
+          <button
+            onClick={() => {
+              if (optimizationResult) {
+                downloadFile('gridpoint_metrics_comparison.csv', buildMetricsCsv(optimizationResult));
+                downloadFile('gridpoint_assignments.csv', buildAssignmentsCsv(optimizationResult));
+              } else setPanel('export');
+            }}
+            className="flex items-center gap-1.5 px-4 py-2.5 rounded-full bg-grape-300 shadow-lg text-[13px] font-bold text-ink hover:bg-grape-200 transition cursor-pointer whitespace-nowrap"
+          >
+            <Download className="w-4 h-4" /> Export
+          </button>
+        </div>
+
+        {/* Layer chips */}
+        <div className="absolute top-[76px] left-4 z-10">
+          <MapChips layers={layers} onToggle={toggleLayer} hasResult={!!optimizationResult} />
+        </div>
+
+        {/* Layers card (basemap + color-by + zones) */}
+        <div className="absolute bottom-6 left-4 z-10">
+          <button
+            onClick={() => setPanel('settings')}
+            title="Map themes & settings"
+            className="px-4 py-2.5 rounded-2xl bg-white shadow-lg border border-black/5 text-[12px] font-bold text-ink hover:bg-cream-deep transition cursor-pointer"
+          >
+            ◈ Layers • {mapLayerOptions.basemap === 'osm' ? 'Standard' : mapLayerOptions.basemap === 'positron' ? 'Light' : 'Dark'} / {mapLayerOptions.colorBy}
+          </button>
+        </div>
+      </main>
 
       <SyntheticModal
         isOpen={isSyntheticModalOpen}

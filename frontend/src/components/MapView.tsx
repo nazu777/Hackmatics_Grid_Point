@@ -18,17 +18,41 @@ function demandColor(orders: number, minOrders: number, maxOrders: number): { co
   return { color: '#10b981', category: 'Low' };
 }
 
+export interface MapFocus {
+  lat: number;
+  lon: number;
+  zoom?: number;
+  key: number;
+}
+
 interface MapViewProps {
   neighborhoods: Neighborhood[];
   warehouses?: Warehouse[];
   assignments?: Assignment[];
   radiusKm?: number | null;
   height?: number;
+  /** Fill parent height instead of fixed pixel height (for full-viewport shells). */
+  fill?: boolean;
   basemap: BasemapStyle;
   onBasemapChange: (b: BasemapStyle) => void;
   colorBy: ColorByMode;
   onColorByChange: (c: ColorByMode) => void;
   zoneColors: ZoneColorMap;
+  /** Layer visibility toggles (map chips). */
+  showWarehouses?: boolean;
+  showRoutes?: boolean;
+  showDemand?: boolean;
+  showRadius?: boolean;
+  /** Fly-to request; effect triggers on key change. */
+  focus?: MapFocus | null;
+  /** Override route polyline color (e.g. pink on dark maps). */
+  routeColor?: string;
+  /** 'light' | 'dark' website theme — adjusts pin chrome. */
+  theme?: 'light' | 'dark';
+  /** Hide the built-in header/legend chrome (shell provides its own). */
+  minimal?: boolean;
+  /** Selected neighborhood id to emphasize. */
+  highlightId?: string | null;
 }
 
 const COLOR_MODES: { id: ColorByMode; label: string }[] = [
@@ -43,11 +67,21 @@ export const MapView: React.FC<MapViewProps> = ({
   assignments = [],
   radiusKm = null,
   height = 420,
+  fill = false,
   basemap,
   onBasemapChange,
   colorBy,
   onColorByChange,
-  zoneColors
+  zoneColors,
+  showWarehouses = true,
+  showRoutes = true,
+  showDemand = true,
+  showRadius = true,
+  focus = null,
+  routeColor,
+  theme = 'light',
+  minimal = false,
+  highlightId = null
 }) => {
   const divRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<L.Map | null>(null);
@@ -56,7 +90,8 @@ export const MapView: React.FC<MapViewProps> = ({
   useEffect(() => {
     if (!divRef.current) return;
     if (!mapRef.current) {
-      mapRef.current = L.map(divRef.current).setView([17.385, 78.486], 11);
+      mapRef.current = L.map(divRef.current, { zoomControl: false }).setView([17.385, 78.486], 11);
+      L.control.zoom({ position: 'bottomright' }).addTo(mapRef.current);
     }
     const map = mapRef.current;
 
@@ -92,64 +127,76 @@ export const MapView: React.FC<MapViewProps> = ({
       return { color: a ? whColor(a.warehouse_id) : '#64748b', tag: a ? a.warehouse_id : 'unassigned' };
     };
 
-    neighborhoods.forEach((n) => {
-      const a = asgByNb.get(n.neighborhood_id);
-      const { color, tag } = resolveColor(n);
-      const frac = Math.sqrt((Number(n.daily_orders) || 0) / Math.max(1, maxOrders));
-      const r = 4 + frac * 18;
-      bounds.push([n.latitude, n.longitude]);
-      L.circleMarker([n.latitude, n.longitude], {
-        radius: r,
-        color,
-        weight: 2,
-        fillColor: color,
-        fillOpacity: 0.45
-      })
-        .bindTooltip(
-          `<b>${n.neighborhood_id}</b> ${n.name || ''}<br/>${n.daily_orders} orders • ${n.zone || 'Unzoned'}<br/>${n.latitude.toFixed(4)}, ${n.longitude.toFixed(4)}<br/>Color: ${tag}${a ? `<br/>→ ${a.warehouse_id} (${a.distance_km} km)` : ''}`
-        )
-        .addTo(map);
-    });
+    const pinBorder = theme === 'dark' ? '#1B1B1F' : '#fff';
+    const lineColor = (wid: string) => routeColor || whColor(wid);
+
+    if (showDemand) {
+      neighborhoods.forEach((n) => {
+        const a = asgByNb.get(n.neighborhood_id);
+        const { color, tag } = resolveColor(n);
+        const frac = Math.sqrt((Number(n.daily_orders) || 0) / Math.max(1, maxOrders));
+        const isHi = highlightId === n.neighborhood_id;
+        const r = (4 + frac * 18) * (isHi ? 1.35 : 1);
+        bounds.push([n.latitude, n.longitude]);
+        L.circleMarker([n.latitude, n.longitude], {
+          radius: r,
+          color: isHi ? '#F0A0EA' : color,
+          weight: isHi ? 3 : 2,
+          fillColor: color,
+          fillOpacity: 0.45
+        })
+          .bindTooltip(
+            `<b>${n.neighborhood_id}</b> ${n.name || ''}<br/>${n.daily_orders} orders • ${n.zone || 'Unzoned'}<br/>${n.latitude.toFixed(4)}, ${n.longitude.toFixed(4)}<br/>Color: ${tag}${a ? `<br/>→ ${a.warehouse_id} (${a.distance_km} km)` : ''}`
+          )
+          .addTo(map);
+      });
+    } else {
+      neighborhoods.forEach((n) => bounds.push([n.latitude, n.longitude]));
+    }
 
     const whById = new Map(warehouses.map((w) => [w.warehouse_id, w]));
-    warehouses.forEach((w) => {
-      bounds.push([w.latitude, w.longitude]);
-      const color = whColor(w.warehouse_id);
-      L.marker([w.latitude, w.longitude], {
-        icon: L.divIcon({
-          className: '',
-          html: `<div style="background:${color};color:#fff;font-weight:800;font-size:11px;border-radius:10px;padding:3px 9px;border:2px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,.3)">${w.warehouse_id}</div>`,
-          iconSize: [44, 24],
-          iconAnchor: [22, 12]
+    if (showWarehouses) {
+      warehouses.forEach((w) => {
+        bounds.push([w.latitude, w.longitude]);
+        const color = whColor(w.warehouse_id);
+        L.marker([w.latitude, w.longitude], {
+          icon: L.divIcon({
+            className: '',
+            html: `<div style="background:${color};color:#fff;font-weight:800;font-size:11px;border-radius:10px;padding:3px 9px;border:2px solid ${pinBorder};box-shadow:0 2px 6px rgba(0,0,0,.3)">${w.warehouse_id}</div>`,
+            iconSize: [44, 24],
+            iconAnchor: [22, 12]
+          })
         })
-      })
-        .bindTooltip(`<b>${w.warehouse_id}</b><br/>${w.latitude.toFixed(4)}, ${w.longitude.toFixed(4)}<br/>${w.assigned_orders || 0} orders`)
-        .addTo(map);
-      if (radiusKm && radiusKm > 0) {
-        L.circle([w.latitude, w.longitude], {
-          radius: radiusKm * 1000,
-          color,
-          weight: 1.5,
-          dashArray: '6 6',
-          fillOpacity: 0.06
-        }).addTo(map);
-      }
-    });
+          .bindTooltip(`<b>${w.warehouse_id}</b><br/>${w.latitude.toFixed(4)}, ${w.longitude.toFixed(4)}<br/>${w.assigned_orders || 0} orders`)
+          .addTo(map);
+        if (showRadius && radiusKm && radiusKm > 0) {
+          L.circle([w.latitude, w.longitude], {
+            radius: radiusKm * 1000,
+            color,
+            weight: 1.5,
+            dashArray: '6 6',
+            fillOpacity: 0.06
+          }).addTo(map);
+        }
+      });
+    }
 
     // Polylines neighborhood → assigned warehouse (must match assignment table)
-    assignments.forEach((a) => {
-      const nb = neighborhoods.find((n) => n.neighborhood_id === a.neighborhood_id);
-      const wh = whById.get(a.warehouse_id);
-      if (!nb || !wh) return;
-      L.polyline([[nb.latitude, nb.longitude], [wh.latitude, wh.longitude]], {
-        color: whColor(a.warehouse_id),
-        weight: 1,
-        opacity: a.is_feasible ? 0.55 : 0.9,
-        dashArray: a.is_feasible ? undefined : '4 4'
-      }).addTo(map);
-    });
+    if (showRoutes) {
+      assignments.forEach((a) => {
+        const nb = neighborhoods.find((n) => n.neighborhood_id === a.neighborhood_id);
+        const wh = whById.get(a.warehouse_id);
+        if (!nb || !wh) return;
+        L.polyline([[nb.latitude, nb.longitude], [wh.latitude, wh.longitude]], {
+          color: lineColor(a.warehouse_id),
+          weight: routeColor ? 2 : 1,
+          opacity: a.is_feasible ? 0.75 : 0.9,
+          dashArray: a.is_feasible ? undefined : '4 4'
+        }).addTo(map);
+      });
+    }
 
-    if (bounds.length > 0) {
+    if (bounds.length > 0 && !focus) {
       try {
         map.fitBounds(L.latLngBounds(bounds).pad(0.15));
       } catch {
@@ -157,7 +204,18 @@ export const MapView: React.FC<MapViewProps> = ({
       }
     }
     map.invalidateSize();
-  }, [neighborhoods, warehouses, assignments, radiusKm, basemap, colorBy, zoneColors]);
+  }, [neighborhoods, warehouses, assignments, radiusKm, basemap, colorBy, zoneColors, showWarehouses, showRoutes, showDemand, showRadius, routeColor, theme, highlightId, focus]);
+
+  // Fly-to on focus requests (gmaps "Center" action)
+  useEffect(() => {
+    if (focus && mapRef.current) {
+      try {
+        mapRef.current.flyTo([focus.lat, focus.lon], focus.zoom ?? 14, { duration: 0.9 });
+      } catch {
+        /* ignore */
+      }
+    }
+  }, [focus]);
 
   useEffect(() => {
     return () => {
@@ -169,6 +227,10 @@ export const MapView: React.FC<MapViewProps> = ({
 
   const counts = zoneCounts(neighborhoods);
   const zoneList = Object.keys(counts).sort((a, b) => a.localeCompare(b));
+
+  if (minimal) {
+    return <div ref={divRef} style={fill ? { height: '100%' } : { height }} className="z-0 h-full w-full" />;
+  }
 
   return (
     <div className="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden">
@@ -210,7 +272,7 @@ export const MapView: React.FC<MapViewProps> = ({
         {neighborhoods.length} nodes • {warehouses.length} warehouses • {assignments.length} lines
         {radiusKm ? ` • R_max ${radiusKm} km` : ''}
       </div>
-      <div ref={divRef} style={{ height }} className="z-0" />
+      <div ref={divRef} style={fill ? { height: '100%' } : { height }} className="z-0" />
       <div className="px-5 py-2 border-t border-slate-100 flex flex-wrap gap-3 text-[11px] text-slate-600">
         {colorBy === 'warehouse' && warehouses.map((w) => (
           <span key={w.warehouse_id} className="flex items-center gap-1.5">

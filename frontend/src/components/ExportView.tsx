@@ -2,6 +2,7 @@ import React from 'react';
 import { FileDown, Table2, Map as MapIcon, Database, ReceiptText } from 'lucide-react';
 import type { Neighborhood, OptimizationResult } from '../types';
 import { exportCsv, exportJson } from '../services/api';
+import { buildAssignmentsCsv, buildMetricsCsv } from './panelStore';
 
 interface ExportViewProps {
   neighborhoods: Neighborhood[];
@@ -25,37 +26,12 @@ export const ExportView: React.FC<ExportViewProps> = ({ neighborhoods, result })
 
   const handleMetricsCsv = () => {
     if (!result?.comparison) return;
-    const b = result.comparison.baseline.metrics;
-    const o = result.comparison.optimized.metrics;
-    const rows: [string, number, number][] = [
-      ['total_unweighted_distance_km', b.total_unweighted_distance_km, o.total_unweighted_distance_km],
-      ['total_weighted_distance_km_orders', b.total_weighted_distance_km_orders, o.total_weighted_distance_km_orders],
-      ['total_cost', b.total_cost, o.total_cost],
-      ['avg_distance_per_order_km', b.avg_distance_per_order_km, o.avg_distance_per_order_km],
-      ['avg_weighted_distance_km', b.avg_weighted_distance_km, o.avg_weighted_distance_km],
-      ['feasibility_ratio', b.feasibility_ratio, o.feasibility_ratio]
-    ];
-    const lines = ['metric,baseline,optimized,saved,pct_saved'];
-    rows.forEach(([name, bv, ov]) => {
-      const saved = +(bv - ov).toFixed(2);
-      const pct = bv ? +(((bv - ov) / bv) * 100).toFixed(2) : 0;
-      lines.push(`${name},${bv},${ov},${saved},${pct}`);
-    });
-    lines.push('');
-    lines.push('warehouse_id,assigned_orders,utilization_pct,avg_distance_km,neighborhood_count');
-    result.metrics.warehouses.forEach((w) =>
-      lines.push(`${w.warehouse_id},${w.assigned_orders},${w.utilization_pct},${w.avg_distance_km},${w.neighborhood_count}`)
-    );
-    download('gridpoint_metrics_comparison.csv', lines.join('\n'));
+    download('gridpoint_metrics_comparison.csv', buildMetricsCsv(result));
   };
 
   const handleAssignmentsCsv = () => {
     if (!result) return;
-    const lines = ['neighborhood_id,warehouse_id,distance_km,weighted_distance,cost,within_radius,is_feasible'];
-    result.assignments.forEach((a) =>
-      lines.push(`${a.neighborhood_id},${a.warehouse_id},${a.distance_km},${a.weighted_distance},${a.cost},${a.within_radius},${a.is_feasible}`)
-    );
-    download('gridpoint_assignments.csv', lines.join('\n'));
+    download('gridpoint_assignments.csv', buildAssignmentsCsv(result));
   };
 
   const handleGeoJson = () => {
