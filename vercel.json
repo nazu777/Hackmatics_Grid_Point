@@ -4,11 +4,6 @@
   "outputDirectory": "frontend/dist",
   "installCommand": "pnpm install",
   "framework": "vite",
-  "functions": {
-    "api/index.py": {
-      "runtime": "python3.11"
-    }
-  },
   "rewrites": [
     {
       "source": "/api/(.*)",
