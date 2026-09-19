@@ -4,6 +4,7 @@
   "private": true,
   "description": "GRIDPOINT — Warehouse Location & Assignment Optimization Platform",
   "scripts": {
+    "build": "pnpm --filter gridpoint-frontend build",
     "dev:backend": "backend/.venv/bin/uvicorn src.api:app --reload --port 8000 --app-dir backend",
     "dev:frontend": "pnpm --prefix frontend dev",
     "dev:streamlit": "backend/.venv/bin/streamlit run app.py",
