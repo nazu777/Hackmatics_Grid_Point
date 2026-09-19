@@ -130,6 +130,22 @@ export interface DatasetSummary {
   bounds: { min_lat: number; max_lat: number; min_lon: number; max_lon: number };
 }
 
+export interface CensusCity {
+  city_id: string;
+  label: string;
+  center: { lat: number; lon: number };
+  counties: string[];
+}
+
+export interface CensusDemand {
+  city_id: string;
+  label: string;
+  live: boolean;
+  neighborhoods: Neighborhood[];
+  tracts: number;
+  skipped: number;
+}
+
 export interface SyntheticConfig {
   N: number;
   lat_center: number;

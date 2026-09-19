@@ -21,15 +21,26 @@ interface AskPanelProps {
   onExportComparison: () => void;
   onOpenDetail: (node: Neighborhood) => void;
   onShowResults: (nodes: Neighborhood[], title: string) => void;
+  onOpenCensus: () => void;
 }
 
 const SUGGESTIONS = [
   'Optimize for 2 warehouses',
   'How much will I save?',
   'Show traffic congestion',
+  'Seed New York demand',
   'Load land-use demo',
   'Show biggest demand nodes',
   'Export comparison CSV'
+];
+
+const CENSUS_CITY_WORDS: [RegExp, string][] = [
+  [/new\s*york|nyc|manhattan|brooklyn|queens/i, ''],
+  [/los\s*angeles|\bla\b|hollywood/i, ''],
+  [/las\s*vegas|vegas/i, ''],
+  [/chicago/i, ''],
+  [/houston/i, ''],
+  [/san\s*francisco|\bsf\b|bay area/i, '']
 ];
 
 export const AskPanel: React.FC<AskPanelProps> = ({
@@ -42,7 +53,8 @@ export const AskPanel: React.FC<AskPanelProps> = ({
   onExportDataset,
   onExportComparison,
   onOpenDetail,
-  onShowResults
+  onShowResults,
+  onOpenCensus
 }) => {
   const [messages, setMessages] = useState<ChatMsg[]>([]);
   const [input, setInput] = useState('');
@@ -158,9 +170,17 @@ export const AskPanel: React.FC<AskPanelProps> = ({
       return;
     }
 
-    // 7. Help / capabilities
+    // 7. US Census seeding ("seed New York", "load Chicago demand", ...)
+    if (/(seed|census|real demand)/.test(lower) || CENSUS_CITY_WORDS.some(([re]) => re.test(lower))) {
+      say('Opening the US Census seeder — pick a city to load real tract-level demand, then optimize on it.',
+        { label: 'Seed US city', onClick: onOpenCensus });
+      onOpenCensus();
+      return;
+    }
+
+    // 8. Help / capabilities
     if (/(help|what can|how (do|to)|commands?)/.test(lower)) {
-      say('I can: run optimization ("optimize for 3 warehouses"), report savings ("how much will I save?"), report traffic ("show traffic congestion"), apply land-use categories, find neighborhoods ("Hitec"), list biggest demand nodes, and export CSVs.');
+      say('I can: run optimization ("optimize for 3 warehouses"), report savings ("how much will I save?"), report traffic ("show traffic congestion"), seed real US demand ("seed New York"), apply land-use categories, find neighborhoods ("Hitec"), list biggest demand nodes, and export CSVs.');
       return;
     }
 

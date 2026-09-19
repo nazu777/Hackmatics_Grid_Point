@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Search, X, Plus, Download } from 'lucide-react';
 import { GmapsRail, type RailTab } from './components/GmapsRail';
 import { AskPanel } from './components/AskPanel';
+import { CensusModal } from './components/CensusModal';
 import { DetailCard } from './components/DetailCard';
 import { SavedPanel } from './components/SavedPanel';
 import { MapChips, ResultRows, type LayerFlags } from './components/MapChrome';
@@ -76,6 +77,7 @@ export const App: React.FC = () => {
   const [summary, setSummary] = useState<DatasetSummary>(() => computeSummary(neighborhoods));
   const [optimizationResult, setOptimizationResult] = useState<OptimizationResult | null>(null);
   const [isSyntheticModalOpen, setIsSyntheticModalOpen] = useState(false);
+  const [isCensusModalOpen, setIsCensusModalOpen] = useState(false);
   const [isErrorDrawerOpen, setIsErrorDrawerOpen] = useState(false);
   const [theme, setTheme] = useState<ThemeMode>(() => {
     try { return (localStorage.getItem('gridpoint-theme') as ThemeMode) || 'dark'; } catch { return 'dark'; }
@@ -340,6 +342,7 @@ export const App: React.FC = () => {
               setResultTitle(title);
               setPanel('results');
             }}
+            onOpenCensus={() => setIsCensusModalOpen(true)}
           />
         )}
 
@@ -418,7 +421,11 @@ export const App: React.FC = () => {
         {panel === 'data' && (
           <div className="p-4 space-y-4">
             <h2 className="font-display font-semibold text-[24px] text-ink px-1">Demand Data ({neighborhoods.length})</h2>
-            <FileUploader onDataLoaded={handleDataLoaded} onOpenSyntheticModal={() => setIsSyntheticModalOpen(true)} />
+            <FileUploader
+              onDataLoaded={handleDataLoaded}
+              onOpenSyntheticModal={() => setIsSyntheticModalOpen(true)}
+              onOpenCensusModal={() => setIsCensusModalOpen(true)}
+            />
             <DataTable neighborhoods={neighborhoods} errors={validation.errors} onChange={setNeighborhoods} externalQuery="" />
             <ZoneLegendEditor
               neighborhoods={neighborhoods}
@@ -606,6 +613,12 @@ export const App: React.FC = () => {
       <SyntheticModal
         isOpen={isSyntheticModalOpen}
         onClose={() => setIsSyntheticModalOpen(false)}
+        onGenerated={handleSyntheticGenerated}
+      />
+
+      <CensusModal
+        isOpen={isCensusModalOpen}
+        onClose={() => setIsCensusModalOpen(false)}
         onGenerated={handleSyntheticGenerated}
       />
 

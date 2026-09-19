@@ -289,6 +289,32 @@ def traffic_history(lat: float = Query(..., ge=-90.0, le=90.0),
     return {"cell": cell_of(lat, lon), "hour": hour, "factor": factor, "samples": samples}
 
 
+@app.get("/api/census/cities")
+def census_cities():
+    """Seedable US metros with real Census demand (no network, no key needed)."""
+    from .census import api_key_configured, list_cities
+    return {"cities": list_cities(), "key_configured": api_key_configured()}
+
+
+@app.get("/api/census/demand")
+def census_demand(
+    city: str = Query(..., description="City id from /api/census/cities"),
+    orders_per_1000: float = Query(5.0, gt=0.0, le=1000.0,
+                                   description="Daily orders per 1,000 residents"),
+):
+    """
+    Real demand nodes: ACS tract populations × rate, joined to Gazetteer
+    centroids. The key is never exposed — only demand leaves the server.
+    """
+    from .census import get_city_demand
+    try:
+        return get_city_demand(city.strip().lower(), orders_per_1000)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    except RuntimeError as e:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(e))
+
+
 @app.post("/api/export/assignments")
 def export_assignments(payload: MetricsExportRequest):
     """Export full neighborhood→warehouse assignment table as CSV (map lines match table)."""
@@ -372,6 +398,34 @@ def get_constraint_diagnostics(payload: DiagnosticsRequest):
     from .scenarios import diagnose_constraints
     try:
         return diagnose_constraints(payload.warehouses, payload.assignments, payload.config)
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+
+
+class ExpandRequest(BaseModel):
+    neighborhoods: List[Dict[str, Any]]
+    warehouses: List[Warehouse]
+    add_count: int = 1
+    config: Optional[OptimizationConfig] = None
+
+
+@app.post("/api/expand")
+def expand_warehouses(payload: ExpandRequest):
+    """
+    Incrementally add warehouses to an existing layout. Current warehouses
+    keep their ids/coordinates; new sites relieve the heaviest loads or cover
+    poorly served areas, and serving assignments are recomputed.
+    """
+    from .expansion import expand_network
+    try:
+        return expand_network(
+            payload.neighborhoods,
+            [w.model_dump() for w in payload.warehouses],
+            payload.add_count,
+            payload.config or OptimizationConfig(),
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 

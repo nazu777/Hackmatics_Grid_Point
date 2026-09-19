@@ -14,7 +14,9 @@ import {
   DemandShiftStats,
   FleetETAResult,
   ConstraintDiagnostics,
-  FuelRates
+  FuelRates,
+  CensusCity,
+  CensusDemand
 } from '../types';
 
 // In production (single Vercel deployment) API is same-origin at /api
@@ -98,6 +100,26 @@ export async function fetchSynthetic(config: SyntheticConfig): Promise<Neighborh
 
   // Client-side synthetic generator fallback
   return localGenerateSynthetic(config);
+}
+
+// --------------------------------------------------------------------------
+// US Census real demand (ACS tract populations, server-side key)
+// --------------------------------------------------------------------------
+
+export async function fetchCensusCities(): Promise<{ cities: CensusCity[]; key_configured: boolean }> {
+  const res = await fetch(`${API_BASE}/census/cities`);
+  if (!res.ok) throw new Error('Census service unreachable');
+  return await res.json();
+}
+
+export async function fetchCensusDemand(cityId: string, ordersPer1000 = 5): Promise<CensusDemand> {
+  const params = new URLSearchParams({ city: cityId, orders_per_1000: ordersPer1000.toString() });
+  const res = await fetch(`${API_BASE}/census/demand?${params.toString()}`);
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: 'Census demand failed' }));
+    throw new Error(err.detail || 'Census demand failed');
+  }
+  return await res.json();
 }
 
 export async function uploadFile(file: File): Promise<{

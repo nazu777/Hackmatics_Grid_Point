@@ -1,14 +1,15 @@
 import React, { useState, useRef } from 'react';
-import { UploadCloud, AlertCircle, Sparkles, FileSpreadsheet } from 'lucide-react';
+import { UploadCloud, AlertCircle, Sparkles, FileSpreadsheet, Flag } from 'lucide-react';
 import { uploadFile } from '../services/api';
 import { Neighborhood, ValidationResult, DatasetSummary } from '../types';
 
 interface FileUploaderProps {
   onDataLoaded: (neighborhoods: Neighborhood[], validation: ValidationResult, summary: DatasetSummary) => void;
   onOpenSyntheticModal: () => void;
+  onOpenCensusModal?: () => void;
 }
 
-export const FileUploader: React.FC<FileUploaderProps> = ({ onDataLoaded, onOpenSyntheticModal }) => {
+export const FileUploader: React.FC<FileUploaderProps> = ({ onDataLoaded, onOpenSyntheticModal, onOpenCensusModal }) => {
   const [isDragging, setIsDragging] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
@@ -56,6 +57,15 @@ export const FileUploader: React.FC<FileUploaderProps> = ({ onDataLoaded, onOpen
             <Sparkles className="w-4 h-4" />
             <span>Generate Synthetic</span>
           </button>
+          {onOpenCensusModal && (
+            <button
+              onClick={onOpenCensusModal}
+              className="flex items-center gap-1.5 px-4 py-2 bg-white border border-[#E4E1D2] hover:border-gold text-ink rounded-full text-xs font-bold transition cursor-pointer"
+            >
+              <Flag className="w-4 h-4" />
+              <span>Seed US City (Census)</span>
+            </button>
+          )}
         </div>
       </div>
 
