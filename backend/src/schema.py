@@ -57,6 +57,8 @@ class OptimizationConfig(BaseModel):
     infra_cost_per_warehouse: float = Field(0.0, ge=0.0)
     traffic_factor: float = Field(0.0, ge=0.0)
     use_live_fuel: bool = Field(False, description="Use live RapidAPI fuel prices for fuel burn")
+    use_live_traffic: bool = Field(False, description="Use live TomTom corridor speeds for congestion")
+    traffic_hour: Optional[int] = Field(None, ge=0, le=23, description="Hour-of-day for traffic history (default: now)")
     fuel_state: str = Field("Karnataka", description="Indian state for live fuel rates")
     fuel_city: Optional[str] = Field(None, description="City for live fuel rates (default: first city)")
     vehicle_fleet: List[VehicleType] = Field(default_factory=list)
@@ -74,6 +76,7 @@ class Assignment(BaseModel):
     cost: float
     within_radius: bool = True
     is_feasible: bool = True
+    congestion_pct: Optional[float] = Field(None, ge=0.0, description="Corridor congestion applied (delay ratio)")
 
 
 class SyntheticGenerationConfig(BaseModel):
@@ -129,6 +132,7 @@ class Metrics(BaseModel):
     total_cost: float = 0.0
     total_fuel_cost: float = 0.0
     fuel_live: bool = False
+    avg_congestion_pct: float = 0.0
     avg_distance_per_order_km: float = 0.0
     avg_weighted_distance_km: float = 0.0
     warehouses: List[WarehouseMetric] = Field(default_factory=list)
@@ -169,4 +173,5 @@ class OptimizationResult(BaseModel):
     is_feasible: bool = True
     infeasibility_reason: Optional[str] = None
     fuel_note: Optional[str] = None
+    traffic_note: Optional[str] = None
 

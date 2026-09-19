@@ -92,7 +92,7 @@ export const App: React.FC = () => {
   const [highlightId, setHighlightId] = useState<string | null>(null);
 
   // Map layer chips
-  const [layers, setLayers] = useState<LayerFlags>({ warehouses: true, routes: true, demand: true, radius: true });
+  const [layers, setLayers] = useState<LayerFlags>({ warehouses: true, routes: true, demand: true, radius: true, traffic: false });
 
   // Resizable sidebar (drag the right edge; width persisted)
   const SIDEBAR_MIN = 280;
@@ -518,7 +518,8 @@ export const App: React.FC = () => {
             showDemand={layers.demand}
             showRadius={layers.radius}
             focus={focus}
-            routeColor={theme === 'dark' ? '#F0A0EA' : undefined}
+            routeColor={theme === 'dark' && !layers.traffic ? '#F0A0EA' : undefined}
+            colorRoutesByTraffic={layers.traffic}
             theme={theme}
             highlightId={highlightId}
           />

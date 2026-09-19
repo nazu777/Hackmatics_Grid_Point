@@ -30,6 +30,7 @@ export interface Assignment {
   cost: number;
   within_radius: boolean;
   is_feasible: boolean;
+  congestion_pct?: number | null;
 }
 
 export interface OptimizationConfig {
@@ -61,6 +62,7 @@ export interface Metrics {
   total_cost: number;
   total_fuel_cost?: number;
   fuel_live?: boolean;
+  avg_congestion_pct?: number;
   avg_distance_per_order_km: number;
   avg_weighted_distance_km: number;
   warehouses: WarehouseMetric[];
@@ -97,6 +99,7 @@ export interface OptimizationResult {
   is_feasible: boolean;
   infeasibility_reason?: string | null;
   fuel_note?: string | null;
+  traffic_note?: string | null;
 }
 
 export interface ValidationErrorItem {
@@ -162,6 +165,8 @@ export interface OptimizationConfig {
   use_live_fuel?: boolean;
   fuel_state?: string;
   fuel_city?: string | null;
+  use_live_traffic?: boolean;
+  traffic_hour?: number | null;
   vehicle_fleet: VehicleType[];
   random_seed: number;
   baseline_mode: 'centroid' | 'mean' | 'single_center' | 'custom';
@@ -220,6 +225,7 @@ export interface FleetETAResult {
   vehicle_used: string;
   avg_speed_kmph: number;
   traffic_congestion_pct: number;
+  effective_congestion_pct?: number;
 }
 
 export interface FuelCityRate {

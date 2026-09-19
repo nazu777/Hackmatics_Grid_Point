@@ -17,6 +17,7 @@ export const ComparisonDashboard: React.FC<Props> = ({ result }) => {
       ['Total weighted distance (km·orders)', b.total_weighted_distance_km_orders, o.total_weighted_distance_km_orders],
       ['Total delivery cost ($)', b.total_cost, o.total_cost],
       ['Fuel cost portion ($)', b.total_fuel_cost ?? 0, o.total_fuel_cost ?? 0],
+      ['Avg corridor congestion', b.avg_congestion_pct ?? 0, o.avg_congestion_pct ?? 0],
       ['Avg distance / order (km)', b.avg_distance_per_order_km, o.avg_distance_per_order_km],
       ['Avg weighted distance (km)', b.avg_weighted_distance_km, o.avg_weighted_distance_km],
       ['Feasibility ratio', b.feasibility_ratio, o.feasibility_ratio]

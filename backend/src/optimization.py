@@ -128,10 +128,13 @@ def solve_cflp_milp(
     C_max: Optional[int],
     R_max_km: Optional[float],
     infra_cost: float,
-    metric: str = "haversine"
+    metric: str = "haversine",
+    col_multipliers: Optional[np.ndarray] = None,
 ) -> Tuple[bool, Optional[np.ndarray], Optional[np.ndarray], Optional[str]]:
     """
     Solves the Capacitated Facility Location Problem (CFLP) using Mixed-Integer Linear Programming (PuLP).
+    col_multipliers optionally scales each candidate column (e.g. 1 + historical
+    congestion) so placement prefers historically fluid corridors.
     Returns: (feasible: bool, chosen_warehouses: (K, 2), labels: (N,), reason_if_infeasible: str)
     """
     N = len(coords)
@@ -139,6 +142,9 @@ def solve_cflp_milp(
 
     # Compute pairwise distance matrix between demand points and candidate facilities
     dist_matrix = compute_distance_matrix(coords, candidate_centers, metric=metric)
+    if col_multipliers is not None:
+        mult = np.asarray(col_multipliers, dtype=float).reshape(1, M)
+        dist_matrix = dist_matrix * np.maximum(1.0, mult)
 
     # Pre-feasibility checks
     total_demand = int(np.sum(weights))
@@ -250,11 +256,14 @@ def evaluate_network_layout(
     config: OptimizationConfig,
     fuel_prices: Optional[Dict[str, float]] = None,
     fuel_live: bool = False,
+    corridor: Optional[Dict[int, float]] = None,
 ) -> Tuple[List[Warehouse], List[Assignment], Metrics]:
     """
     Computes all distances, costs, and warehouse utilization metrics for a given layout (schema.md §2.5, §2.6).
     fuel_prices/fuel_live are resolved once per run in run_optimization so both
     layouts share identical fuel economics (cached, single lookup).
+    corridor maps warehouse index -> congestion delay ratio applied to its
+    assignments (live + history, resolved once per run).
     """
     N = len(neighborhoods)
     K = len(warehouse_coords)
@@ -296,7 +305,8 @@ def evaluate_network_layout(
 
         d_km = float(dist_matrix[i, assigned_k])
         weighted_d = w_i * d_km
-        cost_i = assignment_cost(w_i, d_km, config, fuel_prices)
+        cong = float(corridor.get(assigned_k, 0.0)) if corridor else 0.0
+        cost_i = assignment_cost(w_i, d_km, config, fuel_prices, cong)
 
         within_rad = True
         if config.radius_enabled and config.R_max_km is not None:
@@ -313,13 +323,14 @@ def evaluate_network_layout(
             weighted_distance=round(weighted_d, 2),
             cost=round(cost_i, 2),
             within_radius=within_rad,
-            is_feasible=is_feas
+            is_feasible=is_feas,
+            congestion_pct=round(cong, 4),
         ))
 
         total_unweighted_dist += d_km
         total_weighted_dist += weighted_d
         total_cost += cost_i
-        total_fuel_cost += assignment_fuel_cost(w_i, d_km, config, fuel_prices)
+        total_fuel_cost += assignment_fuel_cost(w_i, d_km, config, fuel_prices, cong)
 
         warehouse_orders[assigned_k] += w_i
         warehouse_distances[assigned_k].append(d_km)
@@ -357,12 +368,14 @@ def evaluate_network_layout(
 
     feasibility_ratio = round((N - infeasible_count) / max(1, N), 4)
 
+    congs = [float(a.congestion_pct) for a in assignments if a.congestion_pct is not None]
     metrics = Metrics(
         total_unweighted_distance_km=round(total_unweighted_dist, 2),
         total_weighted_distance_km_orders=round(total_weighted_dist, 2),
         total_cost=round(total_cost, 2),
         total_fuel_cost=round(total_fuel_cost, 2),
         fuel_live=fuel_live,
+        avg_congestion_pct=round(sum(congs) / len(congs), 4) if congs else 0.0,
         avg_distance_per_order_km=round(avg_dist_per_order, 2),
         avg_weighted_distance_km=round(avg_weighted_dist, 2),
         warehouses=warehouse_metrics,
@@ -378,6 +391,7 @@ def compute_baseline_layout(
     config: OptimizationConfig,
     fuel_prices: Optional[Dict[str, float]] = None,
     fuel_live: bool = False,
+    apply_history: bool = False,
 ) -> LayoutEvaluation:
     """
     Computes baseline / original layout according to config.baseline_mode (schema.md §2.4, PRD §5.7).
@@ -403,6 +417,12 @@ def compute_baseline_layout(
     dist_matrix = compute_distance_matrix(coords, base_centers, metric=config.distance_metric)
     labels = np.argmin(dist_matrix, axis=1)
 
+    base_corridor: Optional[Dict[int, float]] = None
+    if apply_history:
+        from .traffic import historical_corridors
+        hist_corr, _ = historical_corridors(
+            base_centers, config.traffic_hour)
+        base_corridor = {k: float(v) for k, v in enumerate(hist_corr)}
     warehouses, assignments, metrics = evaluate_network_layout(
         neighborhoods,
         base_centers,
@@ -410,6 +430,7 @@ def compute_baseline_layout(
         config,
         fuel_prices=fuel_prices,
         fuel_live=fuel_live,
+        corridor=base_corridor,
     )
 
     return LayoutEvaluation(
@@ -443,9 +464,12 @@ def run_optimization(
     # Resolve live fuel prices once per run (TTL-cached) so baseline and
     # optimized layouts share identical fuel economics.
     fuel_prices, fuel_live, fuel_note = resolve_fuel_prices(config)
+    hour = config.traffic_hour
+    manual_traffic = float(config.traffic_factor or 0.0)
 
     # Determine optimization approach: Unconstrained vs Constrained MILP
     use_milp = (config.capacity_enabled or config.radius_enabled) and N <= 500
+    hist_samples = 0
 
     if use_milp:
         # Generate candidate facility locations:
@@ -460,6 +484,10 @@ def run_optimization(
             axis=0
         )
 
+        # Steer MILP placement with past corridor congestion (history only,
+        # no network in the solver path): congested candidate sites cost more.
+        from .traffic import historical_corridors
+        hist_corr, hist_samples = historical_corridors(candidate_pool, hour)
         milp_feas, chosen_centers, labels, reason = solve_cflp_milp(
             coords=coords,
             weights=weights,
@@ -468,7 +496,8 @@ def run_optimization(
             C_max=config.C_max if config.capacity_enabled else None,
             R_max_km=config.R_max_km if config.radius_enabled else None,
             infra_cost=config.infra_cost_per_warehouse,
-            metric=config.distance_metric
+            metric=config.distance_metric,
+            col_multipliers=(1.0 + hist_corr) if hist_samples > 0 or manual_traffic > 0 else None,
         )
 
         if milp_feas and chosen_centers is not None and labels is not None:
@@ -488,6 +517,20 @@ def run_optimization(
             coords, weights, K=K, random_seed=config.random_seed
         )
 
+    # Resolve live corridor congestion at the final warehouse sites (K cached
+    # TomTom calls at most; each reading is recorded into rolling history).
+    from .traffic import corridor_factor
+    corridor: Dict[int, float] = {}
+    live_corridors = 0
+    corridor_samples = 0
+    for k in range(len(opt_centers)):
+        cf = corridor_factor(float(opt_centers[k, 0]), float(opt_centers[k, 1]),
+                             manual_floor=manual_traffic, hour=hour,
+                             allow_live=config.use_live_traffic)
+        corridor[k] = float(cf["factor"])
+        live_corridors += 1 if cf["live"] else 0
+        corridor_samples += int(cf["samples"])
+
     # Evaluate optimized layout
     warehouses, assignments, metrics = evaluate_network_layout(
         neighborhoods,
@@ -496,13 +539,26 @@ def run_optimization(
         config,
         fuel_prices=fuel_prices,
         fuel_live=fuel_live,
+        corridor=corridor,
     )
 
-    # Compute baseline comparison (Phase 4 cost engine)
+    # Compute baseline comparison (Phase 4 cost engine, history-steered too)
     baseline_eval = compute_baseline_layout(neighborhoods, config,
-                                            fuel_prices=fuel_prices, fuel_live=fuel_live)
+                                            fuel_prices=fuel_prices, fuel_live=fuel_live,
+                                            apply_history=True)
     opt_eval = LayoutEvaluation(metrics=metrics, warehouses=warehouses, assignments=assignments)
     comparison = compute_comparison(baseline_eval, opt_eval)
+
+    if config.use_live_traffic and live_corridors > 0:
+        traffic_note = (f"Live TomTom corridors ({live_corridors}/{len(opt_centers)} sites, "
+                        f"avg +{metrics.avg_congestion_pct * 100:.0f}%) + {corridor_samples} history samples")
+    elif corridor_samples > 0 or hist_samples > 0:
+        traffic_note = (f"History-based congestion ({corridor_samples} samples this run); "
+                        "enable live traffic for real-time speeds")
+    elif manual_traffic > 0:
+        traffic_note = f"Manual congestion floor +{manual_traffic * 100:.0f}% (no history yet)"
+    else:
+        traffic_note = "Free-flow (no congestion data yet)"
 
     return OptimizationResult(
         config=config,
@@ -513,4 +569,5 @@ def run_optimization(
         is_feasible=is_feasible,
         infeasibility_reason=infeasibility_reason,
         fuel_note=fuel_note,
+        traffic_note=traffic_note,
     )

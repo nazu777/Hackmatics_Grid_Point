@@ -11,6 +11,13 @@ function whColor(warehouseId: string): string {
   return PALETTE[(n - 1) % PALETTE.length];
 }
 
+/** Corridor congestion → traffic-light color for route lines. */
+export function congestionColor(delayRatio: number): string {
+  if (delayRatio < 0.15) return '#22c55e';
+  if (delayRatio < 0.4) return '#f59e0b';
+  return '#ef4444';
+}
+
 function demandColor(orders: number, minOrders: number, maxOrders: number): { color: string; category: string } {
   const ratio = maxOrders <= minOrders ? 0.5 : Math.max(0, Math.min(1, (orders - minOrders) / (maxOrders - minOrders)));
   if (ratio >= 0.66) return { color: '#ef4444', category: 'High' };
@@ -70,6 +77,8 @@ interface MapViewProps {
   focus?: MapFocus | null;
   /** Override route polyline color (e.g. pink on dark maps). */
   routeColor?: string;
+  /** Color route lines by corridor congestion (green→amber→red) instead of warehouse. */
+  colorRoutesByTraffic?: boolean;
   /** 'light' | 'dark' website theme — adjusts pin chrome. */
   theme?: 'light' | 'dark';
   /** Hide the built-in header/legend chrome (shell provides its own). */
@@ -149,6 +158,7 @@ export const MapView: React.FC<MapViewProps> = ({
   showRadius = true,
   focus = null,
   routeColor,
+  colorRoutesByTraffic = false,
   theme = 'light',
   minimal = false,
   highlightId = null
@@ -294,6 +304,8 @@ export const MapView: React.FC<MapViewProps> = ({
 
     const pinBorder = theme === 'dark' ? '#1B1B1F' : '#fff';
     const lineColor = (wid: string) => routeColor || whColor(wid);
+    const routePaint = (a: { congestion_pct?: number | null; warehouse_id: string }) =>
+      colorRoutesByTraffic && a.congestion_pct != null ? congestionColor(a.congestion_pct) : lineColor(a.warehouse_id);
 
     if (showDemand) {
       neighborhoods.forEach((n) => {
@@ -380,7 +392,7 @@ export const MapView: React.FC<MapViewProps> = ({
         if (!nb || !wh) return;
         const feat = {
           type: 'Feature',
-          properties: { color: lineColor(a.warehouse_id) },
+          properties: { color: routePaint(a) },
           geometry: {
             type: 'LineString',
             coordinates: [[nb.longitude, nb.latitude], [wh.longitude, wh.latitude]]
@@ -395,7 +407,7 @@ export const MapView: React.FC<MapViewProps> = ({
             id: ROUTES_OK,
             type: 'line',
             source: ROUTES_OK,
-            paint: { 'line-color': ['get', 'color'], 'line-width': routeColor ? 2 : 1, 'line-opacity': 0.75 }
+            paint: { 'line-color': ['get', 'color'], 'line-width': routeColor || colorRoutesByTraffic ? 2.5 : 1, 'line-opacity': 0.8 }
           });
         }
         if (badFeatures.length > 0) {
@@ -422,7 +434,7 @@ export const MapView: React.FC<MapViewProps> = ({
     try {
       map.resize();
     } catch { /* ignore */ }
-  }, [neighborhoods, warehouses, assignments, radiusKm, basemap, styleReady, token, colorBy, zoneColors, showWarehouses, showRoutes, showDemand, showRadius, routeColor, theme, highlightId, focus]);
+  }, [neighborhoods, warehouses, assignments, radiusKm, basemap, styleReady, token, colorBy, zoneColors, showWarehouses, showRoutes, showDemand, showRadius, routeColor, colorRoutesByTraffic, theme, highlightId, focus]);
 
   // Fly-to on focus requests (gmaps "Center" action)
   useEffect(() => {
@@ -460,7 +472,18 @@ export const MapView: React.FC<MapViewProps> = ({
   }
 
   if (minimal) {
-    return <div ref={divRef} style={fill ? { height: '100%' } : { height }} className="z-0 h-full w-full" />;
+    return (
+      <div className="relative h-full w-full">
+        <div ref={divRef} style={fill ? { height: '100%' } : { height }} className="z-0 h-full w-full" />
+        {colorRoutesByTraffic && assignments.length > 0 && (
+          <div className="absolute bottom-4 left-4 z-10 bg-white/95 backdrop-blur-sm border border-slate-200/80 rounded-2xl px-3 py-2 shadow-lg flex items-center gap-3 text-[10px] font-semibold text-slate-600">
+            <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full bg-[#22c55e]" /> Fluid</span>
+            <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full bg-[#f59e0b]" /> Busy</span>
+            <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full bg-[#ef4444]" /> Jammed</span>
+          </div>
+        )}
+      </div>
+    );
   }
 
   return (

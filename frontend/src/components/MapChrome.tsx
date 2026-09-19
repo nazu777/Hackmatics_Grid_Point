@@ -1,5 +1,5 @@
 import React from 'react';
-import { Warehouse, Route, CircleDot, Radar } from 'lucide-react';
+import { Warehouse, Route, CircleDot, Radar, Siren } from 'lucide-react';
 import type { Neighborhood } from '../types';
 
 /** Floating category chips over the map (gmaps "Nearby hotels / Restaurants…" pattern). */
@@ -8,6 +8,7 @@ export interface LayerFlags {
   routes: boolean;
   demand: boolean;
   radius: boolean;
+  traffic: boolean;
 }
 
 interface MapChipsProps {
@@ -19,6 +20,7 @@ interface MapChipsProps {
 const CHIP_DEFS: { id: keyof LayerFlags; label: string; icon: React.ElementType }[] = [
   { id: 'warehouses', label: 'Warehouses', icon: Warehouse },
   { id: 'routes', label: 'Routes', icon: Route },
+  { id: 'traffic', label: 'Traffic', icon: Siren },
   { id: 'demand', label: 'Demand', icon: CircleDot },
   { id: 'radius', label: 'Radius', icon: Radar }
 ];
@@ -28,13 +30,13 @@ export const MapChips: React.FC<MapChipsProps> = ({ layers, onToggle, hasResult 
     {CHIP_DEFS.map((c) => {
       const Icon = c.icon;
       const on = layers[c.id];
-      const disabled = !hasResult && (c.id === 'warehouses' || c.id === 'routes' || c.id === 'radius');
+      const disabled = !hasResult && (c.id === 'warehouses' || c.id === 'routes' || c.id === 'radius' || c.id === 'traffic');
       return (
         <button
           key={c.id}
           disabled={disabled}
           onClick={() => onToggle(c.id)}
-          title={disabled ? 'Run the optimizer to unlock' : `Toggle ${c.label.toLowerCase()} layer`}
+          title={disabled ? 'Run the optimizer to unlock' : c.id === 'traffic' ? 'Color routes by live corridor congestion' : `Toggle ${c.label.toLowerCase()} layer`}
           className={`flex items-center gap-1.5 px-3.5 py-2 rounded-full text-[13px] font-semibold whitespace-nowrap border transition cursor-pointer shadow-sm ${
             on
               ? 'bg-white text-ink border-white'

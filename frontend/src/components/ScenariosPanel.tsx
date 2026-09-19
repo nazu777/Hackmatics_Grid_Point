@@ -517,7 +517,12 @@ export const ScenariosPanel: React.FC<ScenariosPanelProps> = ({
                 <div className="bg-cream-deep p-3 rounded-2xl border border-[#E4E1D2] text-center">
                   <span className="text-[10px] font-semibold text-ink-faint uppercase block">Avg ETA / Drop</span>
                   <span className="text-base font-extrabold text-ink">{fleetETA.avg_eta_minutes} min</span>
-                  <span className="text-[10px] text-ink-faint block mt-0.5">Max {fleetETA.max_eta_minutes} min</span>
+                  <span className="text-[10px] text-ink-faint block mt-0.5">
+                    Max {fleetETA.max_eta_minutes} min
+                    {fleetETA.effective_congestion_pct != null && fleetETA.effective_congestion_pct > 0
+                      ? ` • +${fleetETA.effective_congestion_pct}% corridors`
+                      : ''}
+                  </span>
                 </div>
                 <div className="bg-cream-deep p-3 rounded-2xl border border-[#E4E1D2] text-center">
                   <span className="text-[10px] font-semibold text-ink-faint uppercase block">Total Vehicle Trips</span>

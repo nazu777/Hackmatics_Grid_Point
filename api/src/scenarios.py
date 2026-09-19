@@ -158,8 +158,12 @@ def calculate_fleet_eta(
     total_trips = 0
     total_effective_km = 0.0
 
+    from .cost import corridor_congestion
+    applied_congs: List[float] = []
     for a in assignments:
-        d_eff = float(a.distance_km) * (1.0 + traffic)
+        cong = corridor_congestion(config, getattr(a, "congestion_pct", None))
+        applied_congs.append(cong)
+        d_eff = float(a.distance_km) * (1.0 + cong)
         total_effective_km += d_eff
         time_hours = d_eff / max(5.0, speed_kmph)
         etas.append(time_hours * 60.0)
@@ -205,6 +209,8 @@ def calculate_fleet_eta(
         "vehicle_used": v_name,
         "avg_speed_kmph": speed_kmph,
         "traffic_congestion_pct": round(traffic * 100.0, 1),
+        "effective_congestion_pct": round(
+            (sum(applied_congs) / len(applied_congs) * 100.0) if applied_congs else 0.0, 1),
     }
 
 

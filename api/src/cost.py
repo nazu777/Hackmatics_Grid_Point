@@ -97,21 +97,33 @@ def effective_rate(config: OptimizationConfig,
 
 
 def assignment_fuel_cost(w_i: int, d_km: float, config: OptimizationConfig,
-                         prices: Optional[Dict[str, float]] = None) -> float:
+                         prices: Optional[Dict[str, float]] = None,
+                         congestion: Optional[float] = None) -> float:
     """Fuel-only portion of one neighborhood's delivery cost."""
     _, fuel_rate = split_rate(config, prices)
-    return float(w_i) * effective_distance(d_km, config) * fuel_rate
+    return float(w_i) * effective_distance(d_km, config, congestion) * fuel_rate
 
 
-def effective_distance(d_km: float, config: OptimizationConfig) -> float:
-    """Traffic-aware distance: d * (1 + traffic_factor)."""
-    return float(d_km) * (1.0 + float(config.traffic_factor or 0.0))
+def corridor_congestion(config: OptimizationConfig,
+                          congestion: Optional[float] = None) -> float:
+    """Congestion delay ratio: per-corridor observed value wins over the manual floor."""
+    manual = float(config.traffic_factor or 0.0)
+    if congestion is None:
+        return manual
+    return max(manual, float(congestion))
+
+
+def effective_distance(d_km: float, config: OptimizationConfig,
+                       congestion: Optional[float] = None) -> float:
+    """Traffic-aware distance: d * (1 + corridor congestion)."""
+    return float(d_km) * (1.0 + corridor_congestion(config, congestion))
 
 
 def assignment_cost(w_i: int, d_km: float, config: OptimizationConfig,
-                      prices: Optional[Dict[str, float]] = None) -> float:
+                      prices: Optional[Dict[str, float]] = None,
+                      congestion: Optional[float] = None) -> float:
     """Delivery cost for one neighborhood: w_i * d_eff * rate_eff."""
-    return float(w_i) * effective_distance(d_km, config) * effective_rate(config, prices)
+    return float(w_i) * effective_distance(d_km, config, congestion) * effective_rate(config, prices)
 
 
 def compute_metrics(
@@ -143,7 +155,8 @@ def compute_metrics(
         total_unweighted += float(a.distance_km)
         total_weighted += float(a.weighted_distance)
         total_cost += float(a.cost)
-        total_fuel += assignment_fuel_cost(w_i, float(a.distance_km), config, prices)
+        total_fuel += assignment_fuel_cost(w_i, float(a.distance_km), config, prices,
+                                           a.congestion_pct)
         if a.warehouse_id in orders_by_wh:
             orders_by_wh[a.warehouse_id] += w_i
             dists_by_wh[a.warehouse_id].append(float(a.distance_km))
@@ -173,12 +186,14 @@ def compute_metrics(
 
     total_demand = sum(int(n["daily_orders"]) for n in neighborhoods)
     n = max(1, len(neighborhoods))
+    congs = [float(a.congestion_pct) for a in assignments if a.congestion_pct is not None]
     return Metrics(
         total_unweighted_distance_km=round(total_unweighted, 2),
         total_weighted_distance_km_orders=round(total_weighted, 2),
         total_cost=round(total_cost, 2),
         total_fuel_cost=round(total_fuel, 2),
         fuel_live=fuel_live,
+        avg_congestion_pct=round(sum(congs) / len(congs), 4) if congs else 0.0,
         avg_distance_per_order_km=round(total_weighted / max(1, total_demand), 2),
         avg_weighted_distance_km=round(total_weighted / n, 2),
         warehouses=wh_metrics,
@@ -237,6 +252,7 @@ def metrics_table_rows(
         ("total_weighted_distance_km_orders", baseline.total_weighted_distance_km_orders, optimized.total_weighted_distance_km_orders),
         ("total_cost", baseline.total_cost, optimized.total_cost),
         ("total_fuel_cost", baseline.total_fuel_cost, optimized.total_fuel_cost),
+        ("avg_congestion_pct", baseline.avg_congestion_pct, optimized.avg_congestion_pct),
         ("avg_distance_per_order_km", baseline.avg_distance_per_order_km, optimized.avg_distance_per_order_km),
         ("avg_weighted_distance_km", baseline.avg_weighted_distance_km, optimized.avg_weighted_distance_km),
         ("feasibility_ratio", baseline.feasibility_ratio, optimized.feasibility_ratio),

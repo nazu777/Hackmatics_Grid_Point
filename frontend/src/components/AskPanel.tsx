@@ -26,6 +26,7 @@ interface AskPanelProps {
 const SUGGESTIONS = [
   'Optimize for 2 warehouses',
   'How much will I save?',
+  'Show traffic congestion',
   'Load land-use demo',
   'Show biggest demand nodes',
   'Export comparison CSV'
@@ -143,9 +144,23 @@ export const AskPanel: React.FC<AskPanelProps> = ({
       return;
     }
 
-    // 6. Help / capabilities
+    // 6. Traffic congestion report
+    if (/(traffic|congest|jam|speed)/.test(lower)) {
+      if (result) {
+        const pct = ((result.metrics.avg_congestion_pct ?? 0) * 100).toFixed(0);
+        say(
+          `Corridors are running +${pct}% over free-flow on average. ${result.traffic_note || ''} Toggle the Traffic chip on the map to see jammed routes in red.`,
+          { label: 'Open comparison', onClick: onOpenCompare }
+        );
+      } else {
+        say('No traffic data yet — run the optimizer with "Real-time speeds" on, and I will report live corridor congestion plus record it for future runs.');
+      }
+      return;
+    }
+
+    // 7. Help / capabilities
     if (/(help|what can|how (do|to)|commands?)/.test(lower)) {
-      say('I can: run optimization ("optimize for 3 warehouses"), report savings ("how much will I save?"), apply land-use categories, find neighborhoods ("Hitec"), list biggest demand nodes, and export CSVs.');
+      say('I can: run optimization ("optimize for 3 warehouses"), report savings ("how much will I save?"), report traffic ("show traffic congestion"), apply land-use categories, find neighborhoods ("Hitec"), list biggest demand nodes, and export CSVs.');
       return;
     }
 

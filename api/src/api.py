@@ -266,6 +266,29 @@ def fuel_price(
             "live": live, "city": city_used, "state": state}
 
 
+@app.get("/api/traffic/flow")
+def traffic_flow(lat: float = Query(..., ge=-90.0, le=90.0),
+                 lon: float = Query(..., ge=-180.0, le=180.0)):
+    """
+    Live TomTom flow segment for a point (TTL-cached). Key stays server-side;
+    without it returns live=false. Feeds the map's congestion coloring.
+    """
+    from .traffic import api_key_configured, get_flow
+    info = get_flow(lat, lon)
+    return {**info, "lat": lat, "lon": lon, "key_configured": api_key_configured()}
+
+
+@app.get("/api/traffic/history")
+def traffic_history(lat: float = Query(..., ge=-90.0, le=90.0),
+                    lon: float = Query(..., ge=-180.0, le=180.0),
+                    hour: Optional[int] = Query(None, ge=0, le=23,
+                                               description="Hour of day (default: now)")):
+    """Rolling historical congestion factor for a corridor cell × hour."""
+    from .traffic import cell_of, historical_factor
+    factor, samples = historical_factor(lat, lon, hour)
+    return {"cell": cell_of(lat, lon), "hour": hour, "factor": factor, "samples": samples}
+
+
 @app.post("/api/export/assignments")
 def export_assignments(payload: MetricsExportRequest):
     """Export full neighborhood→warehouse assignment table as CSV (map lines match table)."""

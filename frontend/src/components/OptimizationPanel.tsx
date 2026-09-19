@@ -3,6 +3,7 @@ import { Cpu, CheckCircle2, AlertTriangle, Zap, TrendingDown, DollarSign, ArrowR
 import { Neighborhood, OptimizationConfig, OptimizationResult } from '../types';
 import { optimizeNetwork } from '../services/api';
 import { FuelCard } from './FuelCard';
+import { TrafficCard } from './TrafficCard';
 
 interface OptimizationPanelProps {
   neighborhoods: Neighborhood[];
@@ -205,6 +206,13 @@ export const OptimizationPanel: React.FC<OptimizationPanelProps> = ({
             </div>
 
             <FuelCard config={config} onChange={(patch) => setConfig({ ...config, ...patch })} />
+
+            <TrafficCard
+              config={config}
+              onChange={(patch) => setConfig({ ...config, ...patch })}
+              lastAvgCongestion={lastResult?.metrics.avg_congestion_pct ?? null}
+              lastNote={lastResult?.traffic_note ?? null}
+            />
           </div>
         </div>
 
@@ -283,6 +291,19 @@ export const OptimizationPanel: React.FC<OptimizationPanelProps> = ({
                 {' '}of ${lastResult.metrics.total_cost.toLocaleString()} total
                 {lastResult.metrics.fuel_live ? ' • live prices' : ' • manual rates'}
                 {lastResult.fuel_note ? ` — ${lastResult.fuel_note}` : ''}
+              </span>
+            </div>
+          </div>
+
+          {/* Traffic economics line */}
+          <div className="p-4 bg-violet-50/60 border border-violet-200/70 rounded-2xl flex items-start gap-3">
+            <span className="text-lg leading-none">🚦</span>
+            <div className="text-xs">
+              <span className="font-bold text-slate-800">
+                Traffic: +{((lastResult.metrics.avg_congestion_pct ?? 0) * 100).toFixed(0)}% avg corridor delay
+              </span>
+              <span className="text-slate-600">
+                {lastResult.traffic_note ? ` — ${lastResult.traffic_note}` : ''}
               </span>
             </div>
           </div>
