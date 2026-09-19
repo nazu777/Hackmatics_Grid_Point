@@ -614,6 +614,7 @@ export const App: React.FC = () => {
         isOpen={isSyntheticModalOpen}
         onClose={() => setIsSyntheticModalOpen(false)}
         onGenerated={handleSyntheticGenerated}
+        onOpenCensus={() => setIsCensusModalOpen(true)}
       />
 
       <CensusModal

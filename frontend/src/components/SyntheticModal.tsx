@@ -7,6 +7,7 @@ interface SyntheticModalProps {
   isOpen: boolean;
   onClose: () => void;
   onGenerated: (nodes: Neighborhood[]) => void;
+  onOpenCensus?: () => void;
 }
 
 const CITY_PRESETS = [
@@ -16,7 +17,7 @@ const CITY_PRESETS = [
   { name: 'Delhi NCR', lat: 28.613939, lon: 77.209023 }
 ];
 
-export const SyntheticModal: React.FC<SyntheticModalProps> = ({ isOpen, onClose, onGenerated }) => {
+export const SyntheticModal: React.FC<SyntheticModalProps> = ({ isOpen, onClose, onGenerated, onOpenCensus }) => {
   const [config, setConfig] = useState<SyntheticConfig>({
     N: 35,
     lat_center: 17.385044,
@@ -208,6 +209,20 @@ export const SyntheticModal: React.FC<SyntheticModalProps> = ({ isOpen, onClose,
             <p className="text-rose-600 font-medium">{error}</p>
           )}
         </div>
+
+        {/* Real-data shortcut */}
+        {onOpenCensus && (
+          <button
+            onClick={() => {
+              onClose();
+              onOpenCensus();
+            }}
+            className="w-full mt-2 flex items-center justify-center gap-2 px-4 py-2.5 rounded-2xl bg-blue-50 hover:bg-blue-100 text-blue-800 border border-blue-200 text-xs font-bold transition cursor-pointer"
+          >
+            <span>🗽</span>
+            <span>Prefer real data? Seed a US city (NYC, LA, Chicago…) from live Census tracts</span>
+          </button>
+        )}
 
         {/* Footer */}
         <div className="mt-6 pt-4 border-t border-[#E4E1D2] flex items-center justify-end space-x-2">
