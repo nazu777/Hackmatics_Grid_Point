@@ -308,26 +308,116 @@ export function localValidate(neighborhoods: Neighborhood[]): ValidationResult {
   };
 }
 
-// Client-side synthetic generator fallback
+// Client-side synthetic generator fallback — mirrors the backend city model:
+// dense core + inner districts (all bearings) + satellite hubs + outskirt
+// fringe, with orders tapering away from the centre. Used only when the
+// backend /api/synthetic endpoint is unreachable.
 function localGenerateSynthetic(config: SyntheticConfig): Neighborhood[] {
   const nodes: Neighborhood[] = [];
-  const latDelta = config.spread_km / 111.0;
-  const lonDelta = config.spread_km / (111.0 * Math.cos(config.lat_center * Math.PI / 180));
+  const spread = Math.max(1, config.spread_km);
+  const latDegPerKm = 1 / 110.574;
+  const lonDegPerKm = 1 / (111.32 * Math.max(0.1, Math.cos(config.lat_center * Math.PI / 180)));
+  const COMPASS = ['North', 'North-East', 'East', 'South-East', 'South', 'South-West', 'West', 'North-West'];
+  const CORE = ['Central Market', 'Old City', 'Grand Square', 'Metro Hub', 'Midtown'];
+  const INNER = ['Green Hills', 'Riverside', 'Lakeview', 'Garden Colony', 'Mill Quarter'];
+  const HUBS = ['Tech Park', 'Cyber City', 'Logistics Park', 'IT Corridor'];
+  const FRINGE = ['Green Belt', 'Outer Ring Village', 'Rural Fringe', 'Satellite Town'];
 
-  for (let i = 0; i < config.N; i++) {
-    const angle = (i / config.N) * 2 * Math.PI;
-    const radius = Math.random();
-    const lat = config.lat_center + Math.sin(angle) * radius * latDelta;
-    const lon = config.lon_center + Math.cos(angle) * radius * lonDelta;
-    const orders = Math.floor(config.orders_min + Math.random() * (config.orders_max - config.orders_min + 1));
+  const gauss = () => (Math.random() + Math.random() + Math.random()) / 1.5 - 1; // ~N(0, ~0.47)
+  const district = (bearing: number, inner: boolean) => {
+    const deg = ((bearing * 180 / Math.PI) % 360 + 360) % 360;
+    return `${inner ? 'Inner' : 'Outer'} ${COMPASS[Math.floor((deg + 22.5) / 45) % 8]}`;
+  };
+  const taper = (frac: number) => {
+    const span = Math.max(1, config.orders_max - config.orders_min);
+    const v = Math.round(config.orders_max - Math.min(1, Math.max(0, frac)) * span * 0.9 + (Math.random() - 0.5) * 0.3 * span);
+    return Math.min(config.orders_max, Math.max(config.orders_min, v));
+  };
+  const push = (idx: number, distKm: number, bearing: number, zone: string, name: string, frac: number) => {
     nodes.push({
-      neighborhood_id: `N${String(i + 1).padStart(3, '0')}`,
-      name: `Cluster Hub #${i + 1}`,
-      latitude: parseFloat(lat.toFixed(6)),
-      longitude: parseFloat(lon.toFixed(6)),
-      daily_orders: orders,
-      zone: `Zone-${(i % config.num_clusters) + 1}`
+      neighborhood_id: `N${String(idx + 1).padStart(3, '0')}`,
+      name,
+      latitude: parseFloat((config.lat_center + distKm * Math.cos(bearing) * latDegPerKm).toFixed(6)),
+      longitude: parseFloat((config.lon_center + distKm * Math.sin(bearing) * lonDegPerKm).toFixed(6)),
+      daily_orders: taper(frac),
+      zone
     });
+  };
+
+  if (config.distribution === 'uniform') {
+    for (let i = 0; i < config.N; i++) {
+      const r = spread * Math.sqrt(Math.random());
+      const b = Math.random() * 2 * Math.PI;
+      push(i, r, b, district(b, r < 0.5 * spread), INNER[i % INNER.length], r / spread);
+    }
+    return nodes;
+  }
+  if (config.distribution === 'gaussian') {
+    for (let i = 0; i < config.N; i++) {
+      const lat = config.lat_center + gauss() * (spread / 3) * latDegPerKm;
+      const lon = config.lon_center + gauss() * (spread / 3) * lonDegPerKm;
+      const frac = Math.min(1, Math.hypot((lat - config.lat_center) / latDegPerKm, (lon - config.lon_center) / lonDegPerKm) / spread);
+      nodes.push({
+        neighborhood_id: `N${String(i + 1).padStart(3, '0')}`,
+        name: CORE[i % CORE.length],
+        latitude: parseFloat(lat.toFixed(6)),
+        longitude: parseFloat(lon.toFixed(6)),
+        daily_orders: taper(frac),
+        zone: 'Central-Zone'
+      });
+    }
+    return nodes;
+  }
+
+  // City model (clustered): core + inner disc + satellite hubs + fringe + centre anchors
+  const n = config.N;
+  const nCore = Math.max(2, Math.round(n * 0.25));
+  const nInner = Math.max(2, Math.round(n * 0.4));
+  const nFringe = Math.max(1, Math.round(n * 0.1));
+  const nHubs = Math.max(0, n - nCore - nInner - nFringe);
+  const kHubs = Math.max(1, Math.min(config.num_clusters, Math.max(1, nHubs)));
+  const hubBearings = Array.from({ length: kHubs }, (_, h) => (2 * Math.PI * h) / kHubs + (Math.random() - 0.5) * 0.6);
+  const hubDists = hubBearings.map(() => (0.55 + Math.random() * 0.25) * spread);
+  let i = 0;
+  for (let c = 0; c < nCore && i < n; c++, i++) {
+    const r = Math.abs(gauss()) * 0.12 * spread;
+    const b = Math.random() * 2 * Math.PI;
+    push(i, r, b, 'City Centre', CORE[i % CORE.length], r / spread);
+  }
+  for (let c = 0; c < nInner && i < n; c++, i++) {
+    const r = spread * Math.sqrt(0.02 + Math.random() * 0.34);
+    const b = Math.random() * 2 * Math.PI;
+    push(i, r, b, district(b, true), INNER[i % INNER.length], r / spread);
+  }
+  for (let c = 0; c < nHubs && i < n; c++, i++) {
+    const h = c % kHubs;
+    const r = hubDists[h] + gauss() * 0.1 * spread;
+    push(i, Math.max(0, r), hubBearings[h], `${HUBS[h % HUBS.length]} Hub`, HUBS[i % HUBS.length], Math.max(0, r) / spread);
+  }
+  for (let c = 0; c < nFringe && i < n; c++, i++) {
+    const r = (0.65 + Math.random() * 0.35) * spread;
+    const b = Math.random() * 2 * Math.PI;
+    push(i, r, b, district(b, false), FRINGE[i % FRINGE.length], r / spread);
+  }
+  while (i < n) { // safety fill (rounding): inner disc
+    const r = spread * Math.sqrt(Math.random() * 0.36);
+    const b = Math.random() * 2 * Math.PI;
+    push(i, r, b, district(b, true), INNER[i % INNER.length], r / spread);
+    i++;
+  }
+  // Anchor nodes guarantee centre coverage
+  const anchors = Math.min(3, nodes.length);
+  for (let a = 0; a < anchors; a++) {
+    const r = (0.02 + Math.random() * 0.06) * spread;
+    const b = Math.random() * 2 * Math.PI;
+    nodes[a] = {
+      ...nodes[a],
+      latitude: parseFloat((config.lat_center + r * Math.cos(b) * latDegPerKm).toFixed(6)),
+      longitude: parseFloat((config.lon_center + r * Math.sin(b) * lonDegPerKm).toFixed(6)),
+      zone: 'City Centre',
+      name: CORE[a % CORE.length],
+      daily_orders: taper(r / spread)
+    };
   }
   return nodes;
 }

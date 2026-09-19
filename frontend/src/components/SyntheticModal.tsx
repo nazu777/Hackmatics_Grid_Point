@@ -129,8 +129,8 @@ export const SyntheticModal: React.FC<SyntheticModalProps> = ({ isOpen, onClose,
                 onChange={(e) => setConfig({ ...config, distribution: e.target.value as any })}
                 className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs focus:ring-2 focus:ring-emerald-500"
               >
-                <option value="clustered">Clustered (Suburban Hubs)</option>
-                <option value="uniform">Uniform (Scattered)</option>
+                <option value="clustered">City Mix (core + districts + hubs + fringe)</option>
+                <option value="uniform">Uniform (even sprawl, full spread)</option>
                 <option value="gaussian">Gaussian (Dense Core)</option>
               </select>
             </div>
