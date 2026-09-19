@@ -9,7 +9,7 @@ Hackathon window: 24 hours. Phases are sequential with overlap allowed; each pha
 **Goal**: Establish codebase, data contracts (`schema.md`), and neighborhood data entry layer — fulfilling *“Allow users to upload or enter neighborhood data including location and daily orders”*.
 
 - **Tasks**:
-  1. Initialize repo structure & `requirements.txt` (Python 3.10+, Streamlit/React, Pandas, NumPy, scikit-learn, PuLP/OR-Tools, Folium/streamlit-folium/PyDeck, Geopy).
+  1. Initialize repo structure & `requirements.txt` (Python 3.10+, React, Pandas, NumPy, scikit-learn, PuLP/OR-Tools, Leaflet/Mapbox, Geopy).
   2. Define schemas (see `schema.md`) for `Neighborhood`, `Warehouse`, `Assignment`, `OptimizationConfig`.
   3. Implement CSV and JSON parsers (`id`, `latitude`, `longitude`, `daily_orders`, optional `name`) with header auto-detection.
   4. Build manual tabular entry form (add/edit/delete rows, inline validation, duplicate ID guard).
@@ -23,7 +23,7 @@ Hackathon window: 24 hours. Phases are sequential with overlap allowed; each pha
 **Goal**: Render geography and user controls — fulfilling *“Visualize all neighborhood locations on a map”* and *“Allow user to select number of warehouses”*.
 
 - **Tasks**:
-  1. Integrate interactive map (Folium + streamlit-folium / PyDeck / Leaflet / Mapbox — per suggested stack).
+  1. Integrate interactive map (Leaflet / Mapbox — per tech stack).
   2. Plot neighborhood nodes as circle markers; radius ∝ `daily_orders`; tooltip with ID/orders/coords; color scale by order volume.
   3. Implement warehouse count selector `K` (1–10) + distance metric toggle (Haversine default, Euclidean, Manhattan) with helper text.
   4. Implement constraint control panel (toggles for `C_max`, `R_max`, vehicle/fuel params — wired but optional).
@@ -75,7 +75,7 @@ Hackathon window: 24 hours. Phases are sequential with overlap allowed; each pha
      - Demand shift simulator: slider `w_i' = w_i × (1+Δ%)` and re-optimize button.
      - Infrastructure vs delivery trade-off: `infra_cost_per_warehouse` slider + chart of `Total Cost vs K` (elbow analysis).
   2. Polish: responsive layout, dark/light theme, tooltips, loading spinners for optimization, error toasts for infeasibility.
-  3. Docs: comprehensive `README.md` (problem recap, architecture diagram, pipeline gif, setup `pip install -r requirements.txt` + `streamlit run app.py`, AI tools disclosure, library list, schema reference).
+   3. Docs: comprehensive `README.md` (problem recap, architecture diagram, pipeline gif, setup `pnpm install` + `make setup`, AI tools disclosure, library list, schema reference).
   4. Demo video (2–3 min) script: (0:00) Problem intro → (0:20) Upload/edit neighborhoods → (0:45) Map visualization → (1:05) Select K & run optimization → (1:30) Show assignments & warehouses → (1:50) Cost comparison original vs optimized → (2:20) Bonus constraints toggle → (2:45) Close + repo link.
   5. Final QA: test with N=10, 100, 1,000; verify <5s, no console errors, public GitHub push.
 - **Deliverable**: Polished prototype, public repo, demo video ready for submission. Covers full pipeline `Neighborhood Data → Location Visualization → Warehouse Optimization → Neighborhood Assignment → Delivery Cost Comparison`.
@@ -124,4 +124,4 @@ README.md
 | :--- | :--- | :--- |
 | MILP infeasible (capacity < demand) | 3,4 | Pre-check ΣC_max ≥ Σw_i; suggest increase K/C_max |
 | Slow optimization for N>500 with MILP | 3 | Chunking; cap constrained MILP to N≤500 else weighted K-Means |
-| Map library mismatch (Streamlit vs React) | 2 | Abstract mapping layer; choose one stack early |
+| Map library mismatch | 2 | Abstract mapping layer; choose one stack early |

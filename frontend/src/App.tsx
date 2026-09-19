@@ -336,7 +336,7 @@ export const App: React.FC = () => {
             GRIDPOINT Decision-Support Engine &bull; Built for HACK-A-MATICS
           </div>
           <div className="flex items-center space-x-4">
-            <span>Tech Stack: React + FastAPI + Streamlit + Pandas</span>
+            <span>Tech Stack: React + FastAPI + Pandas</span>
             <span>Schema v1.0.0</span>
           </div>
         </div>

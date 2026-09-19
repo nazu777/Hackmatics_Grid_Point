@@ -32,7 +32,7 @@ Hackmatics_Grid_Point/
 │   ├── schema.md             # SINGLE SOURCE OF TRUTH for entities, validation, API contracts
 │   ├── phases.md             # Sprint plan Phases 1-5, Appendix A traceability
 │   └── prompt.md             # Phase 1 implementation prompt
-├── backend/                  # Python 3.10+ FastAPI + Streamlit shared core
+├── backend/                  # Python 3.10+ FastAPI shared core
 │   ├── src/
 │   │   ├── schema.py         # Pydantic v2 models (Neighborhood, Warehouse, OptimizationConfig, Metrics, Comparison) — mirrors schema.md §2
 │   │   ├── validation.py     # Strict validation engine (schema.md §4)
@@ -41,9 +41,8 @@ Hackmatics_Grid_Point/
 │   │   ├── distance.py       # Vectorized Haversine/Euclidean/Manhattan matrices (schema.md §5) — NEW Phase 3
 │   │   ├── optimization.py   # Weiszfeld (K=1), Weighted K-Means (K>1), PuLP MILP CFLP, evaluate & run_optimization (PRD §5.4) — NEW Phase 3
 │   │   └── api.py            # FastAPI app `app` (schema.md §6) — now includes POST /api/optimize
-│   ├── app.py                # Streamlit UI (Phase 1 ingestion + Phase 3 optimization panel)
 │   ├── tests/                # 50+ tests: schema, validation, ingestion, synthetic, distance, optimization, api, acceptance+perf (N=1000 <5s, 1000-node MILP <10s)
-│   ├── requirements.txt      # FastAPI/Uvicorn/Pydantic/Streamlit/Pandas/NumPy/SciPy/sklearn/PuLP/Geopy/pytest + httpx
+│   ├── requirements.txt      # FastAPI/Uvicorn/Pydantic/Pandas/NumPy/SciPy/sklearn/PuLP/Geopy/pytest + httpx
 │   ├── pyproject.toml        # pytest config, pythonpath="."
 │   └── pytest.ini
 ├── frontend/                 # React 18 + Vite + TypeScript + Tailwind
@@ -58,12 +57,11 @@ Hackmatics_Grid_Point/
 │   ├── index.py              # ⚠️ Vercel adapter only — re-exports backend/src/api.py `app` (see §7)
 │   └── requirements.txt      # -r ../backend/requirements.txt + mangum
 ├── data/samples/             # hyderabad_demand.csv, neighborhoods_*.json, large_1000_nodes.csv (perf benchmark), sample_with_errors.csv
-├── app.py                    # Root Streamlit entry (delegates to backend/app.py)
 ├── vercel.json               # Root Vercel monorepo config (frontend + backend, see §7)
 ├── pnpm-workspace.yaml       # pnpm workspace: frontend + allowBuilds.esbuild
-├── package.json              # Monorepo scripts: build, dev:backend/frontend/streamlit, test
+├── package.json              # Monorepo scripts: build, dev:backend/frontend, test
 ├── requirements.txt          # Root: -r backend/requirements.txt
-└── Makefile                  # setup, test, run-backend/frontend/streamlit, build-frontend
+└── Makefile                  # setup, test, run-backend/frontend, build-frontend
 ```
 
 **Do NOT duplicate logic** between `backend/` and `api/`. `api/index.py` is a 30-line wrapper.
@@ -127,14 +125,13 @@ Always keep CORS `allow_origins=["*"]` (`backend/src/api.py:35`) for Vercel prox
 make setup              # backend/.venv + pnpm install
 make run-backend        # FastAPI: backend/.venv/bin/uvicorn src.api:app --reload --port 8000 --app-dir backend → http://localhost:8000/docs
 make run-frontend       # Vite: pnpm --prefix frontend dev → http://localhost:3000 (proxy /api → 8000)
-make run-streamlit      # Streamlit: backend/.venv/bin/streamlit run app.py → http://localhost:8501
 make test               # pytest: backend/.venv/bin/pytest -c backend/pyproject.toml backend/tests -v  (50+ tests, includes distance, optimization, acceptance_phase3)
 pnpm --prefix frontend build   # tsc && vite build → frontend/dist (verified <18s, gzip ~56kB)
 # Quick backend smoke: python -c "from src.api import app; print([r.path for r in app.routes])" --app-dir backend
 # Optimize smoke: curl -X POST http://localhost:8000/api/optimize -H "Content-Type: application/json" -d '{"neighborhoods":[...], "config":{"K":2}}'
 ```
 
-Local dev needs 2 terminals (backend + frontend) or single Streamlit.
+Local dev needs 2 terminals (backend + frontend).
 
 Env: copy `.env.example` → `.env` (Neon `DATABASE_URL`, `NEON_PROJECT_ID`) — never commit `.env` (`.gitignore:48`).
 
@@ -167,7 +164,7 @@ vercel ls / vercel project ls   # verify
 - **Phase 1 ✅ DONE** (`docs/phases.md:8`, `1b09bc4`): ingestion, validation, synthetic, export, tests (1000 nodes <0.2s, 31 passing). Deliverable: validated DataFrame/session.
 - **Phase 2 ✅ DONE** (`frontend/src/components/MapView.tsx:1`, `backend/src/mapping.py:1`): Leaflet map (OSM tiles), bubbles ∝√orders (`mapping.py:32 bubble_radius`, `MapView.tsx:62`), cluster colors per warehouse (`warehouse_color`), auto-fit bounds + single-point guard (`fit_bounds`), polylines neighborhood→warehouse (`assignment_lines`), R_max circles, layer legend. K/metric/constraint panel lives in OptimizationPanel (Phase 3).
 - **Phase 3 ✅ DONE** (`1b09bc4 feat(phase3)` `backend/src/distance.py:1`, `backend/src/optimization.py:1`): distance matrix (Haversine `backend/src/distance.py:11`, Euclidean `45`, Manhattan `70` + `*111km`), Weiszfeld K=1 `backend/src/optimization.py:26`, weighted K-Means K>1 `78` with k-means++ & Weiszfeld refine, MILP CFLP `122` PuLP `y_k,x_{i,k}` + infra cost + capacity `191` + radius `199`, assignment via `evaluate_network_layout:245`, baseline `compute_baseline_layout:367`, main `run_optimization:409` (<5s for N=1000, N≤500 MILP cutoff). Frontend fallback `frontend/src/services/api.ts:280 localOptimizeNetwork` mirrors logic in JS. Tests: `backend/tests/test_distance.py`, `test_optimization.py`, `test_acceptance_phase3.py`.
-- **Phase 4 ✅ DONE** (`backend/src/cost.py:1`, `backend/src/mapping.py:1`): cost engine `effective_rate/effective_distance/assignment_cost/compute_metrics/compute_comparison/distance_histogram/metrics_table_rows` (traffic `d*(1+traffic_factor)` + fleet-weighted rate + infra); `optimization.py:245 evaluate_network_layout` delegates to it; new `POST /api/export/metrics` + `/api/export/assignments` (`backend/src/api.py:179`); Streamlit Phase 4 dashboard (`backend/app.py:392` side-by-side cards, metrics table, `st.bar_chart` histogram, `st.map` overlay + R_max notice, CSV/GeoJSON exports); frontend `MapView.tsx` + `ComparisonDashboard.tsx` (cards, table, histogram, CSV exports) wired to App Phase 2/4; tests `backend/tests/test_cost.py` (3 hand-calcs).
+- **Phase 4 ✅ DONE** (`backend/src/cost.py:1`, `backend/src/mapping.py:1`): cost engine `effective_rate/effective_distance/assignment_cost/compute_metrics/compute_comparison/distance_histogram/metrics_table_rows` (traffic `d*(1+traffic_factor)` + fleet-weighted rate + infra); `optimization.py:245 evaluate_network_layout` delegates to it; new `POST /api/export/metrics` + `/api/export/assignments` (`backend/src/api.py:179`); frontend `MapView.tsx` + `ComparisonDashboard.tsx` (cards, table, histogram, CSV exports) wired to App Phase 2/4; tests `backend/tests/test_cost.py` (3 hand-calcs).
 - **Phase 5 TODO** (`docs/phases.md:65`): bonus toggles (vehicles/fuel/traffic/demand/infra trade-off chart), polish, README, 2-3min demo video script (pipeline order).
 
 Traceability: `docs/phases.md:86` + `docs/prd.md:22`.

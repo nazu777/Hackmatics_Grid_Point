@@ -6,7 +6,6 @@ fastapi>=0.110.0
 uvicorn[standard]>=0.28.0
 python-multipart>=0.0.9
 pydantic>=2.6.0
-streamlit>=1.32.0
 
 # Data Manipulation & Scientific Computing
 pandas>=2.2.0

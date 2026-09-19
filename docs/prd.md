@@ -17,7 +17,7 @@
 | Operational usability | Non-technical user can upload data → see optimized map in <30s |
 | Constraint awareness | Capacity / radius violations are detected and reported; feasible assignments preferred |
 | Demonstrability | Working prototype + 2–3 min demo video covering the 5-step pipeline |
-| Hackathon fit | Built in 24h window using suggested stack: Python + React/Streamlit + Leaflet/Mapbox |
+| Hackathon fit | Built in 24h window using suggested stack: Python + React + Leaflet/Mapbox |
 
 ## 4. Core Requirements Traceability
 Directly derived from `problem_statement.md`:
@@ -43,7 +43,7 @@ Directly derived from `problem_statement.md`:
 - **Persistence**: In-memory DataFrame/session state; optional export to CSV/JSON.
 
 ### 5.2 Interactive Spatial Mapping
-- Render all neighborhoods on interactive map (Leaflet via Streamlit-Folium / PyDeck / Mapbox / React-Leaflet).
+- Render all neighborhoods on interactive map (Leaflet via React-Leaflet / Mapbox).
 - Bubble sizing proportional to `daily_orders`; tooltip: ID, orders, coordinates.
 - Distinct warehouse markers (color/icon per warehouse).
 - Polylines/vectors from each neighborhood to its assigned warehouse; cluster coloring by assignment.
@@ -103,11 +103,11 @@ Directly derived from `problem_statement.md`:
 | Layer | Suggested Technology | Role |
 | :--- | :--- | :--- |
 | Language | Python 3.10+ (alt: Java/C++ for solver) | Core logic |
-| UI Framework | Streamlit **or** React | Dashboard & controls |
+| UI Framework | React | Dashboard & controls |
 | Data | Pandas, NumPy | Ingestion, validation, matrices |
 | Optimization | scikit-learn (K-Means), SciPy/Weiszfeld, PuLP/OR-Tools (MILP) | Solvers |
-| Geospatial | Geopy (Haversine), Folium / streamlit-folium / PyDeck / Leaflet / Mapbox | Distance & mapping |
-| Visualization | Plotly / Altair / Streamlit charts | Metrics & comparison |
+| Geospatial | Geopy (Haversine), Leaflet / Mapbox | Distance & mapping |
+| Visualization | Plotly / Altair / React charts | Metrics & comparison |
 
 Suggested repo structure: `app.py` (or `frontend/` + `backend/`), `src/data_ingestion.py`, `src/optimization.py`, `src/cost.py`, `src/mapping.py`, `src/validation.py`, `data/samples/`.
 
@@ -117,7 +117,7 @@ Suggested repo structure: `app.py` (or `frontend/` + `backend/`), `src/data_inge
 - **Reliability**: Graceful handling of infeasible constraints with explanatory message.
 - **Reproducibility**: Seeded RNG for synthetic data & K-Means.
 - **Submission**: Public GitHub repo with `README.md` disclosing AI tools & libraries; demo video 2–3 min covering full pipeline.
-- **Portability**: `requirements.txt` + one-command run (`streamlit run app.py` or `npm start`).
+- **Portability**: `requirements.txt` + one-command run (`npm start` or `make run-frontend`).
 
 ## 8. Deliverable & Demo Flow
 Must demonstrate sequentially:

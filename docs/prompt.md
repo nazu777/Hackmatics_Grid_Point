@@ -22,11 +22,11 @@ Multiple warehouses, limited capacity, max delivery radius, different vehicle ty
 
 ### TECH STACK (Suggested — choose one coherent stack)
 - **Language**: Python 3.10+ (alt: Java/C++ for solvers)
-- **UI**: Streamlit **or** React
+- **UI**: React
 - **Data**: Pandas, NumPy
 - **Optimization**: scikit-learn (Weighted K-Means), SciPy/Weiszfeld (geometric median), PuLP / OR-Tools (MILP for CFLP)
-- **Geospatial & Maps**: Geopy (Haversine), Folium / streamlit-folium / PyDeck / Leaflet / Mapbox
-- **Charts**: Plotly / Altair / Streamlit native
+- **Geospatial & Maps**: Geopy (Haversine), Leaflet / Mapbox
+- **Charts**: Plotly / Altair / React charts
 
 ### DATA CONTRACT (see schema.md)
 - `Neighborhood`: `{neighborhood_id: string, latitude: float [-90,90], longitude: float [-180,180], daily_orders: int ≥0, name?: string}`
@@ -55,12 +55,12 @@ Provide a detailed, step-by-step technical Implementation Plan specifically for 
 
 In your response, cover:
 
-1. **Directory and file structure** for the app (Streamlit `app.py` + `src/` modules **or** React `frontend/` + `backend/` alternative).
+1. **Directory and file structure** for the app (React `frontend/` + `backend/`).
 2. **Complete `requirements.txt`** (or `package.json` + `requirements.txt` if React+Python).
 3. **Complete code implementation** for the data ingestion layer (modular, e.g., `src/data_ingestion.py`, `src/validation.py`, and `app.py` integration) including:
    - File uploader supporting CSV and JSON (header auto-detection, schema mapping).
    - Validation logic: `lat ∈ [-90,90]`, `lon ∈ [-180,180]`, `orders ≥0` integer, null/duplicate checks.
-   - Manual tabular entry form (add/edit/delete rows interactively, e.g., `st.data_editor` / React table).
+   - Manual tabular entry form (add/edit/delete rows interactively, e.g., React table).
    - Synthetic sample dataset generator (seeded, clustered/uniform, realistic order volumes) for rapid testing/demo.
    - Export & session-state persistence.
 4. **Clear local run & test instructions**: install, run, test with sample CSV/JSON, trigger validation errors, generate synthetic data.

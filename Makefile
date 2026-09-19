@@ -1,4 +1,4 @@
-.PHONY: setup test run-backend run-frontend run-streamlit build-frontend sync-api
+.PHONY: setup test run-backend run-frontend build-frontend sync-api
 
 setup:
 	@echo "Setting up Python backend environment..."
@@ -18,10 +18,6 @@ run-backend:
 run-frontend:
 	@echo "Starting React frontend development server on http://localhost:3000..."
 	pnpm --prefix frontend dev
-
-run-streamlit:
-	@echo "Starting Streamlit dashboard on http://localhost:8501..."
-	backend/.venv/bin/streamlit run app.py
 
 build-frontend:
 	@echo "Building React production assets..."

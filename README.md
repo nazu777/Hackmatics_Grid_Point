@@ -32,7 +32,7 @@ What-If Scenarios & Bonus Fleet (Phase 5)
 
 ## 🏗️ System Architecture
 
-GRIDPOINT is architected as a high-performance monorepo supporting both a **modern full-stack web application (React 18 + FastAPI)** and an **alternative Streamlit single-command dashboard**, both powered by a shared, strictly typed Python optimization core:
+GRIDPOINT is architected as a high-performance monorepo supporting a **modern full-stack web application (React 18 + FastAPI)** powered by a shared, strictly typed Python optimization core:
 
 ```
 Hackmatics_Grid_Point/
@@ -49,7 +49,6 @@ Hackmatics_Grid_Point/
 │   │   ├── scenarios.py           # Phase 5: Multi-K trade-off elbow, demand shift, fleet ETA
 │   │   └── api.py                 # FastAPI application & REST endpoints
 │   ├── tests/                     # 64 automated unit, integration & acceptance tests
-│   ├── app.py                     # Streamlit dashboard application
 │   ├── requirements.txt           # Python dependencies (FastAPI, PuLP, scikit-learn, etc.)
 │   └── pytest.ini
 ├── frontend/                      # React 18 + TypeScript + Vite + Tailwind CSS
@@ -88,7 +87,6 @@ Hackmatics_Grid_Point/
 | **Frontend Framework** | React 18, Vite, TypeScript | Type-safe, reactive single-page application |
 | **Styling & UI** | Tailwind CSS, Lucide Icons | Responsive layout with clear visual hierarchy |
 | **Geospatial & Maps** | Leaflet, React-Leaflet, Geopy | Interactive OSM map, custom bubble markers, spider lines |
-| **Alternative UI** | Streamlit 1.32+ | Single-command Python-only data science UI |
 | **Database** | Neon Serverless Postgres | Cloud persistence for demand points and optimization runs |
 | **Automated Testing** | Pytest, Pytest-Asyncio, HTTPX | 64 test cases covering unit, cost formulas, and benchmarks |
 
@@ -115,13 +113,7 @@ make run-backend
 make run-frontend
 ```
 
-### 3. Alternative: Run Streamlit Dashboard
-```bash
-make run-streamlit
-# Starts interactive dashboard at http://localhost:8501
-```
-
-### 4. Run Automated Test Suite
+### 3. Run Automated Test Suite
 ```bash
 make test
 # Executes all 64 unit, cost hand-calc, and acceptance tests in ~2.4s

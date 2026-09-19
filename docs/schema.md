@@ -261,7 +261,6 @@ Response: `Neighborhood[]`
 
 ## 7. Storage (Session / Optional Persistence)
 
-- __Streamlit__: `st.session_state.neighborhoods_df` (Pandas DataFrame with canonical columns), `st.session_state.config`, `st.session_state.result`.
 - **React**: Local state / Context; optional `localStorage` for draft dataset.
 - **Optional DB (Postgres/SQLite)**:
 
