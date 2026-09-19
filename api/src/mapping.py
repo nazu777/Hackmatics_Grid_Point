@@ -155,3 +155,127 @@ def prepare_map_layer_data(neighborhoods: List[Dict[str, Any]]) -> Dict[str, Any
         "max_orders": max_orders,
         "total_nodes": len(neighborhoods)
     }
+
+# --- Phase 4: assignment overlay helpers (warehouses, lines, GeoJSON) ---
+PALETTE = [
+    "#10b981", "#3b82f6", "#f59e0b", "#ef4444", "#8b5cf6",
+    "#06b6d4", "#f97316", "#84cc16", "#ec4899", "#6366f1",
+]
+
+
+def warehouse_color(warehouse_id: str) -> str:
+    """Deterministic color per warehouse: W1..WK ΓåÆ palette."""
+    try:
+        idx = int("".join(c for c in warehouse_id if c.isdigit()) or "1") - 1
+    except ValueError:
+        idx = 0
+    return PALETTE[idx % len(PALETTE)]
+
+
+def fit_bounds(neighborhoods: List[Dict[str, Any]],
+               warehouses: List[Dict[str, Any]] | None = None) -> Dict[str, float]:
+    """Auto-fit bounding box over demand + warehouses; handles single-point."""
+    lats = [float(n["latitude"]) for n in neighborhoods]
+    lons = [float(n["longitude"]) for n in neighborhoods]
+    if warehouses:
+        lats += [float(w["latitude"]) for w in warehouses]
+        lons += [float(w["longitude"]) for w in warehouses]
+    if not lats:
+        return {"min_lat": 0.0, "max_lat": 0.0, "min_lon": 0.0, "max_lon": 0.0,
+                "center_lat": 0.0, "center_lon": 0.0}
+    min_lat, max_lat = min(lats), max(lats)
+    min_lon, max_lon = min(lons), max(lons)
+    if min_lat == max_lat:
+        min_lat -= 0.05
+        max_lat += 0.05
+    if min_lon == max_lon:
+        min_lon -= 0.05
+        max_lon += 0.05
+    return {"min_lat": min_lat, "max_lat": max_lat, "min_lon": min_lon, "max_lon": max_lon,
+            "center_lat": (min_lat + max_lat) / 2.0, "center_lon": (min_lon + max_lon) / 2.0}
+
+
+def bubble_radius(daily_orders: int, min_r: float = 4.0, max_r: float = 22.0,
+                  max_orders: int | None = None) -> float:
+    """Bubble size Γê¥ sqrt(orders) so area scales linearly with demand."""
+    import math
+    if max_orders is None or max_orders <= 0:
+        max_orders = max(1, int(daily_orders))
+    frac = math.sqrt(max(0, int(daily_orders)) / max(1, max_orders))
+    return round(min_r + frac * (max_r - min_r), 1)
+
+
+def assignment_lines(
+    neighborhoods: List[Dict[str, Any]],
+    warehouses: List[Dict[str, Any]],
+    assignments: List[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    """Polylines neighborhoodΓåÆassigned warehouse; map lines match assignment table."""
+    wh_by_id = {str(w["warehouse_id"]): w for w in warehouses}
+    nb_by_id = {str(n["neighborhood_id"]): n for n in neighborhoods}
+    lines: List[Dict[str, Any]] = []
+    for a in assignments:
+        nb = nb_by_id.get(str(a["neighborhood_id"]))
+        wh = wh_by_id.get(str(a["warehouse_id"]))
+        if not nb or not wh:
+            continue
+        lines.append({
+            "neighborhood_id": str(a["neighborhood_id"]),
+            "warehouse_id": str(a["warehouse_id"]),
+            "from": [float(nb["latitude"]), float(nb["longitude"])],
+            "to": [float(wh["latitude"]), float(wh["longitude"])],
+            "distance_km": float(a.get("distance_km", 0.0)),
+            "color": warehouse_color(str(a["warehouse_id"])),
+            "is_feasible": bool(a.get("is_feasible", True)),
+        })
+    return lines
+
+
+def map_points(neighborhoods: List[Dict[str, Any]],
+               assignments: List[Dict[str, Any]] | None = None) -> List[Dict[str, Any]]:
+    """Demand nodes with cluster color + bubble radius for Leaflet/st.map."""
+    max_o = max([int(n["daily_orders"]) for n in neighborhoods] + [1])
+    asg_by_nb = {str(a["neighborhood_id"]): a for a in (assignments or [])}
+    pts: List[Dict[str, Any]] = []
+    for n in neighborhoods:
+        a = asg_by_nb.get(str(n["neighborhood_id"]))
+        color = warehouse_color(str(a["warehouse_id"])) if a else "#64748b"
+        pts.append({
+            "neighborhood_id": str(n["neighborhood_id"]),
+            "name": n.get("name") or str(n["neighborhood_id"]),
+            "latitude": float(n["latitude"]),
+            "longitude": float(n["longitude"]),
+            "daily_orders": int(n["daily_orders"]),
+            "radius": bubble_radius(int(n["daily_orders"]), max_orders=max_o),
+            "color": color,
+            "warehouse_id": str(a["warehouse_id"]) if a else None,
+        })
+    return pts
+
+
+def to_geojson(neighborhoods: List[Dict[str, Any]],
+               warehouses: List[Dict[str, Any]],
+               assignments: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Map snapshot export: demand points + warehouses + assignment lines."""
+    features: List[Dict[str, Any]] = []
+    for p in map_points(neighborhoods, assignments):
+        features.append({"type": "Feature",
+                         "properties": {"kind": "neighborhood", **{k: v for k, v in p.items()
+                                                                   if k not in ("latitude", "longitude")}},
+                         "geometry": {"type": "Point",
+                                      "coordinates": [p["longitude"], p["latitude"]]}})
+    for w in warehouses:
+        features.append({"type": "Feature",
+                         "properties": {"kind": "warehouse",
+                                        "warehouse_id": str(w["warehouse_id"]),
+                                        "color": warehouse_color(str(w["warehouse_id"]))},
+                         "geometry": {"type": "Point",
+                                      "coordinates": [float(w["longitude"]), float(w["latitude"])]}})
+    for line in assignment_lines(neighborhoods, warehouses, assignments):
+        (la1, lo1), (la2, lo2) = line["from"], line["to"]
+        features.append({"type": "Feature",
+                         "properties": {"kind": "assignment", **{k: v for k, v in line.items()
+                                                                 if k not in ("from", "to")}},
+                         "geometry": {"type": "LineString",
+                                      "coordinates": [[lo1, la1], [lo2, la2]]}})
+    return {"type": "FeatureCollection", "features": features}

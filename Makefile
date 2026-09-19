@@ -1,4 +1,4 @@
-.PHONY: setup test run-backend run-frontend run-streamlit build-frontend
+.PHONY: setup test run-backend run-frontend run-streamlit build-frontend sync-api
 
 setup:
 	@echo "Setting up Python backend environment..."
@@ -26,3 +26,7 @@ run-streamlit:
 build-frontend:
 	@echo "Building React production assets..."
 	pnpm --prefix frontend build
+
+sync-api:
+	@echo "Syncing backend/src/ into api/src/ for Vercel serverless bundle..."
+	cp backend/src/*.py api/src/
