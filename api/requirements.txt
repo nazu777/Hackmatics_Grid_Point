@@ -1,0 +1,4 @@
+# Vercel Python function dependencies
+# Reuse backend requirements + Mangum for legacy adapter compatibility
+-r ../backend/requirements.txt
+mangum>=0.17.0

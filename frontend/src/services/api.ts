@@ -11,7 +11,9 @@ import {
   ComparisonResult
 } from '../types';
 
-const API_BASE = '/api';
+// In production (single Vercel deployment) API is same-origin at /api
+// For split deployments, set VITE_API_URL to backend URL (e.g., https://hackmatics-grid-point-backend.vercel.app)
+const API_BASE = (import.meta.env.VITE_API_URL as string) || '/api';
 
 export async function validateData(neighborhoods: Neighborhood[]): Promise<ValidationResult> {
   try {
