@@ -1,8 +1,8 @@
-import React, { useEffect, useRef } from 'react';
-import L from 'leaflet';
-import 'leaflet/dist/leaflet.css';
+import React, { useEffect, useRef, useState } from 'react';
+import mapboxgl from 'mapbox-gl';
+import 'mapbox-gl/dist/mapbox-gl.css';
 import { Neighborhood, Warehouse, Assignment, BasemapStyle, ColorByMode, ZoneColorMap } from '../types';
-import { BASEMAPS, colorForZone, zoneCounts } from './mapThemes';
+import { BASEMAPS, getMapboxToken, colorForZone, zoneCounts } from './mapThemes';
 
 const PALETTE = ['#10b981', '#3b82f6', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4', '#f97316', '#84cc16', '#ec4899', '#6366f1'];
 
@@ -16,6 +16,29 @@ function demandColor(orders: number, minOrders: number, maxOrders: number): { co
   if (ratio >= 0.66) return { color: '#ef4444', category: 'High' };
   if (ratio >= 0.33) return { color: '#f59e0b', category: 'Medium' };
   return { color: '#10b981', category: 'Low' };
+}
+
+/** Approximate a geodesic circle as a GeoJSON polygon (no extra deps). */
+function circlePolygon(lat: number, lon: number, radiusKm: number, steps = 64): number[][][] {
+  const R = 6371;
+  const d = radiusKm / R;
+  const latR = (lat * Math.PI) / 180;
+  const lonR = (lon * Math.PI) / 180;
+  const ring: number[][] = [];
+  for (let i = 0; i <= steps; i++) {
+    const brng = (i / steps) * 2 * Math.PI;
+    const lat2 = Math.asin(
+      Math.sin(latR) * Math.cos(d) + Math.cos(latR) * Math.sin(d) * Math.cos(brng)
+    );
+    const lon2 =
+      lonR +
+      Math.atan2(
+        Math.sin(brng) * Math.sin(d) * Math.cos(latR),
+        Math.cos(d) - Math.sin(latR) * Math.sin(lat2)
+      );
+    ring.push([((lon2 * 180) / Math.PI + 540) % 360 - 180, (lat2 * 180) / Math.PI]);
+  }
+  return [ring];
 }
 
 export interface MapFocus {
@@ -61,6 +84,19 @@ const COLOR_MODES: { id: ColorByMode; label: string }[] = [
   { id: 'demand', label: 'Demand' }
 ];
 
+const ROUTES_OK = 'gp-routes-ok';
+const ROUTES_BAD = 'gp-routes-bad';
+const RADIUS_SRC = 'gp-radius';
+
+function removeLayerAndSource(map: mapboxgl.Map, layerId: string, sourceId: string) {
+  try {
+    if (map.getLayer(layerId)) map.removeLayer(layerId);
+  } catch { /* ignore */ }
+  try {
+    if (map.getSource(sourceId)) map.removeSource(sourceId);
+  } catch { /* ignore */ }
+}
+
 export const MapView: React.FC<MapViewProps> = ({
   neighborhoods,
   warehouses = [],
@@ -84,35 +120,81 @@ export const MapView: React.FC<MapViewProps> = ({
   highlightId = null
 }) => {
   const divRef = useRef<HTMLDivElement>(null);
-  const mapRef = useRef<L.Map | null>(null);
-  const tileRef = useRef<L.TileLayer | null>(null);
+  const mapRef = useRef<mapboxgl.Map | null>(null);
+  const markersRef = useRef<mapboxgl.Marker[]>([]);
+  const styleRef = useRef<string>('');
+  const [styleReady, setStyleReady] = useState(false);
+  const token = getMapboxToken();
 
+  // Create the map once (token must exist)
   useEffect(() => {
-    if (!divRef.current) return;
-    if (!mapRef.current) {
-      mapRef.current = L.map(divRef.current, { zoomControl: false }).setView([17.385, 78.486], 11);
-      L.control.zoom({ position: 'bottomright' }).addTo(mapRef.current);
-    }
-    const map = mapRef.current;
-
-    // Swap basemap tiles when theme changes
-    const wantUrl = BASEMAPS[basemap].url;
-    if (!tileRef.current || (tileRef.current as L.TileLayer & { _url?: string })._url !== wantUrl) {
-      if (tileRef.current) map.removeLayer(tileRef.current);
-      tileRef.current = L.tileLayer(wantUrl, { attribution: BASEMAPS[basemap].attribution });
-      tileRef.current.addTo(map);
-    }
-
-    // Clear overlay layers (keep tile layer)
-    map.eachLayer((layer) => {
-      if (layer !== tileRef.current) map.removeLayer(layer);
+    if (!divRef.current || mapRef.current || !token) return;
+    mapboxgl.accessToken = token;
+    const map = new mapboxgl.Map({
+      container: divRef.current,
+      style: BASEMAPS[basemap].style,
+      center: [78.486, 17.385],
+      zoom: 11
     });
+    styleRef.current = BASEMAPS[basemap].style;
+    map.addControl(new mapboxgl.NavigationControl({ visualizePitch: false }), 'bottom-right');
+    map.on('load', () => setStyleReady(true));
+    mapRef.current = map;
+    return () => {
+      markersRef.current.forEach((m) => m.remove());
+      markersRef.current = [];
+      map.remove();
+      mapRef.current = null;
+      styleRef.current = '';
+      setStyleReady(false);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token]);
+
+  // Swap Mapbox style when basemap changes (sources re-added by overlay effect)
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !token) return;
+    const want = BASEMAPS[basemap].style;
+    if (styleRef.current === want) return;
+    styleRef.current = want;
+    setStyleReady(false);
+    try {
+      map.setStyle(want);
+      map.once('idle', () => setStyleReady(true));
+    } catch {
+      setStyleReady(true);
+    }
+  }, [basemap, token]);
+
+  // Render overlays: demand bubbles, warehouse pins, radius circles, assignment lines
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !token || !styleReady) return;
+
+    // Clear previous markers
+    markersRef.current.forEach((m) => m.remove());
+    markersRef.current = [];
+    removeLayerAndSource(map, ROUTES_OK, ROUTES_OK);
+    removeLayerAndSource(map, ROUTES_BAD, ROUTES_BAD);
+    removeLayerAndSource(map, `${RADIUS_SRC}-fill`, RADIUS_SRC);
+    // (fill + line share one source; remove both layers first)
+    try {
+      if (map.getLayer(`${RADIUS_SRC}-line`)) map.removeLayer(`${RADIUS_SRC}-line`);
+    } catch { /* ignore */ }
 
     const asgByNb = new Map(assignments.map((a) => [a.neighborhood_id, a]));
     const orders = neighborhoods.map((n) => Number(n.daily_orders) || 0);
     const minOrders = orders.length ? Math.min(...orders) : 0;
     const maxOrders = orders.length ? Math.max(...orders) : 1;
-    const bounds: L.LatLngExpression[] = [];
+    const bounds = new mapboxgl.LngLatBounds();
+    let hasBounds = false;
+    const extend = (lat: number, lon: number) => {
+      if (Number.isFinite(lat) && Number.isFinite(lon)) {
+        bounds.extend([lon, lat]);
+        hasBounds = true;
+      }
+    };
 
     const resolveColor = (n: Neighborhood): { color: string; tag: string } => {
       if (colorBy === 'zone') {
@@ -137,96 +219,160 @@ export const MapView: React.FC<MapViewProps> = ({
         const frac = Math.sqrt((Number(n.daily_orders) || 0) / Math.max(1, maxOrders));
         const isHi = highlightId === n.neighborhood_id;
         const r = (4 + frac * 18) * (isHi ? 1.35 : 1);
-        bounds.push([n.latitude, n.longitude]);
-        L.circleMarker([n.latitude, n.longitude], {
-          radius: r,
-          color: isHi ? '#F0A0EA' : color,
-          weight: isHi ? 3 : 2,
-          fillColor: color,
-          fillOpacity: 0.45
-        })
-          .bindTooltip(
-            `<b>${n.neighborhood_id}</b> ${n.name || ''}<br/>${n.daily_orders} orders • ${n.zone || 'Unzoned'}<br/>${n.latitude.toFixed(4)}, ${n.longitude.toFixed(4)}<br/>Color: ${tag}${a ? `<br/>→ ${a.warehouse_id} (${a.distance_km} km)` : ''}`
-          )
-          .addTo(map);
+        extend(n.latitude, n.longitude);
+        const el = document.createElement('div');
+        el.style.width = `${r * 2}px`;
+        el.style.height = `${r * 2}px`;
+        el.style.borderRadius = '50%';
+        el.style.backgroundColor = `${color}73`;
+        el.style.border = `2px solid ${isHi ? '#F0A0EA' : color}`;
+        el.style.boxShadow = isHi ? '0 0 0 3px rgba(240,160,234,.5)' : 'none';
+        el.style.cursor = 'pointer';
+        const popup = new mapboxgl.Popup({ offset: 12, closeButton: false }).setHTML(
+          `<b>${n.neighborhood_id}</b> ${n.name || ''}<br/>${n.daily_orders} orders • ${n.zone || 'Unzoned'}<br/>${Number(n.latitude).toFixed(4)}, ${Number(n.longitude).toFixed(4)}<br/>Color: ${tag}${a ? `<br/>→ ${a.warehouse_id} (${a.distance_km} km)` : ''}`
+        );
+        const marker = new mapboxgl.Marker({ element: el }).setLngLat([n.longitude, n.latitude]).setPopup(popup).addTo(map);
+        markersRef.current.push(marker);
       });
     } else {
-      neighborhoods.forEach((n) => bounds.push([n.latitude, n.longitude]));
+      neighborhoods.forEach((n) => extend(n.latitude, n.longitude));
     }
 
     const whById = new Map(warehouses.map((w) => [w.warehouse_id, w]));
     if (showWarehouses) {
       warehouses.forEach((w) => {
-        bounds.push([w.latitude, w.longitude]);
+        extend(w.latitude, w.longitude);
         const color = whColor(w.warehouse_id);
-        L.marker([w.latitude, w.longitude], {
-          icon: L.divIcon({
-            className: '',
-            html: `<div style="background:${color};color:#fff;font-weight:800;font-size:11px;border-radius:10px;padding:3px 9px;border:2px solid ${pinBorder};box-shadow:0 2px 6px rgba(0,0,0,.3)">${w.warehouse_id}</div>`,
-            iconSize: [44, 24],
-            iconAnchor: [22, 12]
-          })
-        })
-          .bindTooltip(`<b>${w.warehouse_id}</b><br/>${w.latitude.toFixed(4)}, ${w.longitude.toFixed(4)}<br/>${w.assigned_orders || 0} orders`)
-          .addTo(map);
-        if (showRadius && radiusKm && radiusKm > 0) {
-          L.circle([w.latitude, w.longitude], {
-            radius: radiusKm * 1000,
-            color,
-            weight: 1.5,
-            dashArray: '6 6',
-            fillOpacity: 0.06
-          }).addTo(map);
-        }
+        const el = document.createElement('div');
+        el.style.background = color;
+        el.style.color = '#fff';
+        el.style.fontWeight = '800';
+        el.style.fontSize = '11px';
+        el.style.borderRadius = '10px';
+        el.style.padding = '3px 9px';
+        el.style.border = `2px solid ${pinBorder}`;
+        el.style.boxShadow = '0 2px 6px rgba(0,0,0,.3)';
+        el.style.cursor = 'pointer';
+        el.style.whiteSpace = 'nowrap';
+        el.textContent = w.warehouse_id;
+        const popup = new mapboxgl.Popup({ offset: 14, closeButton: false }).setHTML(
+          `<b>${w.warehouse_id}</b><br/>${Number(w.latitude).toFixed(4)}, ${Number(w.longitude).toFixed(4)}<br/>${w.assigned_orders || 0} orders`
+        );
+        const marker = new mapboxgl.Marker({ element: el }).setLngLat([w.longitude, w.latitude]).setPopup(popup).addTo(map);
+        markersRef.current.push(marker);
       });
     }
 
-    // Polylines neighborhood → assigned warehouse (must match assignment table)
-    if (showRoutes) {
+    // Service-radius circles as filled GeoJSON polygons
+    if (showRadius && showWarehouses && radiusKm && radiusKm > 0 && warehouses.length > 0) {
+      const features = warehouses.map((w) => ({
+        type: 'Feature' as const,
+        properties: { color: whColor(w.warehouse_id) },
+        geometry: { type: 'Polygon' as const, coordinates: circlePolygon(w.latitude, w.longitude, radiusKm) }
+      }));
+      try {
+        map.addSource(RADIUS_SRC, { type: 'geojson', data: { type: 'FeatureCollection', features } });
+        map.addLayer({
+          id: `${RADIUS_SRC}-fill`,
+          type: 'fill',
+          source: RADIUS_SRC,
+          paint: { 'fill-color': ['get', 'color'], 'fill-opacity': 0.06 }
+        });
+        map.addLayer({
+          id: `${RADIUS_SRC}-line`,
+          type: 'line',
+          source: RADIUS_SRC,
+          paint: { 'line-color': ['get', 'color'], 'line-width': 1.5, 'line-dasharray': [2, 2] }
+        });
+      } catch { /* style race — next render retries */ }
+    }
+
+    // Assignment lines neighborhood → warehouse (must match assignment table)
+    if (showRoutes && assignments.length > 0) {
+      const okFeatures: unknown[] = [];
+      const badFeatures: unknown[] = [];
       assignments.forEach((a) => {
         const nb = neighborhoods.find((n) => n.neighborhood_id === a.neighborhood_id);
         const wh = whById.get(a.warehouse_id);
         if (!nb || !wh) return;
-        L.polyline([[nb.latitude, nb.longitude], [wh.latitude, wh.longitude]], {
-          color: lineColor(a.warehouse_id),
-          weight: routeColor ? 2 : 1,
-          opacity: a.is_feasible ? 0.75 : 0.9,
-          dashArray: a.is_feasible ? undefined : '4 4'
-        }).addTo(map);
+        const feat = {
+          type: 'Feature',
+          properties: { color: lineColor(a.warehouse_id) },
+          geometry: {
+            type: 'LineString',
+            coordinates: [[nb.longitude, nb.latitude], [wh.longitude, wh.latitude]]
+          }
+        };
+        (a.is_feasible ? okFeatures : badFeatures).push(feat);
       });
+      try {
+        if (okFeatures.length > 0) {
+          map.addSource(ROUTES_OK, { type: 'geojson', data: { type: 'FeatureCollection', features: okFeatures as never[] } });
+          map.addLayer({
+            id: ROUTES_OK,
+            type: 'line',
+            source: ROUTES_OK,
+            paint: { 'line-color': ['get', 'color'], 'line-width': routeColor ? 2 : 1, 'line-opacity': 0.75 }
+          });
+        }
+        if (badFeatures.length > 0) {
+          map.addSource(ROUTES_BAD, { type: 'geojson', data: { type: 'FeatureCollection', features: badFeatures as never[] } });
+          map.addLayer({
+            id: ROUTES_BAD,
+            type: 'line',
+            source: ROUTES_BAD,
+            paint: { 'line-color': ['get', 'color'], 'line-width': 1.5, 'line-opacity': 0.9, 'line-dasharray': [2, 2] }
+          });
+        }
+      } catch { /* style race — next render retries */ }
     }
 
-    if (bounds.length > 0 && !focus) {
+    if (hasBounds && !focus) {
       try {
-        map.fitBounds(L.latLngBounds(bounds).pad(0.15));
+        map.fitBounds(bounds, { padding: 60, maxZoom: 14 });
       } catch {
         /* single-point safe */
       }
     }
-    map.invalidateSize();
-  }, [neighborhoods, warehouses, assignments, radiusKm, basemap, colorBy, zoneColors, showWarehouses, showRoutes, showDemand, showRadius, routeColor, theme, highlightId, focus]);
+    try {
+      map.resize();
+    } catch { /* ignore */ }
+  }, [neighborhoods, warehouses, assignments, radiusKm, basemap, styleReady, token, colorBy, zoneColors, showWarehouses, showRoutes, showDemand, showRadius, routeColor, theme, highlightId, focus]);
 
   // Fly-to on focus requests (gmaps "Center" action)
   useEffect(() => {
     if (focus && mapRef.current) {
       try {
-        mapRef.current.flyTo([focus.lat, focus.lon], focus.zoom ?? 14, { duration: 0.9 });
+        mapRef.current.flyTo({ center: [focus.lon, focus.lat], zoom: focus.zoom ?? 14, duration: 900 });
       } catch {
         /* ignore */
       }
     }
   }, [focus]);
 
-  useEffect(() => {
-    return () => {
-      mapRef.current?.remove();
-      mapRef.current = null;
-      tileRef.current = null;
-    };
-  }, []);
-
   const counts = zoneCounts(neighborhoods);
   const zoneList = Object.keys(counts).sort((a, b) => a.localeCompare(b));
+
+  if (!token) {
+    return (
+      <div
+        style={fill ? { height: '100%' } : { height }}
+        className="flex items-center justify-center bg-slate-100 rounded-3xl border border-slate-200 p-8 text-center"
+      >
+        <div className="max-w-md">
+          <h3 className="font-bold text-sm text-slate-900">🗺️ Mapbox token missing</h3>
+          <p className="text-[12px] text-slate-600 mt-2">
+            Mapbox needs a public token even for local dev (free tier covers it).
+            Get one at <span className="font-mono">mapbox.com → Account → Tokens</span>, then:
+          </p>
+          <pre className="mt-3 text-left text-[11px] font-mono bg-slate-900 text-emerald-300 rounded-xl p-3 overflow-x-auto">
+{`# frontend/.env.local\nVITE_MAPBOX_TOKEN=pk.your_token_here`}
+          </pre>
+          <p className="text-[11px] text-slate-500 mt-2">Restart <span className="font-mono">pnpm dev</span> after adding it.</p>
+        </div>
+      </div>
+    );
+  }
 
   if (minimal) {
     return <div ref={divRef} style={fill ? { height: '100%' } : { height }} className="z-0 h-full w-full" />;

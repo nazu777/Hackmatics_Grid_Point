@@ -1,4 +1,4 @@
-@import 'leaflet/dist/leaflet.css';
+@import 'mapbox-gl/dist/mapbox-gl.css';
 
 @tailwind base;
 @tailwind components;
@@ -90,42 +90,24 @@ body {
 .dark table thead tr { background-color: #131316 !important; }
 .dark .divide-slate-100 > :not([hidden]) ~ :not([hidden]) { border-color: #2C2C33 !important; }
 .dark .hover\:bg-slate-50\/70:hover { background-color: rgba(20, 48, 56, 0.7) !important; }
-.dark .leaflet-container { background: #131316; }
+.dark .mapboxgl-canvas-container { background: #131316; }
 
-/* Custom Leaflet Popups and Controls */
-.leaflet-popup-content-wrapper {
+/* Custom Mapbox Popups and Controls */
+.mapboxgl-popup-content {
   background: #ffffff;
   border-radius: 1rem;
   box-shadow: 0 10px 25px -5px rgba(15, 23, 42, 0.15), 0 8px 10px -6px rgba(15, 23, 42, 0.1);
-  padding: 0;
-  overflow: hidden;
+  padding: 10px 12px;
   border: 1px solid #e2e8f0;
-}
-
-.leaflet-popup-content {
-  margin: 0;
+  font-family: inherit;
+  font-size: 12px;
   line-height: 1.5;
 }
 
-.leaflet-container {
-  font-family: inherit;
-}
-
-.leaflet-bar {
+.mapboxgl-ctrl-group {
   border-radius: 0.75rem !important;
   overflow: hidden;
   border: 1px solid #e2e8f0 !important;
   box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05) !important;
-}
-
-.leaflet-bar a {
-  background-color: #ffffff !important;
-  color: #1e293b !important;
-  border-bottom: 1px solid #f1f5f9 !important;
-}
-
-.leaflet-bar a:hover {
-  background-color: #f8fafc !important;
-  color: #0f172a !important;
 }
 

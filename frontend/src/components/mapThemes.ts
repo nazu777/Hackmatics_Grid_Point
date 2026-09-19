@@ -1,52 +1,35 @@
 import { useState, useCallback } from 'react';
 import type { BasemapStyle, Neighborhood, ZoneColorMap } from '../types';
 
-/** Optional CARTO API key (Vite env). CARTO raster tiles now watermark without one — see https://carto.com/basemaps/apikey. */
-function getCartoKey(): string {
+/** Mapbox public token (Vite env). Required even for local dev — free tier covers it. */
+export function getMapboxToken(): string {
   try {
     const env = import.meta.env as Record<string, string | undefined>;
-    return env.VITE_CARTO_KEY || env.VITE_CARTO_API_KEY || '';
+    return env.VITE_MAPBOX_TOKEN || '';
   } catch {
     return '';
   }
 }
 
-const CARTO_KEY = getCartoKey();
+/** True when a Mapbox token is configured. */
+export const MAPBOX_TOKEN_CONFIGURED = getMapboxToken().length > 0;
 
-/** True when a CARTO key is configured (CARTO positron/dark styles used); false = keyless Esri grey fallbacks. */
-export const CARTO_KEY_CONFIGURED = CARTO_KEY.length > 0;
-
-/** Shared basemap registry — keyless by default (no watermark).
- * OSM Standard needs no key. Light/Dark use Esri grey canvases (no key) unless
- * VITE_CARTO_KEY / VITE_CARTO_API_KEY is set, in which case CARTO positron/dark_all are used with ?key=. */
-export const BASEMAPS: Record<BasemapStyle, { url: string; attribution: string; label: string }> = {
+/** Shared basemap registry — Mapbox vector styles.
+ * Keys stay 'osm' | 'positron' | 'dark' so saved prefs keep working;
+ * values are now mapbox:// style URLs (Standard / Light / Dark). */
+export const BASEMAPS: Record<BasemapStyle, { style: string; label: string }> = {
   osm: {
-    url: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
-    attribution: '&copy; OpenStreetMap contributors',
+    style: 'mapbox://styles/mapbox/streets-v12',
     label: 'Standard'
   },
-  positron: CARTO_KEY
-    ? {
-        url: `https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png?key=${CARTO_KEY}`,
-        attribution: '&copy; OpenStreetMap contributors &copy; CARTO',
-        label: 'Light'
-      }
-    : {
-        url: 'https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}',
-        attribution: 'Tiles &copy; Esri &mdash; Esri, DeLorme, NAVTEQ | &copy; OpenStreetMap contributors',
-        label: 'Light'
-      },
-  dark: CARTO_KEY
-    ? {
-        url: `https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png?key=${CARTO_KEY}`,
-        attribution: '&copy; OpenStreetMap contributors &copy; CARTO',
-        label: 'Dark'
-      }
-    : {
-        url: 'https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}',
-        attribution: 'Tiles &copy; Esri &mdash; Esri, DeLorme, NAVTEQ | &copy; OpenStreetMap contributors',
-        label: 'Dark'
-      }
+  positron: {
+    style: 'mapbox://styles/mapbox/light-v11',
+    label: 'Light'
+  },
+  dark: {
+    style: 'mapbox://styles/mapbox/dark-v11',
+    label: 'Dark'
+  }
 };
 
 /** Default land-use category colors (legend-ready). */
