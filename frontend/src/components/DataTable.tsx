@@ -106,29 +106,29 @@ export const DataTable: React.FC<DataTableProps> = ({ neighborhoods, errors, onC
   };
 
   return (
-    <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+    <div className="bg-white rounded-2xl border border-[#E4E1D2] shadow-sm overflow-hidden">
       {/* Table Toolbar */}
-      <div className="p-4 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-        <div className="flex items-center space-x-2">
-          <div className="relative">
-            <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
+      <div className="p-3 border-b border-[#E4E1D2] flex flex-col items-stretch gap-2.5">
+        <div className="flex items-center gap-2">
+          <div className="relative flex-1">
+            <Search className="w-4 h-4 text-ink-faint absolute left-3 top-2.5" />
             <input
               type="text"
               placeholder="Search by ID, name, zone..."
               value={searchTerm}
               onChange={(e) => { setSearchTerm(e.target.value); setCurrentPage(1); }}
-              className="pl-9 pr-4 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 w-64"
+              className="w-full pl-9 pr-4 py-1.5 text-xs bg-cream-deep border border-[#E4E1D2] rounded-full focus:outline-none focus:border-gold"
             />
           </div>
-          <span className="text-xs text-slate-500 font-medium">
+        </div>
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-xs text-ink-faint font-medium">
             Showing {filtered.length} of {neighborhoods.length} rows
           </span>
-        </div>
-
-        <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5">
           <button
             onClick={handleAddRow}
-            className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 rounded-xl text-xs font-semibold transition cursor-pointer"
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-grape-100 text-grape-600 hover:bg-grape-200 rounded-full text-xs font-semibold transition cursor-pointer"
           >
             <Plus className="w-3.5 h-3.5" />
             <span>Add Row</span>
@@ -136,7 +136,7 @@ export const DataTable: React.FC<DataTableProps> = ({ neighborhoods, errors, onC
 
           <button
             onClick={handleExportCsv}
-            className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-semibold transition cursor-pointer"
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-cream-deep hover:bg-gold-100 text-ink rounded-full text-xs font-semibold transition cursor-pointer"
           >
             <Download className="w-3.5 h-3.5" />
             <span>Export CSV</span>
@@ -144,11 +144,12 @@ export const DataTable: React.FC<DataTableProps> = ({ neighborhoods, errors, onC
 
           <button
             onClick={handleExportJson}
-            className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-semibold transition cursor-pointer"
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-cream-deep hover:bg-gold-100 text-ink rounded-full text-xs font-semibold transition cursor-pointer"
           >
             <Download className="w-3.5 h-3.5" />
             <span>Export JSON</span>
           </button>
+          </div>
         </div>
       </div>
 
@@ -156,7 +157,7 @@ export const DataTable: React.FC<DataTableProps> = ({ neighborhoods, errors, onC
       <div className="overflow-x-auto">
         <table className="w-full text-left border-collapse text-xs">
           <thead>
-            <tr className="bg-slate-50 border-b border-slate-200 text-slate-500 font-semibold uppercase tracking-wider">
+            <tr className="bg-cream-deep/60 border-b border-[#E4E1D2] text-ink-faint font-semibold uppercase tracking-wider">
               <th className="py-3 px-4 w-12 text-center">#</th>
               <th className="py-3 px-4 w-36">ID (Unique PK)</th>
               <th className="py-3 px-4">Name / Label</th>
@@ -170,7 +171,7 @@ export const DataTable: React.FC<DataTableProps> = ({ neighborhoods, errors, onC
           <tbody className="divide-y divide-slate-100">
             {paginatedRows.length === 0 ? (
               <tr>
-                <td colSpan={8} className="py-8 text-center text-slate-400">
+                <td colSpan={8} className="py-8 text-center text-ink-faint">
                   No neighborhoods match current query or dataset is empty.
                 </td>
               </tr>
@@ -184,11 +185,11 @@ export const DataTable: React.FC<DataTableProps> = ({ neighborhoods, errors, onC
                 return (
                   <tr
                     key={row.neighborhood_id || actualIndex}
-                    className={`hover:bg-slate-50/70 transition-colors ${
+                    className={`hover:bg-cream-deep/60 transition-colors ${
                       hasError ? 'bg-rose-50/40' : ''
                     }`}
                   >
-                    <td className="py-2.5 px-4 text-center font-mono text-slate-400">
+                    <td className="py-2.5 px-4 text-center font-mono text-ink-faint">
                       {hasError ? (
                         <span title={rowErrors.map((e) => e.error).join('\n')}>
                           <AlertCircle className="w-4 h-4 text-rose-500 inline" />
@@ -204,7 +205,7 @@ export const DataTable: React.FC<DataTableProps> = ({ neighborhoods, errors, onC
                         type="text"
                         value={row.neighborhood_id}
                         onChange={(e) => handleCellChange(actualIndex, 'neighborhood_id', e.target.value)}
-                        className="w-full bg-transparent font-mono font-medium text-slate-900 focus:bg-white focus:ring-1 focus:ring-emerald-500 rounded px-1 py-0.5"
+                        className="w-full bg-transparent font-mono font-medium text-ink focus:bg-white focus:ring-1 focus:ring-gold rounded px-1 py-0.5"
                       />
                     </td>
 
@@ -214,7 +215,7 @@ export const DataTable: React.FC<DataTableProps> = ({ neighborhoods, errors, onC
                         type="text"
                         value={row.name || ''}
                         onChange={(e) => handleCellChange(actualIndex, 'name', e.target.value)}
-                        className="w-full bg-transparent text-slate-700 focus:bg-white focus:ring-1 focus:ring-emerald-500 rounded px-1 py-0.5"
+                        className="w-full bg-transparent text-ink-soft focus:bg-white focus:ring-1 focus:ring-gold rounded px-1 py-0.5"
                       />
                     </td>
 
@@ -225,7 +226,7 @@ export const DataTable: React.FC<DataTableProps> = ({ neighborhoods, errors, onC
                         step="0.000001"
                         value={row.latitude}
                         onChange={(e) => handleCellChange(actualIndex, 'latitude', e.target.value)}
-                        className="w-full bg-transparent font-mono text-slate-700 focus:bg-white focus:ring-1 focus:ring-emerald-500 rounded px-1 py-0.5"
+                        className="w-full bg-transparent font-mono text-ink-soft focus:bg-white focus:ring-1 focus:ring-gold rounded px-1 py-0.5"
                       />
                     </td>
 
@@ -236,7 +237,7 @@ export const DataTable: React.FC<DataTableProps> = ({ neighborhoods, errors, onC
                         step="0.000001"
                         value={row.longitude}
                         onChange={(e) => handleCellChange(actualIndex, 'longitude', e.target.value)}
-                        className="w-full bg-transparent font-mono text-slate-700 focus:bg-white focus:ring-1 focus:ring-emerald-500 rounded px-1 py-0.5"
+                        className="w-full bg-transparent font-mono text-ink-soft focus:bg-white focus:ring-1 focus:ring-gold rounded px-1 py-0.5"
                       />
                     </td>
 
@@ -248,7 +249,7 @@ export const DataTable: React.FC<DataTableProps> = ({ neighborhoods, errors, onC
                         step="1"
                         value={row.daily_orders}
                         onChange={(e) => handleCellChange(actualIndex, 'daily_orders', e.target.value)}
-                        className="w-full bg-transparent font-mono font-bold text-slate-900 focus:bg-white focus:ring-1 focus:ring-emerald-500 rounded px-1 py-0.5"
+                        className="w-full bg-transparent font-mono font-bold text-ink focus:bg-white focus:ring-1 focus:ring-gold rounded px-1 py-0.5"
                       />
                     </td>
 
@@ -258,7 +259,7 @@ export const DataTable: React.FC<DataTableProps> = ({ neighborhoods, errors, onC
                         type="text"
                         value={row.zone || ''}
                         onChange={(e) => handleCellChange(actualIndex, 'zone', e.target.value)}
-                        className="w-full bg-transparent text-slate-500 focus:bg-white focus:ring-1 focus:ring-emerald-500 rounded px-1 py-0.5"
+                        className="w-full bg-transparent text-ink-faint focus:bg-white focus:ring-1 focus:ring-gold rounded px-1 py-0.5"
                       />
                     </td>
 
@@ -267,7 +268,7 @@ export const DataTable: React.FC<DataTableProps> = ({ neighborhoods, errors, onC
                       <button
                         onClick={() => handleDeleteRow(actualIndex)}
                         title="Delete record"
-                        className="text-slate-400 hover:text-rose-600 transition p-1 cursor-pointer"
+                        className="text-ink-faint hover:text-rose-600 transition p-1 cursor-pointer"
                       >
                         <Trash2 className="w-4 h-4" />
                       </button>
@@ -281,7 +282,7 @@ export const DataTable: React.FC<DataTableProps> = ({ neighborhoods, errors, onC
       </div>
 
       {/* Pagination Footer */}
-      <div className="p-4 border-t border-slate-100 flex items-center justify-between text-xs text-slate-500">
+      <div className="p-3 border-t border-[#E4E1D2] flex items-center justify-between text-xs text-ink-faint">
         <div>
           Page {pageIndex} of {totalPages}
         </div>
@@ -289,14 +290,14 @@ export const DataTable: React.FC<DataTableProps> = ({ neighborhoods, errors, onC
           <button
             onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
             disabled={pageIndex === 1}
-            className="p-1.5 rounded-lg border border-slate-200 disabled:opacity-40 hover:bg-slate-50 transition"
+            className="p-1.5 rounded-lg border border-[#E4E1D2] disabled:opacity-40 hover:bg-cream-deep transition"
           >
             <ChevronLeft className="w-4 h-4" />
           </button>
           <button
             onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
             disabled={pageIndex === totalPages}
-            className="p-1.5 rounded-lg border border-slate-200 disabled:opacity-40 hover:bg-slate-50 transition"
+            className="p-1.5 rounded-lg border border-[#E4E1D2] disabled:opacity-40 hover:bg-cream-deep transition"
           >
             <ChevronRight className="w-4 h-4" />
           </button>

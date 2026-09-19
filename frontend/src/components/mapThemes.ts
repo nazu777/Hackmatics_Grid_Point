@@ -34,7 +34,7 @@ export const BASEMAPS: Record<BasemapStyle, { style: string; label: string }> = 
 
 /** Default land-use category colors (legend-ready). */
 export const DEFAULT_ZONE_COLORS: ZoneColorMap = {
-  Residential: '#10b981',
+  Residential: '#0ea5e9',
   Commercial: '#3b82f6',
   Industrial: '#f59e0b',
   Mixed: '#8b5cf6'

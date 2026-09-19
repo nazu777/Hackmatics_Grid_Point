@@ -13,15 +13,15 @@ export const ErrorDrawer: React.FC<ErrorDrawerProps> = ({ isOpen, onClose, error
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-y-0 right-0 z-50 w-full max-w-md bg-white shadow-2xl border-l border-slate-200 flex flex-col animate-in slide-in-from-right duration-200">
-      <div className="p-4 border-b border-slate-100 flex items-center justify-between bg-slate-50">
+    <div className="fixed inset-y-0 right-0 z-50 w-full max-w-md bg-white shadow-2xl border-l border-[#E4E1D2] flex flex-col">
+      <div className="p-4 border-b border-[#E4E1D2] flex items-center justify-between bg-cream-deep/60">
         <div className="flex items-center space-x-2">
           <AlertCircle className="w-5 h-5 text-rose-600" />
-          <h3 className="font-bold text-slate-900 text-sm">Validation Diagnostics</h3>
+          <h3 className="font-bold text-ink text-sm">Validation Diagnostics</h3>
         </div>
         <button
           onClick={onClose}
-          className="p-1 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-200/60 transition cursor-pointer"
+          className="p-1 rounded-lg text-ink-faint hover:text-ink hover:bg-cream-deep transition cursor-pointer"
         >
           <X className="w-4 h-4" />
         </button>
@@ -29,7 +29,7 @@ export const ErrorDrawer: React.FC<ErrorDrawerProps> = ({ isOpen, onClose, error
 
       <div className="flex-1 overflow-y-auto p-4 space-y-3">
         {errors.length === 0 && warnings.length === 0 ? (
-          <div className="text-center py-12 text-slate-400 text-xs">
+          <div className="text-center py-12 text-ink-faint text-xs">
             No validation errors or warnings detected.
           </div>
         ) : (
@@ -74,10 +74,10 @@ export const ErrorDrawer: React.FC<ErrorDrawerProps> = ({ isOpen, onClose, error
         )}
       </div>
 
-      <div className="p-4 border-t border-slate-100 bg-slate-50 flex justify-end">
+      <div className="p-4 border-t border-[#E4E1D2] bg-cream-deep/60 flex justify-end">
         <button
           onClick={onClose}
-          className="px-4 py-1.5 text-xs font-semibold bg-slate-200 hover:bg-slate-300 text-slate-700 rounded-xl transition cursor-pointer"
+          className="px-4 py-1.5 text-xs font-bold bg-cream-deep hover:bg-gold-100 text-ink rounded-full transition cursor-pointer"
         >
           Close Diagnostics
         </button>

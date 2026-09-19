@@ -85,34 +85,34 @@ export const ComparisonDashboard: React.FC<Props> = ({ result }) => {
   return (
     <div className="space-y-6">
       {/* Side-by-side cards */}
-      <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm">
-        <h3 className="font-bold text-sm text-slate-900 mb-4 flex items-center gap-2">
-          <Scale className="w-4 h-4 text-indigo-600" /> Original vs Optimized — Side-by-Side (PRD §5.7)
+      <div className="card p-5">
+        <h3 className="font-bold text-sm text-ink mb-4 flex items-center gap-2">
+          <Scale className="w-4 h-4 text-grape-500" /> Original vs Optimized — Side-by-Side
         </h3>
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-          <div className="p-5 rounded-2xl bg-gradient-to-br from-emerald-50 to-teal-50 border border-emerald-200/80">
+        <div className="grid grid-cols-1 gap-3">
+          <div className="bg-cream-deep border border-[#E4E1D2] p-5 rounded-2xl">
             <div className="flex items-center justify-between">
-              <span className="text-xs font-bold text-emerald-800 uppercase tracking-wider">Distance Saved</span>
-              <Route className="w-5 h-5 text-emerald-600" />
+              <span className="text-xs font-bold text-[#14424E] uppercase tracking-wider">Distance Saved</span>
+              <Route className="w-5 h-5 text-[#14424E]" />
             </div>
-            <h4 className="text-3xl font-extrabold text-emerald-900 mt-2">{comp.delta.pct_distance_saved}%</h4>
-            <p className="text-xs text-emerald-700 mt-1">{comp.delta.weighted_distance_saved.toLocaleString()} km·orders • {comp.delta.distance_saved_km.toLocaleString()} km</p>
+            <h4 className="text-3xl font-extrabold text-ink mt-2">{comp.delta.pct_distance_saved}%</h4>
+            <p className="text-xs text-ink-soft mt-1">{comp.delta.weighted_distance_saved.toLocaleString()} km·orders • {comp.delta.distance_saved_km.toLocaleString()} km</p>
           </div>
-          <div className="p-5 rounded-2xl bg-gradient-to-br from-blue-50 to-indigo-50 border border-blue-200/80">
+          <div className="p-5 rounded-2xl bg-grape-100/70 border border-grape-200">
             <div className="flex items-center justify-between">
-              <span className="text-xs font-bold text-blue-800 uppercase tracking-wider">Cost Reduction</span>
-              <DollarSign className="w-5 h-5 text-blue-600" />
+              <span className="text-xs font-bold text-grape-600 uppercase tracking-wider">Cost Reduction</span>
+              <DollarSign className="w-5 h-5 text-grape-500" />
             </div>
-            <h4 className="text-3xl font-extrabold text-blue-900 mt-2">{comp.delta.pct_cost_saved}%</h4>
-            <p className="text-xs text-blue-700 mt-1">${comp.delta.cost_saved.toLocaleString()} saved • Baseline ${comp.baseline.metrics.total_cost.toLocaleString()} → ${comp.optimized.metrics.total_cost.toLocaleString()}</p>
+            <h4 className="text-3xl font-extrabold text-ink mt-2">{comp.delta.pct_cost_saved}%</h4>
+            <p className="text-xs text-ink-soft mt-1">${comp.delta.cost_saved.toLocaleString()} saved • Baseline ${comp.baseline.metrics.total_cost.toLocaleString()} → ${comp.optimized.metrics.total_cost.toLocaleString()}</p>
           </div>
-          <div className="p-5 rounded-2xl bg-gradient-to-br from-purple-50 to-pink-50 border border-purple-200/80">
+          <div className="p-5 rounded-2xl bg-gold-100/60 border border-gold-200">
             <div className="flex items-center justify-between">
-              <span className="text-xs font-bold text-purple-800 uppercase tracking-wider">Avg / Order</span>
-              <TrendingDown className="w-5 h-5 text-purple-600" />
+              <span className="text-xs font-bold text-gold-600 uppercase tracking-wider">Avg / Order</span>
+              <TrendingDown className="w-5 h-5 text-gold-500" />
             </div>
-            <h4 className="text-3xl font-extrabold text-purple-900 mt-2">{result.metrics.avg_distance_per_order_km} km</h4>
-            <p className="text-xs text-purple-700 mt-1">Baseline was {comp.baseline.metrics.avg_distance_per_order_km} km • Feasibility {(result.metrics.feasibility_ratio * 100).toFixed(1)}%</p>
+            <h4 className="text-3xl font-extrabold text-ink mt-2">{result.metrics.avg_distance_per_order_km} km</h4>
+            <p className="text-xs text-ink-soft mt-1">Baseline was {comp.baseline.metrics.avg_distance_per_order_km} km • Feasibility {(result.metrics.feasibility_ratio * 100).toFixed(1)}%</p>
           </div>
         </div>
 
@@ -120,7 +120,7 @@ export const ComparisonDashboard: React.FC<Props> = ({ result }) => {
         <div className="overflow-x-auto mt-5">
           <table className="w-full text-left text-xs border-collapse">
             <thead>
-              <tr className="bg-slate-50 border-b border-slate-200 text-slate-500 uppercase tracking-wider">
+              <tr className="bg-cream-deep/60 border-b border-[#E4E1D2] text-ink-faint uppercase tracking-wider">
                 <th className="py-2.5 px-4">Metric</th>
                 <th className="py-2.5 px-4 text-right">Baseline</th>
                 <th className="py-2.5 px-4 text-right">Optimized</th>
@@ -130,12 +130,12 @@ export const ComparisonDashboard: React.FC<Props> = ({ result }) => {
             </thead>
             <tbody className="divide-y divide-slate-100">
               {rows.map((r) => (
-                <tr key={r.label} className="hover:bg-slate-50/70">
-                  <td className="py-2 px-4 font-medium text-slate-800">{r.label}</td>
-                  <td className="py-2 px-4 text-right font-mono text-slate-500">{r.baseline.toLocaleString()}</td>
-                  <td className="py-2 px-4 text-right font-mono font-bold text-emerald-700">{r.optimized.toLocaleString()}</td>
-                  <td className="py-2 px-4 text-right font-mono text-slate-700">{r.saved.toLocaleString()}</td>
-                  <td className="py-2 px-4 text-right font-mono text-emerald-700">{r.pct}%</td>
+                <tr key={r.label} className="hover:bg-cream-deep/60">
+                  <td className="py-2 px-4 font-medium text-ink-soft">{r.label}</td>
+                  <td className="py-2 px-4 text-right font-mono text-ink-faint">{r.baseline.toLocaleString()}</td>
+                  <td className="py-2 px-4 text-right font-mono font-bold text-[#14424E]">{r.optimized.toLocaleString()}</td>
+                  <td className="py-2 px-4 text-right font-mono text-ink-soft">{r.saved.toLocaleString()}</td>
+                  <td className="py-2 px-4 text-right font-mono text-[#14424E]">{r.pct}%</td>
                 </tr>
               ))}
             </tbody>
@@ -144,26 +144,26 @@ export const ComparisonDashboard: React.FC<Props> = ({ result }) => {
       </div>
 
       {/* Distance distribution */}
-      <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm">
-        <h3 className="font-bold text-sm text-slate-900 mb-1">📊 Distance Distribution (optimized, km)</h3>
-        <p className="text-[11px] text-slate-500 mb-4">Histogram of neighborhood→warehouse distances; verifies map lines match assignment table.</p>
+      <div className="card p-5">
+        <h3 className="font-bold text-sm text-ink mb-1">📊 Distance Distribution (optimized, km)</h3>
+        <p className="text-[11px] text-ink-faint mb-4">Histogram of neighborhood→warehouse distances; verifies map lines match assignment table.</p>
         <div className="flex items-end gap-1.5 h-32">
           {hist.map((h, i) => (
             <div key={i} className="flex-1 flex flex-col items-center gap-1" title={`${h.label} km: ${h.count}`}>
-              <span className="text-[10px] font-mono text-slate-500">{h.count}</span>
-              <div className="w-full rounded-t-md bg-emerald-500/80 hover:bg-emerald-600 transition" style={{ height: `${Math.max(4, (h.count / maxBin) * 90)}px` }} />
-              <span className="text-[9px] font-mono text-slate-400 hidden sm:block">{h.label}</span>
+              <span className="text-[10px] font-mono text-ink-faint">{h.count}</span>
+              <div className="w-full rounded-t-md bg-[#14424E]/80 hover:bg-[#14424E] transition" style={{ height: `${Math.max(4, (h.count / maxBin) * 90)}px` }} />
+              <span className="text-[9px] font-mono text-ink-faint hidden">{h.label}</span>
             </div>
           ))}
         </div>
       </div>
 
       {/* Exports */}
-      <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm flex flex-wrap gap-3">
-        <button onClick={exportMetrics} className="flex items-center gap-2 px-4 py-2 bg-slate-900 hover:bg-slate-700 text-white rounded-xl text-xs font-bold transition cursor-pointer">
+      <div className="card p-5 flex flex-wrap gap-3">
+        <button onClick={exportMetrics} className="flex items-center gap-2 px-4 py-2 bg-[#14424E] hover:bg-[#0d333d] text-white rounded-full text-xs font-bold transition cursor-pointer">
           <Download className="w-4 h-4" /> Metrics Table (CSV)
         </button>
-        <button onClick={exportAssignments} className="flex items-center gap-2 px-4 py-2 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 rounded-xl text-xs font-bold transition cursor-pointer">
+        <button onClick={exportAssignments} className="flex items-center gap-2 px-4 py-2 bg-white border border-[#E4E1D2] hover:bg-cream-deep text-ink rounded-full text-xs font-bold transition cursor-pointer">
           <Download className="w-4 h-4" /> Assignments (CSV)
         </button>
       </div>

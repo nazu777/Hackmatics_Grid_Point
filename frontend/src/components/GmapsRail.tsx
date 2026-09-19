@@ -56,7 +56,7 @@ export const GmapsRail: React.FC<GmapsRailProps> = ({ tab, onTab, theme, onTheme
         key={item.id}
         onClick={() => onTab(item.id)}
         title={item.label}
-        className="flex flex-col items-center gap-1 py-2 cursor-pointer group"
+        className="flex flex-col items-center gap-1 py-2 cursor-pointer group w-full"
       >
         <span
           className={`w-11 h-11 rounded-2xl flex items-center justify-center transition ${

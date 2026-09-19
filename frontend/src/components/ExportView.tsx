@@ -97,10 +97,10 @@ export const ExportView: React.FC<ExportViewProps> = ({ neighborhoods, result })
   return (
     <div className="space-y-5">
       <div>
-        <h2 className="font-display font-semibold text-[32px] text-ink leading-tight">Export Reports ({cards.filter((c) => c.enabled).length})</h2>
+        <h2 className="font-display font-semibold text-[24px] text-ink leading-tight">Export Reports ({cards.filter((c) => c.enabled).length})</h2>
         <p className="text-[13px] text-ink-faint mt-1">Download datasets, comparisons and map snapshots. Reports unlock as you progress.</p>
       </div>
-      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 gap-3">
         {cards.map((c) => {
           const Icon = c.icon;
           return (
@@ -115,7 +115,7 @@ export const ExportView: React.FC<ExportViewProps> = ({ neighborhoods, result })
                 disabled={!c.enabled}
                 className={`mt-4 px-4 py-2 rounded-full text-xs font-bold transition cursor-pointer ${
                   c.enabled
-                    ? 'bg-pine-700 text-white hover:bg-pine-800'
+                    ? 'bg-[#14424E] text-white hover:bg-[#0d333d]'
                     : 'bg-cream-deep text-ink-faint cursor-not-allowed opacity-70'
                 }`}
               >

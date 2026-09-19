@@ -36,22 +36,22 @@ export const FileUploader: React.FC<FileUploaderProps> = ({ onDataLoaded, onOpen
   };
 
   return (
-    <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm mb-6">
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-4">
+    <div className="card p-4 mb-4">
+      <div className="flex flex-col items-start gap-3 mb-4">
         <div>
-          <h2 className="text-lg font-bold text-slate-900 flex items-center gap-2">
-            <UploadCloud className="w-5 h-5 text-emerald-600" />
-            Data Ingestion Layer (schema.md §3)
+          <h2 className="text-[15px] font-bold text-ink flex items-center gap-2">
+            <UploadCloud className="w-5 h-5 text-[#14424E]" />
+            Demand Data
           </h2>
-          <p className="text-xs text-slate-500">
-            Upload CSV/JSON files with auto-detected aliases or generate synthetic clusters
+          <p className="text-xs text-ink-faint">
+            Upload CSV/JSON with auto-detected headers, or generate synthetic clusters
           </p>
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
           <button
             onClick={onOpenSyntheticModal}
-            className="flex items-center gap-1.5 px-3.5 py-2 bg-gradient-to-r from-emerald-600 to-teal-600 text-white rounded-xl text-xs font-semibold shadow-sm hover:from-emerald-700 hover:to-teal-700 transition-all cursor-pointer"
+            className="flex items-center gap-1.5 px-4 py-2 bg-[#14424E] hover:bg-[#0d333d] text-white rounded-full text-xs font-bold transition cursor-pointer"
           >
             <Sparkles className="w-4 h-4" />
             <span>Generate Synthetic</span>
@@ -65,10 +65,10 @@ export const FileUploader: React.FC<FileUploaderProps> = ({ onDataLoaded, onOpen
         onDragLeave={() => setIsDragging(false)}
         onDrop={handleDrop}
         onClick={() => fileInputRef.current?.click()}
-        className={`border-2 border-dashed rounded-2xl p-8 text-center cursor-pointer transition-all ${
+        className={`border-2 border-dashed rounded-2xl p-6 text-center cursor-pointer transition-all ${
           isDragging
-            ? 'border-emerald-500 bg-emerald-50/50'
-            : 'border-slate-200 hover:border-emerald-400 hover:bg-slate-50/70'
+            ? 'border-[#14424E] bg-grape-100/60'
+            : 'border-[#E4E1D2] hover:border-gold hover:bg-cream-deep/60'
         }`}
       >
         <input
@@ -83,18 +83,18 @@ export const FileUploader: React.FC<FileUploaderProps> = ({ onDataLoaded, onOpen
           }}
         />
 
-        <div className="w-14 h-14 mx-auto rounded-2xl bg-emerald-50 text-emerald-600 flex items-center justify-center mb-3">
-          <UploadCloud className="w-7 h-7" />
+        <div className="w-12 h-12 mx-auto rounded-2xl bg-cream-deep text-[#14424E] flex items-center justify-center mb-2.5">
+          <UploadCloud className="w-6 h-6" />
         </div>
 
-        <h4 className="text-sm font-semibold text-slate-800 mb-1">
-          {uploading ? "Parsing & validating dataset..." : "Drop CSV or JSON file here, or click to browse"}
+        <h4 className="text-[13px] font-semibold text-ink mb-1">
+          {uploading ? "Parsing & validating dataset..." : "Drop CSV or JSON here, or click to browse"}
         </h4>
-        <p className="text-xs text-slate-400 max-w-md mx-auto">
-          Automatic header mapping for: <code className="bg-slate-100 px-1 py-0.5 rounded text-slate-600">neighborhood_id</code>,{' '}
-          <code className="bg-slate-100 px-1 py-0.5 rounded text-slate-600">latitude</code>,{' '}
-          <code className="bg-slate-100 px-1 py-0.5 rounded text-slate-600">longitude</code>,{' '}
-          <code className="bg-slate-100 px-1 py-0.5 rounded text-slate-600">daily_orders</code>
+        <p className="text-xs text-ink-faint max-w-md mx-auto">
+          Automatic header mapping for: <code className="bg-cream-deep px-1 py-0.5 rounded text-ink-soft">neighborhood_id</code>,{' '}
+          <code className="bg-cream-deep px-1 py-0.5 rounded text-ink-soft">latitude</code>,{' '}
+          <code className="bg-cream-deep px-1 py-0.5 rounded text-ink-soft">longitude</code>,{' '}
+          <code className="bg-cream-deep px-1 py-0.5 rounded text-ink-soft">daily_orders</code>
         </p>
 
         {uploadError && (
@@ -106,15 +106,15 @@ export const FileUploader: React.FC<FileUploaderProps> = ({ onDataLoaded, onOpen
       </div>
 
       {/* Canonical Headers Format Helper */}
-      <div className="mt-4 pt-3 border-t border-slate-100 flex flex-wrap items-center justify-between text-xs text-slate-500 gap-2">
+      <div className="mt-3 pt-3 border-t border-[#E4E1D2] flex flex-col gap-1.5 text-xs text-ink-faint">
         <div className="flex items-center gap-2">
-          <FileSpreadsheet className="w-4 h-4 text-slate-400" />
-          <span className="font-semibold text-slate-700">Supported Formats:</span>
-          <span className="bg-slate-100 px-2 py-0.5 rounded font-mono text-slate-600">.csv</span>
-          <span className="bg-slate-100 px-2 py-0.5 rounded font-mono text-slate-600">.json (array/object)</span>
+          <FileSpreadsheet className="w-4 h-4 text-ink-faint" />
+          <span className="font-semibold text-ink-soft">Supported:</span>
+          <span className="bg-cream-deep px-2 py-0.5 rounded-full font-mono">.csv</span>
+          <span className="bg-cream-deep px-2 py-0.5 rounded-full font-mono">.json</span>
         </div>
 
-        <div className="text-slate-400">
+        <div>
           Range checks: Lat [-90, 90] &bull; Lon [-180, 180] &bull; Orders &ge; 0
         </div>
       </div>

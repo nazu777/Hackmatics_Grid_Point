@@ -135,7 +135,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               <span className="block text-[13px] font-bold text-ink">{c.name}</span>
               <span className="block text-[11px] text-ink-faint">{c.detail}</span>
             </span>
-            <span className="font-mono text-[13px] font-bold text-pine-700">{c.phone}</span>
+            <span className="font-mono text-[13px] font-bold text-[#14424E]">{c.phone}</span>
           </a>
         ))}
       </div>

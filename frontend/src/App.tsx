@@ -94,6 +94,57 @@ export const App: React.FC = () => {
   // Map layer chips
   const [layers, setLayers] = useState<LayerFlags>({ warehouses: true, routes: true, demand: true, radius: true });
 
+  // Resizable sidebar (drag the right edge; width persisted)
+  const SIDEBAR_MIN = 280;
+  const SIDEBAR_MAX = 640;
+  const SIDEBAR_DEFAULT = 400;
+  const [sidebarWidth, setSidebarWidth] = useState<number>(() => {
+    try {
+      const v = parseInt(localStorage.getItem('gridpoint_sidebar_width') || '', 10);
+      if (Number.isFinite(v)) return Math.min(SIDEBAR_MAX, Math.max(SIDEBAR_MIN, v));
+    } catch { /* ignore */ }
+    return SIDEBAR_DEFAULT;
+  });
+  const sidebarWidthRef = useRef(sidebarWidth);
+  const startSidebarResize = useCallback((e: React.PointerEvent) => {
+    e.preventDefault();
+    try {
+      (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
+    } catch { /* ignore */ }
+    const startX = e.clientX;
+    const startW = sidebarWidthRef.current;
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+    const onMove = (ev: MouseEvent | PointerEvent) => {
+      const max = Math.min(SIDEBAR_MAX, Math.max(SIDEBAR_MIN + 40, window.innerWidth - 320));
+      const w = Math.min(max, Math.max(SIDEBAR_MIN, startW + ev.clientX - startX));
+      sidebarWidthRef.current = w;
+      setSidebarWidth(w);
+    };
+    const onUp = () => {
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+      window.removeEventListener('mousemove', onMove as EventListener);
+      window.removeEventListener('mouseup', onUp);
+      window.removeEventListener('pointermove', onMove as EventListener);
+      window.removeEventListener('pointerup', onUp);
+      try {
+        localStorage.setItem('gridpoint_sidebar_width', String(Math.round(sidebarWidthRef.current)));
+      } catch { /* ignore */ }
+    };
+    window.addEventListener('mousemove', onMove as EventListener);
+    window.addEventListener('mouseup', onUp);
+    window.addEventListener('pointermove', onMove as EventListener);
+    window.addEventListener('pointerup', onUp);
+  }, []);
+  const resetSidebarWidth = useCallback(() => {
+    sidebarWidthRef.current = SIDEBAR_DEFAULT;
+    setSidebarWidth(SIDEBAR_DEFAULT);
+    try {
+      localStorage.setItem('gridpoint_sidebar_width', String(SIDEBAR_DEFAULT));
+    } catch { /* ignore */ }
+  }, []);
+
   const [optimizationConfig, setOptimizationConfig] = useState<OptimizationConfig>(() => {
     const saved = localStorage.getItem('gridpoint_opt_config');
     if (saved) {
@@ -265,11 +316,14 @@ export const App: React.FC = () => {
   const kCount = optimizationResult?.warehouses.length ?? optimizationConfig.K;
 
   return (
-    <div className="h-screen w-screen flex overflow-hidden bg-cream text-ink">
+    <div className="relative h-screen w-screen flex overflow-hidden bg-cream text-ink">
       <GmapsRail tab={railTab} onTab={setPanel} theme={theme} onThemeChange={handleThemeChange} />
 
-      {/* Left panel */}
-      <aside className="w-[400px] shrink-0 h-full overflow-y-auto nice-scroll bg-white border-r border-[#E4E1D2] z-10">
+      {/* Floating panel — overlays the full-bleed map, never pushes it */}
+      <aside
+        style={{ width: sidebarWidth, left: 76 + 16, top: 16, bottom: 16 }}
+        className="absolute z-20 bg-white border border-[#E4E1D2] rounded-3xl shadow-xl shadow-black/10 overflow-y-auto nice-scroll"
+      >
         {panel === 'ask' && (
           <AskPanel
             neighborhoods={neighborhoods}
@@ -433,6 +487,15 @@ export const App: React.FC = () => {
             ))}
           </div>
         )}
+        {/* Drag handle: resize panel (double-click resets) */}
+        <div
+          onPointerDown={startSidebarResize}
+          onDoubleClick={resetSidebarWidth}
+          title="Drag to resize panel • double-click to reset"
+          className="absolute top-3 bottom-3 right-1 w-4 cursor-col-resize z-20 flex items-center justify-center touch-none select-none group"
+        >
+          <div className="w-[5px] h-16 rounded-full bg-[#E4E1D2] group-hover:bg-gold active:bg-gold transition-colors" />
+        </div>
       </aside>
 
       {/* Map area */}
@@ -461,8 +524,11 @@ export const App: React.FC = () => {
           />
         </div>
 
-        {/* Floating top bar: search + planning actions */}
-        <div className="absolute top-4 left-4 right-4 z-10 flex items-start gap-3">
+        {/* Floating top bar: search + planning actions (starts right of the panel) */}
+        <div
+          className="absolute top-4 right-4 z-10 flex items-start gap-3"
+          style={{ left: sidebarWidth + 32 }}
+        >
           <form
             onSubmit={(e) => {
               e.preventDefault();
@@ -517,12 +583,15 @@ export const App: React.FC = () => {
         </div>
 
         {/* Layer chips */}
-        <div className="absolute top-[76px] left-4 z-10">
+        <div
+          className="absolute top-[76px] z-10"
+          style={{ left: sidebarWidth + 32 }}
+        >
           <MapChips layers={layers} onToggle={toggleLayer} hasResult={!!optimizationResult} />
         </div>
 
         {/* Layers card (basemap + color-by + zones) */}
-        <div className="absolute bottom-6 left-4 z-10">
+        <div className="absolute bottom-6 right-4 z-10">
           <button
             onClick={() => setPanel('settings')}
             title="Map themes & settings"
