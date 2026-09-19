@@ -1,0 +1,8 @@
+neighborhood_id,name,latitude,longitude,daily_orders
+N001,Valid Point A,17.385044,78.486671,120
+N002,Invalid Latitude High,95.500000,78.500000,80
+N003,Invalid Longitude Low,17.370000,-195.450000,45
+N004,Negative Daily Orders,17.410000,78.490000,-15
+N001,Duplicate ID Record,17.420000,78.480000,60
+,Missing ID Record,17.430000,78.470000,50
+N007,Invalid Non-Numeric Order,17.440000,78.460000,abc

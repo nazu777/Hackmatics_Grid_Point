@@ -1,0 +1,58 @@
+[
+  {
+    "neighborhood_id": "N001",
+    "name": "Koramangala",
+    "latitude": 12.9352,
+    "longitude": 77.6245,
+    "daily_orders": 310
+  },
+  {
+    "neighborhood_id": "N002",
+    "name": "Indiranagar",
+    "latitude": 12.9784,
+    "longitude": 77.6408,
+    "daily_orders": 280
+  },
+  {
+    "neighborhood_id": "N003",
+    "name": "Whitefield",
+    "latitude": 12.9698,
+    "longitude": 77.7500,
+    "daily_orders": 350
+  },
+  {
+    "neighborhood_id": "N004",
+    "name": "HSR Layout",
+    "latitude": 12.9121,
+    "longitude": 77.6446,
+    "daily_orders": 240
+  },
+  {
+    "neighborhood_id": "N005",
+    "name": "Electronic City",
+    "latitude": 12.8452,
+    "longitude": 77.6602,
+    "daily_orders": 220
+  },
+  {
+    "neighborhood_id": "N006",
+    "name": "Jayanagar",
+    "latitude": 12.9308,
+    "longitude": 77.5838,
+    "daily_orders": 190
+  },
+  {
+    "neighborhood_id": "N007",
+    "name": "Malleshwaram",
+    "latitude": 13.0031,
+    "longitude": 77.5643,
+    "daily_orders": 160
+  },
+  {
+    "neighborhood_id": "N008",
+    "name": "Hebbal",
+    "latitude": 13.0358,
+    "longitude": 77.5970,
+    "daily_orders": 180
+  }
+]

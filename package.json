@@ -1,0 +1,14 @@
+{
+  "name": "hackmatics-gridpoint-monorepo",
+  "version": "1.0.0",
+  "private": true,
+  "description": "GRIDPOINT — Warehouse Location & Assignment Optimization Platform",
+  "scripts": {
+    "dev:backend": "backend/.venv/bin/uvicorn src.api:app --reload --port 8000 --app-dir backend",
+    "dev:frontend": "pnpm --prefix frontend dev",
+    "dev:streamlit": "backend/.venv/bin/streamlit run app.py",
+    "build:frontend": "pnpm --prefix frontend build",
+    "test:backend": "backend/.venv/bin/pytest -c backend/pyproject.toml backend/tests",
+    "test": "pnpm run test:backend"
+  }
+}

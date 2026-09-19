@@ -1,0 +1,2 @@
+# GridPoint Monorepo Python Requirements
+-r backend/requirements.txt
