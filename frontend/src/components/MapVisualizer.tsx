@@ -2,8 +2,8 @@ import React, { useEffect, useMemo } from 'react';
 import { MapContainer, TileLayer, CircleMarker, Popup, Tooltip, useMap } from 'react-leaflet';
 import L from 'leaflet';
 import { Eye, EyeOff } from 'lucide-react';
-import { Neighborhood, BasemapStyle, MapLayerOptions, ZoneColorMap } from '../types';
-import { colorForZone, zoneCounts } from './mapThemes';
+import { Neighborhood, MapLayerOptions, ZoneColorMap } from '../types';
+import { BASEMAPS, colorForZone, zoneCounts } from './mapThemes';
 
 interface MapVisualizerProps {
   neighborhoods: Neighborhood[];
@@ -94,21 +94,8 @@ export const MapVisualizer: React.FC<MapVisualizerProps> = ({
   const counts = useMemo(() => zoneCounts(neighborhoods), [neighborhoods]);
   const zoneList = useMemo(() => Object.keys(counts).sort((a, b) => a.localeCompare(b)), [counts]);
 
-  // Basemap Tile URLs
-  const basemapUrls: Record<BasemapStyle, { url: string; attribution: string }> = {
-    osm: {
-      url: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
-      attribution: '&copy; OpenStreetMap contributors',
-    },
-    positron: {
-      url: 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',
-      attribution: '&copy; OpenStreetMap contributors &copy; CARTO',
-    },
-    dark: {
-      url: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
-      attribution: '&copy; OpenStreetMap contributors &copy; CARTO',
-    },
-  };
+  // Basemap tiles — single source of truth in mapThemes.BASEMAPS (keyless Esri grey
+  // fallbacks; CARTO positron/dark only when VITE_CARTO_KEY is set).
 
   return (
     <div className="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden flex flex-col h-full relative">
@@ -204,8 +191,8 @@ export const MapVisualizer: React.FC<MapVisualizerProps> = ({
           style={{ width: '100%', height: '100%', zIndex: 10 }}
         >
           <TileLayer
-            attribution={basemapUrls[layerOptions.basemap].attribution}
-            url={basemapUrls[layerOptions.basemap].url}
+            attribution={BASEMAPS[layerOptions.basemap].attribution}
+            url={BASEMAPS[layerOptions.basemap].url}
           />
 
           <BoundsFitter bounds={bounds} />

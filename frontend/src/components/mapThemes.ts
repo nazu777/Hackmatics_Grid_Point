@@ -1,23 +1,52 @@
 import { useState, useCallback } from 'react';
 import type { BasemapStyle, Neighborhood, ZoneColorMap } from '../types';
 
-/** Shared basemap registry — same free tiles as Phase 2 MapVisualizer (no API key). */
+/** Optional CARTO API key (Vite env). CARTO raster tiles now watermark without one — see https://carto.com/basemaps/apikey. */
+function getCartoKey(): string {
+  try {
+    const env = import.meta.env as Record<string, string | undefined>;
+    return env.VITE_CARTO_KEY || env.VITE_CARTO_API_KEY || '';
+  } catch {
+    return '';
+  }
+}
+
+const CARTO_KEY = getCartoKey();
+
+/** True when a CARTO key is configured (CARTO positron/dark styles used); false = keyless Esri grey fallbacks. */
+export const CARTO_KEY_CONFIGURED = CARTO_KEY.length > 0;
+
+/** Shared basemap registry — keyless by default (no watermark).
+ * OSM Standard needs no key. Light/Dark use Esri grey canvases (no key) unless
+ * VITE_CARTO_KEY / VITE_CARTO_API_KEY is set, in which case CARTO positron/dark_all are used with ?key=. */
 export const BASEMAPS: Record<BasemapStyle, { url: string; attribution: string; label: string }> = {
   osm: {
     url: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
     attribution: '&copy; OpenStreetMap contributors',
     label: 'Standard'
   },
-  positron: {
-    url: 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',
-    attribution: '&copy; OpenStreetMap contributors &copy; CARTO',
-    label: 'Light'
-  },
-  dark: {
-    url: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
-    attribution: '&copy; OpenStreetMap contributors &copy; CARTO',
-    label: 'Dark'
-  }
+  positron: CARTO_KEY
+    ? {
+        url: `https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png?key=${CARTO_KEY}`,
+        attribution: '&copy; OpenStreetMap contributors &copy; CARTO',
+        label: 'Light'
+      }
+    : {
+        url: 'https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}',
+        attribution: 'Tiles &copy; Esri &mdash; Esri, DeLorme, NAVTEQ | &copy; OpenStreetMap contributors',
+        label: 'Light'
+      },
+  dark: CARTO_KEY
+    ? {
+        url: `https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png?key=${CARTO_KEY}`,
+        attribution: '&copy; OpenStreetMap contributors &copy; CARTO',
+        label: 'Dark'
+      }
+    : {
+        url: 'https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}',
+        attribution: 'Tiles &copy; Esri &mdash; Esri, DeLorme, NAVTEQ | &copy; OpenStreetMap contributors',
+        label: 'Dark'
+      }
 };
 
 /** Default land-use category colors (legend-ready). */
