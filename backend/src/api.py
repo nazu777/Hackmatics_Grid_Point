@@ -205,3 +205,47 @@ def export_json(payload: ExportRequest):
     """Export neighborhoods to canonical JSON format."""
     json_text = export_to_json(payload.neighborhoods)
     return PlainTextResponse(content=json_text, media_type="application/json")
+
+
+class MetricsExportRequest(BaseModel):
+    result: Dict[str, Any]
+
+
+@app.post("/api/export/metrics")
+def export_metrics(payload: MetricsExportRequest):
+    """Export Phase 4 comparison table (baseline vs optimized) as CSV."""
+    from .cost import metrics_table_rows
+    from .schema import OptimizationResult
+    try:
+        result = OptimizationResult(**payload.result)
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
+                            detail=f"Invalid OptimizationResult: {e}")
+    if not result.comparison:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
+                            detail="No comparison in result; run optimization first")
+    rows = metrics_table_rows(result.comparison.baseline.metrics,
+                              result.comparison.optimized.metrics)
+    lines = ["metric,baseline,optimized,saved,pct_saved"]
+    for r in rows:
+        lines.append(f"{r['metric']},{r['baseline']},{r['optimized']},{r['saved']},{r['pct_saved']}")
+    lines.append("")
+    lines.append("warehouse_id,assigned_orders,utilization_pct,avg_distance_km,neighborhood_count")
+    for w in result.metrics.warehouses:
+        lines.append(f"{w.warehouse_id},{w.assigned_orders},{w.utilization_pct},{w.avg_distance_km},{w.neighborhood_count}")
+    return PlainTextResponse(content="\n".join(lines), media_type="text/csv")
+
+
+@app.post("/api/export/assignments")
+def export_assignments(payload: MetricsExportRequest):
+    """Export full neighborhood→warehouse assignment table as CSV (map lines match table)."""
+    from .schema import OptimizationResult
+    try:
+        result = OptimizationResult(**payload.result)
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
+                            detail=f"Invalid OptimizationResult: {e}")
+    lines = ["neighborhood_id,warehouse_id,distance_km,weighted_distance,cost,within_radius,is_feasible"]
+    for a in result.assignments:
+        lines.append(f"{a.neighborhood_id},{a.warehouse_id},{a.distance_km},{a.weighted_distance},{a.cost},{a.within_radius},{a.is_feasible}")
+    return PlainTextResponse(content="\n".join(lines), media_type="text/csv")

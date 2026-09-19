@@ -1,0 +1,14 @@
+[
+  { "neighborhood_id": "N001", "name": "Banjara Hills", "latitude": 17.4156, "longitude": 78.4346, "daily_orders": 145 },
+  { "neighborhood_id": "N002", "name": "Jubilee Hills", "latitude": 17.4322, "longitude": 78.4070, "daily_orders": 132 },
+  { "neighborhood_id": "N003", "name": "Madhapur", "latitude": 17.4483, "longitude": 78.3915, "daily_orders": 210 },
+  { "neighborhood_id": "N004", "name": "Gachibowli", "latitude": 17.4401, "longitude": 78.3489, "daily_orders": 185 },
+  { "neighborhood_id": "N005", "name": "Kukatpally", "latitude": 17.4849, "longitude": 78.4138, "daily_orders": 98 },
+  { "neighborhood_id": "N006", "name": "Ameerpet", "latitude": 17.4375, "longitude": 78.4483, "daily_orders": 76 },
+  { "neighborhood_id": "N007", "name": "Dilsukhnagar", "latitude": 17.3688, "longitude": 78.5247, "daily_orders": 112 },
+  { "neighborhood_id": "N008", "name": "LB Nagar", "latitude": 17.3457, "longitude": 78.5520, "daily_orders": 88 },
+  { "neighborhood_id": "N009", "name": "Charminar", "latitude": 17.3616, "longitude": 78.4747, "daily_orders": 65 },
+  { "neighborhood_id": "N010", "name": "Secunderabad", "latitude": 17.4399, "longitude": 78.4983, "daily_orders": 157 },
+  { "neighborhood_id": "N011", "name": "Malakpet", "latitude": 17.3753, "longitude": 78.5000, "daily_orders": 54 },
+  { "neighborhood_id": "N012", "name": "Kondapur", "latitude": 17.4622, "longitude": 78.3560, "daily_orders": 102 }
+]

@@ -503,3 +503,89 @@ if "opt_result" in st.session_state and st.session_state.opt_result is not None:
     ]
     st.dataframe(pd.DataFrame(asgn_data), use_container_width=True)
 
+# ==========================================
+# PHASE 4: COST & COMPARATIVE EVALUATION
+# ==========================================
+if "opt_result" in st.session_state and st.session_state.opt_result is not None:
+    from src.cost import distance_histogram, metrics_table_rows
+    from src.mapping import assignment_lines, fit_bounds, map_points, to_geojson
+
+    opt_res = st.session_state.opt_result
+    st.divider()
+    st.subheader("📈 Phase 4: Delivery Cost Comparison (PRD §5.6–5.7)")
+    st.caption("Baseline vs optimized side-by-side, distance distribution, assignment map overlay, and exports.")
+
+    if opt_res.comparison:
+        base_m = opt_res.comparison.baseline.metrics
+        opt_m = opt_res.metrics
+        # Side-by-side baseline vs optimized cards
+        b1, b2, b3, b4 = st.columns(4)
+        b1.metric("Baseline Cost", f"${base_m.total_cost:,.2f}")
+        b2.metric("Optimized Cost", f"${opt_m.total_cost:,.2f}",
+                  f"-${base_m.total_cost - opt_m.total_cost:,.2f}")
+        b3.metric("Baseline Wtd Dist", f"{base_m.total_weighted_distance_km_orders:,.1f}")
+        b4.metric("Optimized Wtd Dist", f"{opt_m.total_weighted_distance_km_orders:,.1f}",
+                  f"-{base_m.total_weighted_distance_km_orders - opt_m.total_weighted_distance_km_orders:,.1f}")
+
+        # Full comparison table (exportable)
+        st.markdown("#### ⚖️ Baseline vs Optimized — Full Metrics Table")
+        rows = metrics_table_rows(base_m, opt_m)
+        st.dataframe(pd.DataFrame(rows), use_container_width=True)
+
+        # Distance distribution chart (optimized assignments)
+        st.markdown("#### 📊 Distance Distribution (optimized, km)")
+        hist = distance_histogram([a for a in opt_res.assignments], bins=10)
+        hist_df = pd.DataFrame([
+            {"bin": f"{h['bin_start']:.1f}–{h['bin_end']:.1f} km", "neighborhoods": h["count"]}
+            for h in hist
+        ]).set_index("bin")
+        st.bar_chart(hist_df)
+
+    # Assignment map overlay (demand bubbles + warehouses + lines count)
+    st.markdown("#### 🗺️ Assignment Map Overlay")
+    try:
+        nb_dicts = st.session_state.neighborhoods
+        wh_dicts = [w.model_dump() for w in opt_res.warehouses]
+        asg_dicts = [a.model_dump() for a in opt_res.assignments]
+        bounds = fit_bounds(nb_dicts, wh_dicts)
+        st.caption(f"Bounds: lat [{bounds['min_lat']:.3f}, {bounds['max_lat']:.3f}] "
+                   f"lon [{bounds['min_lon']:.3f}, {bounds['max_lon']:.3f}] • "
+                   f"{len(assignment_lines(nb_dicts, wh_dicts, asg_dicts))} assignment lines")
+        pts = map_points(nb_dicts, asg_dicts)
+        map_df = pd.DataFrame([{"lat": p["latitude"], "lon": p["longitude"]} for p in pts] +
+                              [{"lat": float(w["latitude"]), "lon": float(w["longitude"])}
+                               for w in wh_dicts])
+        st.map(map_df, zoom=10)
+        # R_max circles notice
+        if opt_res.config.radius_enabled and opt_res.config.R_max_km:
+            st.info(f"⭕ Service radius R_max = {opt_res.config.R_max_km} km enabled — "
+                    f"{opt_res.metrics.infeasible_assignments} assignments exceed radius.")
+    except Exception as e:
+        st.warning(f"Map overlay unavailable: {e}")
+
+    # Exports: metrics CSV/JSON, assignments CSV, GeoJSON map snapshot
+    st.markdown("#### ⬇️ Export Evaluation")
+    e1, e2, e3 = st.columns(3)
+    with e1:
+        if opt_res.comparison:
+            mrows = metrics_table_rows(opt_res.comparison.baseline.metrics, opt_res.metrics)
+            mcsv = "metric,baseline,optimized,saved,pct_saved\n" + "\n".join(
+                f"{r['metric']},{r['baseline']},{r['optimized']},{r['saved']},{r['pct_saved']}" for r in mrows)
+            st.download_button("⬇️ Metrics Table (CSV)", data=mcsv,
+                               file_name="gridpoint_metrics_comparison.csv", mime="text/csv")
+    with e2:
+        acsv = "neighborhood_id,warehouse_id,distance_km,weighted_distance,cost,within_radius,is_feasible\n" + "\n".join(
+            f"{a.neighborhood_id},{a.warehouse_id},{a.distance_km},{a.weighted_distance},{a.cost},"
+            f"{a.within_radius},{a.is_feasible}" for a in opt_res.assignments)
+        st.download_button("⬇️ Assignments (CSV)", data=acsv,
+                           file_name="gridpoint_assignments.csv", mime="text/csv")
+    with e3:
+        try:
+            gj = to_geojson(st.session_state.neighborhoods,
+                            [w.model_dump() for w in opt_res.warehouses],
+                            [a.model_dump() for a in opt_res.assignments])
+            st.download_button("⬇️ Map Snapshot (GeoJSON)", data=json.dumps(gj),
+                               file_name="gridpoint_map.geojson", mime="application/json")
+        except Exception as e:
+            st.warning(f"GeoJSON export unavailable: {e}")
+

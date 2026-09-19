@@ -21,6 +21,7 @@ from .schema import (
     ComparisonDelta
 )
 from .distance import compute_distance_matrix
+from .cost import assignment_cost, compute_comparison
 
 
 def weiszfeld_geometric_median(
@@ -290,7 +291,7 @@ def evaluate_network_layout(
 
         d_km = float(dist_matrix[i, assigned_k])
         weighted_d = w_i * d_km
-        cost_i = weighted_d * config.cost_per_km + (w_i * d_km * config.fuel_cost_per_km)
+        cost_i = assignment_cost(w_i, d_km, config)
 
         within_rad = True
         if config.radius_enabled and config.R_max_km is not None:
@@ -479,34 +480,10 @@ def run_optimization(
         config
     )
 
-    # Compute baseline comparison
+    # Compute baseline comparison (Phase 4 cost engine)
     baseline_eval = compute_baseline_layout(neighborhoods, config)
     opt_eval = LayoutEvaluation(metrics=metrics, warehouses=warehouses, assignments=assignments)
-
-    # Calculate savings delta
-    base_dist = baseline_eval.metrics.total_weighted_distance_km_orders
-    opt_dist = metrics.total_weighted_distance_km_orders
-    dist_saved = max(0.0, base_dist - opt_dist)
-    pct_dist_saved = round((dist_saved / max(0.001, base_dist)) * 100.0, 2)
-
-    base_cost = baseline_eval.metrics.total_cost
-    opt_cost = metrics.total_cost
-    cost_saved = max(0.0, base_cost - opt_cost)
-    pct_cost_saved = round((cost_saved / max(0.001, base_cost)) * 100.0, 2)
-
-    delta = ComparisonDelta(
-        distance_saved_km=round(max(0.0, baseline_eval.metrics.total_unweighted_distance_km - metrics.total_unweighted_distance_km), 2),
-        weighted_distance_saved=round(dist_saved, 2),
-        cost_saved=round(cost_saved, 2),
-        pct_distance_saved=pct_dist_saved,
-        pct_cost_saved=pct_cost_saved
-    )
-
-    comparison = ComparisonResult(
-        baseline=baseline_eval,
-        optimized=opt_eval,
-        delta=delta
-    )
+    comparison = compute_comparison(baseline_eval, opt_eval)
 
     return OptimizationResult(
         config=config,

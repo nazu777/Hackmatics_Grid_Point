@@ -1,0 +1,34 @@
+{
+  "schema_version": "1.0.0",
+  "generation_config": {
+    "N": 15,
+    "distribution": "clustered",
+    "num_clusters": 3,
+    "spread_km": 4.5,
+    "orders_min": 35,
+    "orders_max": 220,
+    "seed": 42,
+    "centers": [
+      { "zone": "HITEC_City_Cluster", "lat_center": 17.4435, "lon_center": 78.3772 },
+      { "zone": "Old_City_Cluster", "lat_center": 17.3616, "lon_center": 78.4747 },
+      { "zone": "Secunderabad_Cluster", "lat_center": 17.4399, "lon_center": 78.4983 }
+    ]
+  },
+  "neighborhoods": [
+    { "neighborhood_id": "SYN-H01", "name": "HITEC-A", "latitude": 17.4483, "longitude": 78.3915, "daily_orders": 210, "zone": "HITEC_City_Cluster" },
+    { "neighborhood_id": "SYN-H02", "name": "HITEC-B", "latitude": 17.4401, "longitude": 78.3489, "daily_orders": 185, "zone": "HITEC_City_Cluster" },
+    { "neighborhood_id": "SYN-H03", "name": "HITEC-C", "latitude": 17.4622, "longitude": 78.3560, "daily_orders": 102, "zone": "HITEC_City_Cluster" },
+    { "neighborhood_id": "SYN-H04", "name": "HITEC-D", "latitude": 17.4322, "longitude": 78.4070, "daily_orders": 132, "zone": "HITEC_City_Cluster" },
+    { "neighborhood_id": "SYN-H05", "name": "HITEC-E", "latitude": 17.4510, "longitude": 78.3801, "daily_orders": 76, "zone": "HITEC_City_Cluster" },
+    { "neighborhood_id": "SYN-O01", "name": "OldCity-A", "latitude": 17.3616, "longitude": 78.4747, "daily_orders": 65, "zone": "Old_City_Cluster" },
+    { "neighborhood_id": "SYN-O02", "name": "OldCity-B", "latitude": 17.3688, "longitude": 78.5247, "daily_orders": 112, "zone": "Old_City_Cluster" },
+    { "neighborhood_id": "SYN-O03", "name": "OldCity-C", "latitude": 17.3753, "longitude": 78.5000, "daily_orders": 54, "zone": "Old_City_Cluster" },
+    { "neighborhood_id": "SYN-O04", "name": "OldCity-D", "latitude": 17.3550, "longitude": 78.4860, "daily_orders": 98, "zone": "Old_City_Cluster" },
+    { "neighborhood_id": "SYN-O05", "name": "OldCity-E", "latitude": 17.3457, "longitude": 78.5520, "daily_orders": 88, "zone": "Old_City_Cluster" },
+    { "neighborhood_id": "SYN-S01", "name": "SecBad-A", "latitude": 17.4399, "longitude": 78.4983, "daily_orders": 157, "zone": "Secunderabad_Cluster" },
+    { "neighborhood_id": "SYN-S02", "name": "SecBad-B", "latitude": 17.4375, "longitude": 78.4483, "daily_orders": 76, "zone": "Secunderabad_Cluster" },
+    { "neighborhood_id": "SYN-S03", "name": "SecBad-C", "latitude": 17.4849, "longitude": 78.4138, "daily_orders": 98, "zone": "Secunderabad_Cluster" },
+    { "neighborhood_id": "SYN-S04", "name": "SecBad-D", "latitude": 17.4156, "longitude": 78.4346, "daily_orders": 145, "zone": "Secunderabad_Cluster" },
+    { "neighborhood_id": "SYN-S05", "name": "SecBad-E", "latitude": 17.4290, "longitude": 78.5100, "daily_orders": 41, "zone": "Secunderabad_Cluster" }
+  ]
+}

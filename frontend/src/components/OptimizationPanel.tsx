@@ -25,6 +25,7 @@ export const OptimizationPanel: React.FC<OptimizationPanelProps> = ({
     fuel_cost_per_km: 0.0,
     infra_cost_per_warehouse: 0.0,
     traffic_factor: 0.0,
+    vehicle_fleet: [],
     random_seed: 42,
     baseline_mode: 'centroid'
   });

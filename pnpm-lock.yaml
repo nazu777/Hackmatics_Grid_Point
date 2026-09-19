@@ -10,9 +10,6 @@ importers:
 
   frontend:
     dependencies:
-      '@types/leaflet':
-        specifier: ^1.9.22
-        version: 1.9.22
       clsx:
         specifier: ^2.1.0
         version: 2.1.1
@@ -35,6 +32,9 @@ importers:
         specifier: ^2.2.1
         version: 2.6.1
     devDependencies:
+      '@types/leaflet':
+        specifier: ^1.9.22
+        version: 1.9.22
       '@types/react':
         specifier: ^18.2.61
         version: 18.3.31

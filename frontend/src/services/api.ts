@@ -160,6 +160,30 @@ export async function optimizeNetwork(
   return localOptimizeNetwork(neighborhoods, config);
 }
 
+export async function exportMetricsCsv(result: OptimizationResult): Promise<string> {
+  try {
+    const res = await fetch(`${API_BASE}/export/metrics`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ result })
+    });
+    if (res.ok) return await res.text();
+  } catch (e) {}
+  throw new Error('Metrics export unavailable offline — use dashboard CSV button');
+}
+
+export async function exportAssignmentsCsv(result: OptimizationResult): Promise<string> {
+  try {
+    const res = await fetch(`${API_BASE}/export/assignments`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ result })
+    });
+    if (res.ok) return await res.text();
+  } catch (e) {}
+  throw new Error('Assignments export unavailable offline — use dashboard CSV button');
+}
+
 // Client-side local validation fallback adhering to schema.md §4
 export function localValidate(neighborhoods: Neighborhood[]): ValidationResult {
   const errors: any[] = [];

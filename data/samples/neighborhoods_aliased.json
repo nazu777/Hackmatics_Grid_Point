@@ -1,0 +1,10 @@
+[
+  { "id": "N001", "name": "Banjara Hills", "lat": 17.4156, "lng": 78.4346, "orders": 145 },
+  { "id": "N002", "name": "Jubilee Hills", "lat": 17.4322, "lon": 78.4070, "demand": 132 },
+  { "id": "N003", "name": "Madhapur", "lat": 17.4483, "lng": 78.3915, "orders": 210 },
+  { "id": "N004", "name": "Gachibowli", "lat": 17.4401, "lon": 78.3489, "demand": 185 },
+  { "id": "N005", "name": "Kukatpally", "lat": 17.4849, "lng": 78.4138, "orders": 98 },
+  { "id": "N006", "name": "Charminar", "lat": 17.3616, "lon": 78.4747, "orders": 65 },
+  { "id": "N007", "name": "Secunderabad", "lat": 17.4399, "lng": 78.4983, "demand": 157 },
+  { "id": "N008", "name": "Dilsukhnagar", "lat": 17.3688, "lon": 78.5247, "orders": 112 }
+]

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Sliders, Cpu, ChevronDown, ChevronUp, AlertCircle, CheckCircle2, Info, ArrowRight } from 'lucide-react';
+import { Sliders, Cpu, ChevronDown, ChevronUp, AlertCircle, ArrowRight } from 'lucide-react';
 import { OptimizationConfig, DistanceMetric, Neighborhood } from '../types';
 
 interface OptimizationControlsProps {

@@ -1,7 +1,7 @@
-import React, { useEffect, useMemo, useRef } from 'react';
+import React, { useEffect, useMemo } from 'react';
 import { MapContainer, TileLayer, CircleMarker, Popup, Tooltip, useMap } from 'react-leaflet';
 import L from 'leaflet';
-import { Layers, Eye, EyeOff, Maximize2, MapPin, Compass } from 'lucide-react';
+import { Eye, EyeOff } from 'lucide-react';
 import { Neighborhood, BasemapStyle, MapLayerOptions } from '../types';
 
 interface MapVisualizerProps {

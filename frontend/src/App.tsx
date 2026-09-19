@@ -7,6 +7,8 @@ import { SyntheticModal } from './components/SyntheticModal';
 import { ErrorDrawer } from './components/ErrorDrawer';
 import { OptimizationPanel } from './components/OptimizationPanel';
 import { MapVisualizer } from './components/MapVisualizer';
+import { MapView } from './components/MapView';
+import { ComparisonDashboard } from './components/ComparisonDashboard';
 import { OptimizationControls } from './components/OptimizationControls';
 import { Neighborhood, ValidationResult, DatasetSummary, OptimizationConfig, OptimizationResult, MapLayerOptions } from './types';
 import { validateData, localValidate } from './services/api';
@@ -218,8 +220,38 @@ export const App: React.FC = () => {
           />
         )}
 
-        {/* Phase 4+ Placeholders */}
-        {activePhase > 3 && (
+        {/* Phase 4: Cost Comparison Dashboard */}
+        {activePhase === 4 ? (
+          <div className="space-y-6">
+            {optimizationResult ? (
+              <>
+                <MapView
+                  neighborhoods={neighborhoods}
+                  warehouses={optimizationResult.warehouses}
+                  assignments={optimizationResult.assignments}
+                  radiusKm={optimizationResult.config.radius_enabled ? (optimizationResult.config.R_max_km ?? null) : null}
+                />
+                <ComparisonDashboard result={optimizationResult} />
+              </>
+            ) : (
+              <div className="bg-white rounded-3xl p-12 text-center border border-slate-200 shadow-sm my-8">
+                <div className="w-16 h-16 rounded-2xl bg-indigo-50 text-indigo-600 flex items-center justify-center mx-auto mb-4 text-2xl font-bold">
+                  📈
+                </div>
+                <h3 className="text-xl font-bold text-slate-800">Phase 4: Delivery Cost Comparison</h3>
+                <p className="text-xs text-slate-500 max-w-md mx-auto mt-2">
+                  No optimization result yet. Run the optimizer in <strong>Phase 3</strong> first — the baseline vs optimized dashboard, distance histogram, map overlay and CSV exports will appear here.
+                </p>
+                <button
+                  onClick={() => setActivePhase(3)}
+                  className="mt-6 px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition cursor-pointer"
+                >
+                  Go to Phase 3 Optimizer &rarr;
+                </button>
+              </div>
+            )}
+          </div>
+        ) : activePhase > 4 && (
           <div className="bg-white rounded-3xl p-12 text-center border border-slate-200 shadow-sm my-8">
             <div className="w-16 h-16 rounded-2xl bg-emerald-50 text-emerald-600 flex items-center justify-center mx-auto mb-4 text-2xl font-bold">
               🚀
