@@ -3,9 +3,15 @@
   "installCommand": "bash -c 'pip install -r api/requirements.txt && pnpm install'",
   "buildCommand": "pnpm run build",
   "outputDirectory": "frontend/dist",
+  "framework": "vite",
+  "functions": {
+    "api/index.py": {
+      "includeFiles": "src/**"
+    }
+  },
   "rewrites": [
     {
-      "source": "/api/(.*)",
+      "source": "/api/((?!index\\.py$).*)",
       "destination": "/api/index.py"
     },
     {
