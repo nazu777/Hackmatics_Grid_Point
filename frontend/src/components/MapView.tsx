@@ -4,7 +4,7 @@ import 'mapbox-gl/dist/mapbox-gl.css';
 import { Neighborhood, Warehouse, Assignment, BasemapStyle, ColorByMode, ZoneColorMap } from '../types';
 import { BASEMAPS, getMapboxToken, colorForZone, zoneCounts } from './mapThemes';
 
-const PALETTE = ['#10b981', '#3b82f6', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4', '#f97316', '#84cc16', '#ec4899', '#6366f1'];
+const PALETTE = ['#0ea5e9', '#3b82f6', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4', '#f97316', '#84cc16', '#ec4899', '#6366f1'];
 
 function whColor(warehouseId: string): string {
   const n = parseInt(warehouseId.replace(/\D/g, '') || '1', 10);
@@ -15,7 +15,7 @@ function demandColor(orders: number, minOrders: number, maxOrders: number): { co
   const ratio = maxOrders <= minOrders ? 0.5 : Math.max(0, Math.min(1, (orders - minOrders) / (maxOrders - minOrders)));
   if (ratio >= 0.66) return { color: '#ef4444', category: 'High' };
   if (ratio >= 0.33) return { color: '#f59e0b', category: 'Medium' };
-  return { color: '#10b981', category: 'Low' };
+  return { color: '#0ea5e9', category: 'Low' };
 }
 
 /** Approximate a geodesic circle as a GeoJSON polygon (no extra deps). */
@@ -87,6 +87,40 @@ const COLOR_MODES: { id: ColorByMode; label: string }[] = [
 const ROUTES_OK = 'gp-routes-ok';
 const ROUTES_BAD = 'gp-routes-bad';
 const RADIUS_SRC = 'gp-radius';
+const BUILDINGS_LAYER = 'gp-3d-buildings';
+
+/** Add (or remove) the 3D building-extrusion layer. Safe to call on any style. */
+function sync3DBuildings(map: mapboxgl.Map, enabled: boolean) {
+  try {
+    if (map.getLayer(BUILDINGS_LAYER)) map.removeLayer(BUILDINGS_LAYER);
+  } catch { /* ignore */ }
+  if (!enabled) return;
+  try {
+    const style = map.getStyle();
+    if (!style || !(style.sources as Record<string, unknown>).composite) return;
+    // Insert below the first label layer so extrusions don't cover place names.
+    const labelLayer = style.layers.find(
+      (l) => l.type === 'symbol' && (l.layout as Record<string, unknown> | undefined)?.['text-field']
+    )?.id;
+    map.addLayer(
+      {
+        id: BUILDINGS_LAYER,
+        source: 'composite',
+        'source-layer': 'building',
+        filter: ['==', 'extrude', 'true'],
+        type: 'fill-extrusion',
+        minzoom: 13,
+        paint: {
+          'fill-extrusion-color': '#9aa5b1',
+          'fill-extrusion-height': ['interpolate', ['linear'], ['zoom'], 13, 0, 13.05, ['get', 'height']],
+          'fill-extrusion-base': ['interpolate', ['linear'], ['zoom'], 13, 0, 13.05, ['get', 'min_height']],
+          'fill-extrusion-opacity': 0.65
+        }
+      },
+      labelLayer
+    );
+  } catch { /* style without building source — stay 2D */ }
+}
 
 function removeLayerAndSource(map: mapboxgl.Map, layerId: string, sourceId: string) {
   try {
@@ -123,6 +157,8 @@ export const MapView: React.FC<MapViewProps> = ({
   const mapRef = useRef<mapboxgl.Map | null>(null);
   const markersRef = useRef<mapboxgl.Marker[]>([]);
   const styleRef = useRef<string>('');
+  const threeDRef = useRef(false);
+  const threeDBtnRef = useRef<HTMLButtonElement | null>(null);
   const [styleReady, setStyleReady] = useState(false);
   const token = getMapboxToken();
 
@@ -134,11 +170,58 @@ export const MapView: React.FC<MapViewProps> = ({
       container: divRef.current,
       style: BASEMAPS[basemap].style,
       center: [78.486, 17.385],
-      zoom: 11
+      zoom: 11,
+      maxPitch: 75
     });
     styleRef.current = BASEMAPS[basemap].style;
-    map.addControl(new mapboxgl.NavigationControl({ visualizePitch: false }), 'bottom-right');
-    map.on('load', () => setStyleReady(true));
+    map.addControl(new mapboxgl.NavigationControl({ visualizePitch: true }), 'bottom-right');
+
+    // One-click 2D ⇄ 3D toggle (pitch + building extrusions). Refs only, so the
+    // closure stays valid for the map's lifetime.
+    const toggle3D = () => {
+      const m = mapRef.current;
+      if (!m) return;
+      threeDRef.current = !threeDRef.current;
+      const on = threeDRef.current;
+      if (threeDBtnRef.current) {
+        threeDBtnRef.current.textContent = on ? '2D' : '3D';
+        threeDBtnRef.current.title = on ? 'Switch back to 2D' : 'Tilt into 3D with buildings';
+      }
+      try {
+        if (on) m.easeTo({ pitch: 62, bearing: -20, duration: 1200 });
+        else m.easeTo({ pitch: 0, bearing: 0, duration: 1200 });
+      } catch { /* ignore */ }
+      if (m.isStyleLoaded()) sync3DBuildings(m, on);
+    };
+    const container = document.createElement('div');
+    container.className = 'mapboxgl-ctrl mapboxgl-ctrl-group';
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.textContent = '3D';
+    btn.title = 'Tilt into 3D with buildings';
+    btn.style.fontSize = '12px';
+    btn.style.fontWeight = '800';
+    btn.style.width = '30px';
+    btn.style.height = '30px';
+    btn.setAttribute('aria-label', 'Toggle 3D buildings');
+    btn.addEventListener('click', toggle3D);
+    container.appendChild(btn);
+    threeDBtnRef.current = btn;
+    map.addControl(
+      {
+        onAdd: () => container,
+        onRemove: () => {
+          container.parentNode?.removeChild(container);
+          threeDBtnRef.current = null;
+        }
+      } as mapboxgl.IControl,
+      'bottom-right'
+    );
+
+    map.on('load', () => {
+      setStyleReady(true);
+      sync3DBuildings(map, threeDRef.current);
+    });
     mapRef.current = map;
     return () => {
       markersRef.current.forEach((m) => m.remove());
@@ -334,6 +417,8 @@ export const MapView: React.FC<MapViewProps> = ({
         /* single-point safe */
       }
     }
+    // Re-apply 3D extrusions after every style swap / overlay refresh.
+    sync3DBuildings(map, threeDRef.current);
     try {
       map.resize();
     } catch { /* ignore */ }
@@ -365,7 +450,7 @@ export const MapView: React.FC<MapViewProps> = ({
             Mapbox needs a public token even for local dev (free tier covers it).
             Get one at <span className="font-mono">mapbox.com → Account → Tokens</span>, then:
           </p>
-          <pre className="mt-3 text-left text-[11px] font-mono bg-slate-900 text-emerald-300 rounded-xl p-3 overflow-x-auto">
+          <pre className="mt-3 text-left text-[11px] font-mono bg-slate-900 text-gold-300 rounded-xl p-3 overflow-x-auto">
 {`# frontend/.env.local\nVITE_MAPBOX_TOKEN=pk.your_token_here`}
           </pre>
           <p className="text-[11px] text-slate-500 mt-2">Restart <span className="font-mono">pnpm dev</span> after adding it.</p>
@@ -435,7 +520,7 @@ export const MapView: React.FC<MapViewProps> = ({
         {colorBy === 'demand' && (
           <>
             <span className="flex items-center gap-1.5">
-              <span className="inline-block w-3 h-3 rounded-full bg-[#10b981]" /> Low
+              <span className="inline-block w-3 h-3 rounded-full bg-[#0ea5e9]" /> Low
             </span>
             <span className="flex items-center gap-1.5">
               <span className="inline-block w-3.5 h-3.5 rounded-full bg-[#f59e0b]" /> Medium
