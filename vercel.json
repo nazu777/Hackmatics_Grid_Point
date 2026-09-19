@@ -4,6 +4,11 @@
   "outputDirectory": "frontend/dist",
   "installCommand": "pnpm install",
   "framework": "vite",
+  "functions": {
+    "api/index.py": {
+      "includeFiles": "backend/**"
+    }
+  },
   "rewrites": [
     {
       "source": "/api/(.*)",
