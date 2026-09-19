@@ -8,7 +8,12 @@ import {
   Warehouse,
   Assignment,
   Metrics,
-  ComparisonResult
+  ComparisonResult,
+  TradeoffPoint,
+  TradeoffResult,
+  DemandShiftStats,
+  FleetETAResult,
+  ConstraintDiagnostics
 } from '../types';
 
 // In production (single Vercel deployment) API is same-origin at /api
@@ -515,3 +520,227 @@ function localOptimizeNetwork(
     infeasibility_reason: infeasibleCount > 0 ? `${infeasibleCount} assignments exceed radius limit` : null
   };
 }
+
+// --------------------------------------------------------------------------
+// Phase 5: Scenario & Bonus API Methods with Local Fallbacks
+// --------------------------------------------------------------------------
+
+export async function getTradeoffCurve(
+  neighborhoods: Neighborhood[],
+  config: OptimizationConfig,
+  max_k: number = 6
+): Promise<TradeoffResult> {
+  try {
+    const res = await fetch(`${API_BASE}/scenarios/tradeoff`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ neighborhoods, config, max_k })
+    });
+    if (res.ok) {
+      return await res.json();
+    }
+  } catch (e) {
+    // network failure -> fallback to local simulation
+  }
+
+  // Local fallback: simulate for each K = 1..max_k
+  const points: TradeoffPoint[] = [];
+  const maxK = Math.max(1, Math.min(max_k, neighborhoods.length, 8));
+  let bestK = 1;
+  let minCost = Infinity;
+
+  const infraCost = config.infra_cost_per_warehouse || 0;
+
+  for (let k = 1; k <= maxK; k++) {
+    const tempConfig: OptimizationConfig = { ...config, K: k };
+    const opt = localOptimizeNetwork(neighborhoods, tempConfig);
+
+    const deliveryCost = opt.assignments.reduce((sum, a) => sum + a.cost, 0);
+    const infra = k * infraCost;
+    const total = deliveryCost + infra;
+
+    points.push({
+      K: k,
+      delivery_cost: parseFloat(deliveryCost.toFixed(2)),
+      infra_cost: parseFloat(infra.toFixed(2)),
+      total_cost: parseFloat(total.toFixed(2)),
+      avg_distance_km: opt.metrics.avg_distance_per_order_km,
+      pct_cost_saved: opt.comparison ? opt.comparison.delta.pct_cost_saved : 0,
+      is_feasible: opt.is_feasible
+    });
+
+    if (total < minCost) {
+      minCost = total;
+      bestK = k;
+    }
+  }
+
+  return {
+    points,
+    optimal_K: bestK,
+    min_cost: parseFloat(minCost.toFixed(2))
+  };
+}
+
+export async function applyDemandShift(
+  neighborhoods: Neighborhood[],
+  pct_delta: number
+): Promise<{ neighborhoods: Neighborhood[]; stats: DemandShiftStats }> {
+  try {
+    const res = await fetch(`${API_BASE}/scenarios/demand-shift`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ neighborhoods, pct_delta })
+    });
+    if (res.ok) {
+      return await res.json();
+    }
+  } catch (e) {
+    // fallback
+  }
+
+  // Local fallback
+  const multiplier = 1.0 + (pct_delta / 100.0);
+  let origTotal = 0;
+  let newTotal = 0;
+
+  const shifted = neighborhoods.map(n => {
+    const orig = Number(n.daily_orders) || 0;
+    origTotal += orig;
+    let next = Math.max(0, Math.round(orig * multiplier));
+    if (orig > 0 && next === 0 && multiplier > 0) next = 1;
+    newTotal += next;
+    return {
+      ...n,
+      daily_orders: next
+    };
+  });
+
+  return {
+    neighborhoods: shifted,
+    stats: {
+      pct_delta,
+      original_total_orders: origTotal,
+      new_total_orders: newTotal,
+      net_order_change: newTotal - origTotal,
+      actual_pct_change: parseFloat((((newTotal - origTotal) / Math.max(1, origTotal)) * 100).toFixed(1))
+    }
+  };
+}
+
+export async function getFleetETA(
+  assignments: Assignment[],
+  config: OptimizationConfig,
+  vehicle_type?: string
+): Promise<FleetETAResult> {
+  try {
+    const res = await fetch(`${API_BASE}/scenarios/eta`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ assignments, config, vehicle_type })
+    });
+    if (res.ok) {
+      return await res.json();
+    }
+  } catch (e) {
+    // fallback
+  }
+
+  // Local fallback
+  const traffic = config.traffic_factor || 0;
+  const speed = 35.0; // default km/h
+  const capacity = 100;
+
+  let totalEffectiveKm = 0;
+  let totalTrips = 0;
+  const etas: number[] = [];
+
+  for (const a of assignments) {
+    const dEff = a.distance_km * (1.0 + traffic);
+    totalEffectiveKm += dEff;
+    const hours = dEff / Math.max(5.0, speed);
+    etas.push(hours * 60);
+
+    const approxOrders = a.distance_km > 0 ? Math.round(a.weighted_distance / a.distance_km) : 1;
+    totalTrips += Math.ceil(approxOrders / Math.max(1, capacity));
+  }
+
+  const avgEta = etas.length > 0 ? etas.reduce((s, e) => s + e, 0) / etas.length : 0;
+  const maxEta = etas.length > 0 ? Math.max(...etas) : 0;
+  const fuelLiters = totalEffectiveKm * 0.08;
+
+  return {
+    avg_eta_minutes: parseFloat(avgEta.toFixed(1)),
+    max_eta_minutes: parseFloat(maxEta.toFixed(1)),
+    total_trips: totalTrips,
+    effective_km: parseFloat(totalEffectiveKm.toFixed(1)),
+    fuel_consumed_liters: parseFloat(fuelLiters.toFixed(1)),
+    vehicle_used: vehicle_type || 'Delivery Van',
+    avg_speed_kmph: speed,
+    traffic_congestion_pct: parseFloat((traffic * 100).toFixed(1))
+  };
+}
+
+export async function getConstraintDiagnostics(
+  warehouses: Warehouse[],
+  assignments: Assignment[],
+  config: OptimizationConfig
+): Promise<ConstraintDiagnostics> {
+  try {
+    const res = await fetch(`${API_BASE}/scenarios/diagnostics`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ warehouses, assignments, config })
+    });
+    if (res.ok) {
+      return await res.json();
+    }
+  } catch (e) {
+    // fallback
+  }
+
+  // Local fallback
+  const capViolations: any[] = [];
+  const radViolations: any[] = [];
+  const cMax = config.capacity_enabled ? config.C_max : null;
+  const rMax = config.radius_enabled ? config.R_max_km : null;
+
+  for (const w of warehouses) {
+    const assigned = w.assigned_orders || 0;
+    if (cMax && assigned > cMax) {
+      const overflow = assigned - cMax;
+      capViolations.push({
+        warehouse_id: w.warehouse_id,
+        assigned_orders: assigned,
+        capacity: cMax,
+        overflow_orders: overflow,
+        utilization_pct: parseFloat((assigned / cMax * 100).toFixed(1)),
+        severity: overflow > (0.25 * cMax) ? 'CRITICAL' : 'WARNING'
+      });
+    }
+  }
+
+  for (const a of assignments) {
+    if (rMax && a.distance_km > rMax) {
+      const overage = a.distance_km - rMax;
+      radViolations.push({
+        neighborhood_id: a.neighborhood_id,
+        warehouse_id: a.warehouse_id,
+        distance_km: parseFloat(a.distance_km.toFixed(2)),
+        r_max_km: parseFloat(rMax.toFixed(2)),
+        overage_km: parseFloat(overage.toFixed(2)),
+        severity: overage > 10 ? 'CRITICAL' : 'WARNING'
+      });
+    }
+  }
+
+  return {
+    is_compliant: capViolations.length === 0 && radViolations.length === 0,
+    capacity_enabled: Boolean(config.capacity_enabled),
+    radius_enabled: Boolean(config.radius_enabled),
+    capacity_violations: capViolations,
+    radius_violations: radViolations,
+    total_violations: capViolations.length + radViolations.length
+  };
+}
+

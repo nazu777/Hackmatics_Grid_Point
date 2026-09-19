@@ -14,7 +14,9 @@ from .schema import (
     SyntheticGenerationConfig,
     ValidationErrorItem,
     OptimizationConfig,
-    OptimizationResult
+    OptimizationResult,
+    Assignment,
+    Warehouse
 )
 from .validation import validate_neighborhoods, validate_optimization_config
 from .data_ingestion import (
@@ -249,3 +251,76 @@ def export_assignments(payload: MetricsExportRequest):
     for a in result.assignments:
         lines.append(f"{a.neighborhood_id},{a.warehouse_id},{a.distance_km},{a.weighted_distance},{a.cost},{a.within_radius},{a.is_feasible}")
     return PlainTextResponse(content="\n".join(lines), media_type="text/csv")
+
+
+class TradeoffRequest(BaseModel):
+    neighborhoods: List[Dict[str, Any]]
+    config: OptimizationConfig
+    max_k: Optional[int] = 6
+
+
+class DemandShiftRequest(BaseModel):
+    neighborhoods: List[Dict[str, Any]]
+    pct_delta: float
+
+
+class FleetETARequest(BaseModel):
+    assignments: List[Assignment]
+    config: OptimizationConfig
+    vehicle_type: Optional[str] = None
+
+
+class DiagnosticsRequest(BaseModel):
+    warehouses: List[Warehouse]
+    assignments: List[Assignment]
+    config: OptimizationConfig
+
+
+@app.post("/api/scenarios/tradeoff")
+def get_tradeoff_curve(payload: TradeoffRequest):
+    """
+    Computes delivery vs infrastructure cost trade-off across K in [1, max_k] (Phase 5 Bonus 8).
+    """
+    from .scenarios import compute_tradeoff_curve
+    try:
+        return compute_tradeoff_curve(payload.neighborhoods, payload.config, max_k=payload.max_k or 6)
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+
+
+@app.post("/api/scenarios/demand-shift")
+def apply_demand_shift(payload: DemandShiftRequest):
+    """
+    Simulates customer demand shifts w_i' = w_i * (1 + delta%) (Phase 5 Bonus 7).
+    """
+    from .scenarios import simulate_demand_shift
+    try:
+        shifted, stats = simulate_demand_shift(payload.neighborhoods, payload.pct_delta)
+        return {"neighborhoods": shifted, "stats": stats}
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+
+
+@app.post("/api/scenarios/eta")
+def get_fleet_eta(payload: FleetETARequest):
+    """
+    Computes delivery ETA and fuel consumption under traffic and vehicle specs (Phase 5 Bonus 4/5/6).
+    """
+    from .scenarios import calculate_fleet_eta
+    try:
+        return calculate_fleet_eta(payload.assignments, payload.config, payload.vehicle_type)
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+
+
+@app.post("/api/scenarios/diagnostics")
+def get_constraint_diagnostics(payload: DiagnosticsRequest):
+    """
+    Evaluates warehouse capacity overflow and radius violations (Phase 5 Bonus 2/3).
+    """
+    from .scenarios import diagnose_constraints
+    try:
+        return diagnose_constraints(payload.warehouses, payload.assignments, payload.config)
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+

@@ -12,7 +12,7 @@ export const Header: React.FC<HeaderProps> = ({ activePhase, setActivePhase }) =
     { id: 2, name: '2. Map Visualizer', icon: MapPin, active: true, tooltip: 'Phase 2: Geographic Demand Map & Controls' },
     { id: 3, name: '3. Warehouse Optimizer', icon: Cpu, active: true, tooltip: 'Phase 3: Core Optimization Engine' },
     { id: 4, name: '4. Cost Comparison', icon: BarChart3, active: true, tooltip: 'Phase 4: Baseline vs Optimized Cost Dashboard' },
-    { id: 5, name: '5. Scenarios & Fleet', icon: Sliders, active: false, tooltip: 'Phase 5' },
+    { id: 5, name: '5. Scenarios & Fleet', icon: Sliders, active: true, tooltip: 'Phase 5: What-If Scenarios, Fleet & Trade-off' },
   ];
 
   return (

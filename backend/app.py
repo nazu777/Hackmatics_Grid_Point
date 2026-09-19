@@ -19,6 +19,7 @@ from src.data_ingestion import (
 from src.synthetic import generate_synthetic_dataset
 from src.optimization import run_optimization
 from src.mapping import prepare_map_layer_data, compute_map_bounds
+from src.scenarios import compute_tradeoff_curve, simulate_demand_shift, calculate_fleet_eta, diagnose_constraints
 
 st.set_page_config(
     page_title="GridPoint — Warehouse Location Optimization",
@@ -588,4 +589,95 @@ if "opt_result" in st.session_state and st.session_state.opt_result is not None:
                                file_name="gridpoint_map.geojson", mime="application/json")
         except Exception as e:
             st.warning(f"GeoJSON export unavailable: {e}")
+
+    # =========================================================================
+    # Phase 5: Advanced Scenarios & Bonus Features (Streamlit UI)
+    # =========================================================================
+    st.markdown("---")
+    st.markdown("### 🧪 Phase 5: What-If Scenarios & Bonus Decision-Support")
+    st.caption("Stress-test infrastructure trade-offs, demand shocks, rush-hour congestion, and capacity constraints.")
+
+    tab_elbow, tab_demand, tab_fleet, tab_diag = st.tabs([
+        "📈 Infrastructure vs Delivery (Elbow)",
+        "⚡ Customer Demand Shift",
+        "🚚 Fleet & Traffic ETA",
+        "⚠️ Constraint Diagnostics"
+    ])
+
+    with tab_elbow:
+        st.markdown("#### Facility Rent vs Route Mileage Trade-off")
+        c_el1, c_el2 = st.columns(2)
+        with c_el1:
+            infra_slider = st.slider("Infra Cost / Warehouse ($)", min_value=0, max_value=3000, value=500, step=100)
+        with c_el2:
+            max_k_slider = st.slider("Max K Evaluated", min_value=2, max_value=6, value=5, step=1)
+
+        elbow_cfg = opt_res.config.model_copy(deep=True)
+        elbow_cfg.infra_cost_per_warehouse = float(infra_slider)
+        tradeoff_data = compute_tradeoff_curve(st.session_state.neighborhoods, elbow_cfg, max_k=max_k_slider)
+
+        pts = tradeoff_data["points"]
+        if pts:
+            st.success(f"★ **Recommended Optimal K = {tradeoff_data['optimal_K']}** (Total Cost = ${tradeoff_data['min_cost']:,.2f})")
+            chart_df = pd.DataFrame([
+                {
+                    "K": p["K"],
+                    "Delivery Cost ($)": p["delivery_cost"],
+                    "Infra Cost ($)": p["infra_cost"],
+                    "Total Cost ($)": p["total_cost"]
+                }
+                for p in pts
+            ]).set_index("K")
+            st.line_chart(chart_df)
+
+    with tab_demand:
+        st.markdown("#### Customer Demand Surge & Contraction")
+        c_dm1, c_dm2 = st.columns([2, 1])
+        with c_dm1:
+            shift_slider = st.slider("Demand Change (Δ%)", min_value=-50, max_value=100, value=25, step=5)
+        with c_dm2:
+            st.markdown("<br>", unsafe_allow_html=True)
+            apply_shift_btn = st.button("Apply Shift & Re-Optimize")
+
+        shifted_nodes, shift_stats = simulate_demand_shift(st.session_state.neighborhoods, shift_slider)
+        c_s1, c_s2 = st.columns(2)
+        c_s1.metric("Original Volume", f"{shift_stats['original_total_orders']:,} orders")
+        c_s2.metric("Projected Volume", f"{shift_stats['new_total_orders']:,} orders", f"{shift_stats['net_order_change']:+d}")
+
+        if apply_shift_btn:
+            st.session_state.neighborhoods = shifted_nodes
+            st.session_state.opt_result = run_optimization(shifted_nodes, opt_res.config)
+            st.rerun()
+
+    with tab_fleet:
+        st.markdown("#### Congestion & Vehicle Fleet Metrics")
+        c_fl1, c_fl2 = st.columns(2)
+        with c_fl1:
+            traffic_slider = st.slider("Rush-Hour Delay Factor", min_value=0.0, max_value=1.0, value=0.3, step=0.05, format="%.2f")
+        with c_fl2:
+            vehicle_sel = st.selectbox("Vehicle Type", ["Delivery Van", "Cargo E-Bike", "Heavy Truck"])
+
+        fleet_cfg = opt_res.config.model_copy(deep=True)
+        fleet_cfg.traffic_factor = traffic_slider
+        fleet_eta_data = calculate_fleet_eta(opt_res.assignments, fleet_cfg, vehicle_sel)
+
+        c_e1, c_e2, c_e3 = st.columns(3)
+        c_e1.metric("Average ETA / Drop", f"{fleet_eta_data['avg_eta_minutes']} min", f"Max {fleet_eta_data['max_eta_minutes']} min")
+        c_e2.metric("Dispatched Trips", f"{fleet_eta_data['total_trips']} trips")
+        c_e3.metric("Est. Fuel Consumption", f"{fleet_eta_data['fuel_consumed_liters']} L", f"{fleet_eta_data['effective_km']} km route")
+
+    with tab_diag:
+        st.markdown("#### Facility Capacity & Radius Compliance Audit")
+        diag_res = diagnose_constraints(opt_res.warehouses, opt_res.assignments, opt_res.config)
+        if diag_res["is_compliant"]:
+            st.success("✅ **100% Compliant**: All warehouse capacities and radius limits are strictly satisfied.")
+        else:
+            st.error(f"⚠️ **{diag_res['total_violations']} Violations Detected**")
+            if diag_res["capacity_violations"]:
+                st.markdown("**Capacity Overflows:**")
+                st.dataframe(pd.DataFrame(diag_res["capacity_violations"]))
+            if diag_res["radius_violations"]:
+                st.markdown("**Service Radius Breaches:**")
+                st.dataframe(pd.DataFrame(diag_res["radius_violations"]))
+
 

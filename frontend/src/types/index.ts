@@ -168,3 +168,62 @@ export interface MapLayerOptions {
   basemap: BasemapStyle;
 }
 
+export interface TradeoffPoint {
+  K: number;
+  delivery_cost: number;
+  infra_cost: number;
+  total_cost: number;
+  avg_distance_km: number;
+  pct_cost_saved: number;
+  is_feasible: boolean;
+}
+
+export interface TradeoffResult {
+  points: TradeoffPoint[];
+  optimal_K: number;
+  min_cost: number;
+}
+
+export interface DemandShiftStats {
+  pct_delta: number;
+  original_total_orders: number;
+  new_total_orders: number;
+  net_order_change: number;
+  actual_pct_change: number;
+}
+
+export interface FleetETAResult {
+  avg_eta_minutes: number;
+  max_eta_minutes: number;
+  total_trips: number;
+  effective_km: number;
+  fuel_consumed_liters: number;
+  vehicle_used: string;
+  avg_speed_kmph: number;
+  traffic_congestion_pct: number;
+}
+
+export interface ConstraintDiagnostics {
+  is_compliant: boolean;
+  capacity_enabled: boolean;
+  radius_enabled: boolean;
+  capacity_violations: Array<{
+    warehouse_id: string;
+    assigned_orders: number;
+    capacity: number;
+    overflow_orders: number;
+    utilization_pct: number;
+    severity: 'WARNING' | 'CRITICAL';
+  }>;
+  radius_violations: Array<{
+    neighborhood_id: string;
+    warehouse_id: string;
+    distance_km: number;
+    r_max_km: number;
+    overage_km: number;
+    severity: 'WARNING' | 'CRITICAL';
+  }>;
+  total_violations: number;
+}
+
+

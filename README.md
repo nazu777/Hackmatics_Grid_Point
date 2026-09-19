@@ -4,78 +4,76 @@
 > Built for the **HACK-A-MATICS** Hackathon.  
 > Aligned to [problem_statement.md](docs/problem_statement.md), [prd.md](docs/prd.md), [schema.md](docs/schema.md), and [phases.md](docs/phases.md).
 
-**Live Production Deployment**: [https://hackmatics-grid-point-eight.vercel.app](https://hackmatics-grid-point-eight.vercel.app)  
-**Database**: Neon Serverless Postgres (`gridpoint` on `aws-ap-southeast-1`)
+**Live Production Deployment**: [https://hackmatics-grid-point.vercel.app](https://hackmatics-grid-point.vercel.app)  
+**Database**: Neon Serverless Postgres (`gridpoint` on `aws-ap-southeast-1`)  
+**Automated Tests**: 64 tests passing in ~2.4s (100% pass rate)
 
 ---
 
-## 🌟 Overview & Pipeline
+## 🌟 Overview & Problem Statement
 
-An e-commerce company serves multiple neighborhoods, each with a geographic coordinate `(latitude, longitude)` and demand volume `daily_orders`. **GRIDPOINT** optimizes warehouse placement and neighborhood assignments to minimize weighted delivery costs:
+An e-commerce company serves multiple neighborhoods, each with a geographic coordinate `(latitude, longitude)` and daily demand `daily_orders` ($w_i$). Placing warehouses incorrectly results in millions of wasted delivery miles and carbon burn.
 
-$$\min \sum_{i} w_i \cdot d(n_i, w_{\text{assigned}})$$
+**GRIDPOINT** solves the multi-facility location and assignment problem by mathematically minimizing weighted delivery cost:
 
-### Complete 5-Step Pipeline
+$$\min \sum_{i=1}^{N} w_i \cdot d(n_i, w_{\text{assigned}}) \cdot \text{rate}_{\text{eff}} + \sum_{k=1}^{K} \text{infra\_cost}_k$$
+
+### The 5-Step Pipeline (Demonstrable End-to-End)
+
 ```ini
 Neighborhood Data (Phase 1) ──► Location Visualization (Phase 2) ──► Warehouse Optimization (Phase 3)
                                                                                │
 Delivery Cost Comparison (Phase 4) ◄── Neighborhood Assignment (Phase 3) ◄─────┘
+               │
+What-If Scenarios & Bonus Fleet (Phase 5)
 ```
 
 ---
 
-## 🏗️ Monorepo Architecture
+## 🏗️ System Architecture
 
-This project is structured as a high-performance monorepo supporting both a **modern full-stack web application (React + FastAPI)** and an **alternative Streamlit single-command dashboard**, both sharing the identical Python domain core:
+GRIDPOINT is architected as a high-performance monorepo supporting both a **modern full-stack web application (React 18 + FastAPI)** and an **alternative Streamlit single-command dashboard**, both powered by a shared, strictly typed Python optimization core:
 
 ```
 Hackmatics_Grid_Point/
 ├── backend/
 │   ├── src/
-│   │   ├── __init__.py
-│   │   ├── schema.py              # Pydantic v2 data contracts (schema.md)
+│   │   ├── schema.py              # Pydantic v2 data contracts (schema.md §2)
 │   │   ├── validation.py          # Strict schema validation engine (§4)
 │   │   ├── data_ingestion.py      # CSV/JSON parsers, alias detection & exports
 │   │   ├── synthetic.py           # Seedable clustered/uniform/gaussian generator (§2.8)
-│   │   └── api.py                 # FastAPI REST application
-│   ├── tests/
-│   │   ├── test_schema.py         # Schema model tests
-│   │   ├── test_validation.py     # Out-of-range, null, duplicate & constraint tests
-│   │   ├── test_data_ingestion.py # Parser, alias normalization & export tests
-│   │   ├── test_synthetic.py      # Synthetic generator & seed reproducibility tests
-│   │   ├── test_api.py            # FastAPI endpoints test
-│   │   └── test_acceptance_phase1.py # Phase 1 acceptance & 1000-node performance tests
-│   ├── app.py                     # Streamlit application UI
-│   ├── requirements.txt           # Python dependencies
-│   ├── pyproject.toml             # Pytest & package settings
+│   │   ├── distance.py            # Vectorized Haversine, Euclidean & Manhattan matrices
+│   │   ├── optimization.py        # Weiszfeld (K=1), Weighted K-Means (K>1), PuLP MILP CFLP
+│   │   ├── cost.py                # Cost engine, traffic factor, fleet weighting & metrics
+│   │   ├── mapping.py             # Geospatial bounds, bubble sizing & GeoJSON exports
+│   │   ├── scenarios.py           # Phase 5: Multi-K trade-off elbow, demand shift, fleet ETA
+│   │   └── api.py                 # FastAPI application & REST endpoints
+│   ├── tests/                     # 64 automated unit, integration & acceptance tests
+│   ├── app.py                     # Streamlit dashboard application
+│   ├── requirements.txt           # Python dependencies (FastAPI, PuLP, scikit-learn, etc.)
 │   └── pytest.ini
 ├── frontend/                      # React 18 + TypeScript + Vite + Tailwind CSS
 │   ├── src/
-│   │   ├── types/index.ts         # TypeScript data contracts
-│   │   ├── services/api.ts        # API client & offline validation fallback
+│   │   ├── types/index.ts         # TypeScript interfaces matching schema.md
+│   │   ├── services/api.ts        # REST API client with full client-side solver fallbacks
 │   │   ├── components/
-│   │   │   ├── Header.tsx         # Navbar with phase status tracking
-│   │   │   ├── SummaryCards.tsx   # Demand and validation metric cards
-│   │   │   ├── FileUploader.tsx   # Drag-and-drop CSV/JSON with auto-mapping
-│   │   │   ├── DataTable.tsx      # Tabular editor (add/edit/delete, pagination)
-│   │   │   ├── SyntheticModal.tsx # Seedable synthetic generator modal
-│   │   │   └── ErrorDrawer.tsx    # Diagnostics error drawer
-│   │   ├── App.tsx
-│   │   └── main.tsx
-│   ├── package.json
-│   ├── vite.config.ts
-│   └── tailwind.config.js
-├── data/
-│   └── samples/
-│       ├── hyderabad_demand.csv    # 20 canonical Hyderabad neighborhoods
-│       ├── neighborhoods_sample.json # Sample JSON dataset
-│       ├── sample_with_errors.csv  # Intentionally invalid rows for error testing
-│       └── large_1000_nodes.csv    # 1,000 synthetic nodes performance benchmark
-├── docs/                           # Problem statement, PRD, schemas, sprint phases
-├── app.py                         # Root Streamlit entry point
-├── requirements.txt               # Root Python requirements
-├── package.json                   # Monorepo scripts
-├── Makefile                       # One-command developer targets
+│   │   │   ├── Header.tsx         # Sticky navigation with 5 active pipeline stages
+│   │   │   ├── SummaryCards.tsx   # Top-level demand and data health metrics
+│   │   │   ├── FileUploader.tsx   # Drag-and-drop CSV/JSON ingestion with alias mapper
+│   │   │   ├── DataTable.tsx      # Editable neighborhood grid (add/delete/edit rows)
+│   │   │   ├── SyntheticModal.tsx # Seedable synthetic demand pattern generator
+│   │   │   ├── MapVisualizer.tsx  # Phase 2 Leaflet map with bubble diameter ∝ √orders
+│   │   │   ├── OptimizationPanel.tsx # Phase 3 solver controls & assignment tables
+│   │   │   ├── MapView.tsx        # Phase 4 spider lines & warehouse cluster map
+│   │   │   ├── ComparisonDashboard.tsx # Phase 4 side-by-side cost deltas & histogram
+│   │   │   ├── ScenariosPanel.tsx # Phase 5 What-If trade-offs, demand surge & fleet ETA
+│   │   │   └── ErrorDrawer.tsx    # Validation diagnostics drawer
+│   │   └── App.tsx                # Master pipeline shell
+│   └── package.json
+├── api/                           # Vercel serverless Python adapter & bundle sync
+├── data/samples/                  # Hyderabad canonical CSV/JSON & 1,000-node benchmarks
+├── docs/                          # PRD, Problem statement, Schema specs, Demo script
+├── Makefile                       # One-command developer build & test targets
 └── README.md
 ```
 
@@ -83,16 +81,16 @@ Hackmatics_Grid_Point/
 
 ## 💻 Tech Stack
 
-| Layer | Technology | Purpose |
+| Layer | Technology | Key Role |
 | :--- | :--- | :--- |
-| **Language** | Python 3.10+ / TypeScript | Core algorithms & type safety |
-| **Backend API** | FastAPI, Uvicorn, Pydantic v2 | High-speed async REST endpoints |
-| **Frontend UI** | React 18, Vite, Tailwind CSS, Lucide | Interactive, responsive dashboard |
-| **Alternative UI** | Streamlit 1.32+ | Single-command Python UI option |
-| **Data & Science** | Pandas, NumPy, SciPy | Ingestion, dataframes, spatial arrays |
-| **Optimization** | scikit-learn, SciPy/Weiszfeld, PuLP | K-Means, geometric median & MILP solver |
-| **Geospatial** | Geopy, WGS84 coordinates | Haversine distance computations |
-| **Testing** | Pytest, Pytest-Asyncio, HTTPX | 31 automated tests, 100% Phase 1 pass rate |
+| **Optimization Solvers** | Python 3.10+, SciPy, PuLP, scikit-learn | Weiszfeld geometric median, Weighted K-Means, MILP CFLP |
+| **Backend REST API** | FastAPI, Uvicorn, Pydantic v2 | Sub-millisecond schema validation & async endpoints |
+| **Frontend Framework** | React 18, Vite, TypeScript | Type-safe, reactive single-page application |
+| **Styling & UI** | Tailwind CSS, Lucide Icons | Responsive layout with clear visual hierarchy |
+| **Geospatial & Maps** | Leaflet, React-Leaflet, Geopy | Interactive OSM map, custom bubble markers, spider lines |
+| **Alternative UI** | Streamlit 1.32+ | Single-command Python-only data science UI |
+| **Database** | Neon Serverless Postgres | Cloud persistence for demand points and optimization runs |
+| **Automated Testing** | Pytest, Pytest-Asyncio, HTTPX | 64 test cases covering unit, cost formulas, and benchmarks |
 
 ---
 
@@ -100,108 +98,109 @@ Hackmatics_Grid_Point/
 
 ### Prerequisites
 - Python 3.10+
-- Node.js 18+ and `pnpm` (or `npm`)
-- `uv` (recommended for instant Python package installation) or `pip`
+- Node.js 18+ and `pnpm`
+- `uv` (recommended) or `pip`
 
 ### 1. One-Step Setup
-Using `make`:
 ```bash
 make setup
 ```
 
-Or manually:
+### 2. Run Full-Stack Web Application (React + FastAPI)
 ```bash
-# Python backend
-uv venv backend/.venv
-uv pip install -r backend/requirements.txt --python backend/.venv/bin/python
-
-# Frontend
-cd frontend && pnpm install
-```
-
----
-
-### 2. Running the Full-Stack Application (React + FastAPI)
-
-Start the backend (Terminal 1):
-```bash
+# Terminal 1 — FastAPI Backend (http://localhost:8000/docs)
 make run-backend
-# Or: backend/.venv/bin/uvicorn src.api:app --reload --port 8000 --app-dir backend
-```
-> Backend API and Swagger docs will be live at: `http://localhost:8000/docs`
 
-Start the frontend (Terminal 2):
-```bash
+# Terminal 2 — React Frontend (http://localhost:3000)
 make run-frontend
-# Or: pnpm --prefix frontend dev
 ```
-> Access the React application at: `http://localhost:3000`
 
----
-
-### 3. Running the Single-Command Streamlit Dashboard
-
-If you prefer the single-command Streamlit application:
+### 3. Alternative: Run Streamlit Dashboard
 ```bash
 make run-streamlit
-# Or: backend/.venv/bin/streamlit run app.py
+# Starts interactive dashboard at http://localhost:8501
 ```
-> Access the Streamlit application at: `http://localhost:8501`
 
----
-
-### 4. Running the Automated Test Suite
-
-Run all 31 unit, integration, and Phase 1 acceptance tests:
+### 4. Run Automated Test Suite
 ```bash
 make test
-# Or: backend/.venv/bin/pytest -c backend/pyproject.toml backend/tests -v
+# Executes all 64 unit, cost hand-calc, and acceptance tests in ~2.4s
 ```
 
 ---
 
-## 🎯 Phase 1 Completed Features
+## 📐 Completed Pipeline Features
 
-- [x] **Monorepo Architecture**: Clean separation between `backend/`, `frontend/`, `data/samples/`, and root runners.
-- [x] **CSV & JSON Ingestion Layer**:
-  - Auto-detection of delimiters (`,` `;` `\t`) and header alias mapping (`id` $\rightarrow$ `neighborhood_id`, `lat` $\rightarrow$ `latitude`, `orders`/`demand` $\rightarrow$ `daily_orders`).
-  - Accepts both JSON arrays `[...]` and wrapped objects `{"neighborhoods": [...]}`.
-- [x] **Validation Engine (`src/validation.py`)**:
-  - WGS84 range validation: `latitude ∈ [-90, 90]`, `longitude ∈ [-180, 180]`.
-  - Volume validation: `daily_orders ≥ 0` integer.
-  - Non-empty, non-null, and duplicate `neighborhood_id` detection.
-  - Detailed error diagnostics drawer with row number, field name, value, error description, and code (`OUT_OF_RANGE`, `DUPLICATE_ID`, `NULL_OR_EMPTY`).
-- [x] **Interactive Tabular Data Editor**:
-  - Add new rows with auto-incremented IDs.
-  - Delete records interactively.
-  - Real-time cell editing with search/filter and pagination (handles 1,000+ nodes).
-- [x] **Seedable Synthetic Data Generator (`src/synthetic.py`)**:
-  - Generates realistic geographic demand points with `clustered`, `uniform`, or `gaussian` spatial distributions.
-  - Seedable for deterministic reproducibility across simulation runs.
-- [x] **Export Capabilities**: Export active datasets to canonical CSV and JSON.
-- [x] **Performance & Acceptance**:
-  - Parses and validates 1,000 nodes in under **0.2 seconds** (far exceeding the <5s requirement).
-  - 31 passing automated tests.
+### Phase 1: Data Ingestion & Validation
+- **Multi-Format Ingestion**: Delimiter auto-sniffing (`,`, `;`, `\t`) and header alias mapping (`id` $\to$ `neighborhood_id`, `lat` $\to$ `latitude`, `orders`/`demand` $\to$ `daily_orders`).
+- **Strict Validation Engine**: WGS84 coordinates check ($[-90, 90], [-180, 180]$), non-negative integer orders, unique ID validation, and interactive error drawer.
+- **Editable Data Table**: Real-time inline editing, search/filter, and canonical CSV/JSON exports.
+- **Seedable Synthetic Generator**: Generates `clustered`, `uniform`, or `gaussian` demand distributions with fixed seeds for benchmark reproducibility.
+
+### Phase 2: Location Visualization & Spatial Mapping
+- **Interactive Geospatial Map**: Leaflet OpenStreetMap view with custom tile styles.
+- **Area-Proportional Demand Bubbles**: Circle marker radius proportional to $\sqrt{w_i}$ for true visual perception of order density.
+- **Controls Panel**: Live $K \in [1, 10]$ selector, distance metric toggles (Haversine, Euclidean, Manhattan), and capacity/radius toggles.
+
+### Phase 3: Multi-Facility Optimization Engine
+- **$K = 1$ Weiszfeld Algorithm**: Exact weighted Fermat-Weber geometric median with numerical singularity perturbation ($\epsilon = 10^{-7}$).
+- **$K > 1$ Weighted K-Means**: Demand-weighted centroid clustering with k-means++ probabilistic seeding, multi-restart inertia selection, and Weiszfeld medoid refinement.
+- **Capacitated Facility Location (MILP)**: Formulated in PuLP for tight $C_{\max}$ capacity and $R_{\max}$ radius constraints.
+- **Performance Benchmark**: Optimizes 1,000 nodes with $K=5$ in **$\sim 0.81\text{s}$** (well below the $<5.0\text{s}$ requirement).
+
+### Phase 4: Delivery Cost Calculation & Comparative Evaluation
+- **Comprehensive Cost Engine**:
+  - Unweighted distance $\sum d_i$
+  - Demand-weighted distance $\sum w_i d_i$
+  - Traffic congestion modeling $d_{\text{eff}} = d \cdot (1 + \text{traffic\_factor})$
+  - Fleet-weighted cost rate + fuel surcharge
+  - Fixed warehouse infrastructure cost
+- **Side-by-Side Comparison Dashboard**: Baseline (single centroid) vs. Optimized layout with percentage cost/distance saved.
+- **Visual Assignment Overlays**: Colored cluster bubbles, spider vector polylines connecting customers to assigned hubs, and distance distribution histogram.
+- **Verified Accuracy**: Hand-calculated cost formulas validated by automated tests in `test_cost.py`.
+
+### Phase 5: Advanced Scenarios & Bonus Features
+- **Multi-K Infrastructure vs. Delivery Cost Trade-off (Elbow Analysis)**:
+  - Interactive slider for fixed facility infrastructure cost ($\$0 - \$3,000/\text{hub}$).
+  - Evaluates $K = 1 \dots 8$ simultaneously to plot Delivery Cost vs. Infrastructure Cost vs. Combined Total Cost.
+  - Automatically identifies and recommends the mathematically optimal $K$ (sweet spot).
+- **Customer Demand Surge & Contraction Simulator**:
+  - Slider $\Delta\% \in [-50\%, +100\%]$ with quick-select presets (Slump, Baseline, Festive Surge, 2x Peak).
+  - One-click "Apply & Re-optimize" dynamically shifts customer volumes and repositions warehouses.
+- **Rush-Hour Traffic & Vehicle Fleet Delivery ETA Calculator**:
+  - Traffic congestion slider ($0\% - 100\%$ delay factor).
+  - Vehicle fleet selection: Cargo E-Bike ($25\text{ km/h}, 30\text{ orders}$), Delivery Van ($40\text{ km/h}, 120\text{ orders}$), Heavy Truck ($30\text{ km/h}, 500\text{ orders}$).
+  - Real-time calculations of average and maximum drop ETA in minutes, total batch trips dispatched, and fuel liters consumed.
+- **Constraint Compliance & Diagnostics Center**:
+  - Real-time warehouse utilization gauges with progressive color thresholds (Normal, High, Overflow).
+  - Violation audit listing exact distance overages for any nodes outside the $R_{\max}$ radius limit.
 
 ---
 
-## 🗺️ Phase 2 Completed Features: Location Visualization & Spatial Mapping
+## 🏆 Bonus Features Summary (8 / 8 Implemented)
 
-- [x] **Interactive Geospatial Demand Map**:
-  - **React (Leaflet)**: Real-time map rendering with OpenStreetMap, CartoDB Positron (Light), and Dark Matter tiles.
-  - **Streamlit (PyDeck)**: Auto-centered ScatterplotLayer rendering demand nodes with hover tooltips.
-- [x] **Cartographic Demand Bubbles**:
-  - Circle marker radius proportional to $\sqrt{w_i}$ (area-proportional to order volume for proper human perception).
-  - Demand intensity color palette: Low (Emerald), Medium (Amber), High (Rose/Crimson).
-  - Interactive tooltips & popups showing ID, name, coordinates, and exact order count.
-- [x] **Optimization Controls & Parameter Selection**:
-  - **Warehouse Count $K$**: Slider & quick-select presets for $K \in [1, 10]$.
-  - **Distance Metric**: Selection between **Haversine** (spherical great-circle), **Euclidean** (flat plane), and **Manhattan** ($L_1$ grid) with contextual descriptions.
-  - **Constraints Configuration**: Toggles and inputs for $C_{max}$ (capacity), $R_{max}$ (radius), delivery cost rate ($\$/\text{km}$), and traffic multiplier.
-- [x] **Spatial Bounds & Edge-Case Guards**:
-  - Automatic viewport bounding box calculation with padding.
-  - Safeguards for single-point datasets and empty sets.
-- [x] **Automated Tests & Performance**:
-  - 38 passing backend tests (all unit + Phase 1 & Phase 2 acceptance tests).
-  - 1,000 nodes spatial styling and bounds calculation takes $<0.05$s (far exceeding the <2.0s requirement).
+| # | Bonus Requirement (Problem Statement) | Implementation & Location |
+| :-: | :--- | :--- |
+| **1** | Support multiple warehouses | Weighted K-Means with Weiszfeld refinement & PuLP MILP solver (`src/optimization.py`) |
+| **2** | Limited warehouse capacity ($C_{\max}$) | PuLP CFLP formulation + UI capacity utilization gauges & overflow alerts (`src/scenarios.py`) |
+| **3** | Maximum delivery radius ($R_{\max}$) | Vectorized radius filtering + map radius circles + violation audit list (`src/mapping.py`, `src/scenarios.py`) |
+| **4** | Different vehicle types | Multi-class fleet specifications (`VehicleType`: E-Bike, Van, Truck) with custom speeds & capacities |
+| **5** | Include fuel costs | Surcharge per km parameter + total fuel consumption in liters calculation (`src/cost.py`, `src/scenarios.py`) |
+| **6** | Traffic-dependent delivery times | Congestion multiplier $d \cdot (1 + \text{traffic}) / v \times 60$ calculating live drop ETAs (`src/scenarios.py`) |
+| **7** | Model changes in customer demand | Interactive demand shift simulator with preset chips ($-50\%$ to $+100\%$) and live re-optimization |
+| **8** | Infrastructure vs. delivery cost trade-off | Interactive multi-$K$ Elbow Analysis curve finding cost-minimizing $K$ (`src/scenarios.py`, `ScenariosPanel.tsx`) |
 
+---
+
+## 🤖 AI Tools & Development Disclosure
+
+In accordance with Hack-A-Matics transparency guidelines:
+- **Code Assistants**: Antigravity agentic coding assistant was utilized for scaffolding boilerplate, structuring test suites, and accelerating mathematical vectorization.
+- **Core Algorithms**: Vectorized Haversine distance matrices, Weiszfeld iteration formulas, and PuLP MILP constraints were engineered to strictly conform to `docs/schema.md` and `docs/prd.md`.
+- **Validation**: All optimization logic and cost formulas were rigorously verified using 64 automated test cases with hand-calculated ground truth benchmarks.
+
+---
+
+## 👥 Authors & License
+
+Built for **HACK-A-MATICS 2026** by the GRIDPOINT Team. Open source under the MIT License.
