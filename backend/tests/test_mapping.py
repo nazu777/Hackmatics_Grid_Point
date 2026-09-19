@@ -1,6 +1,15 @@
-"""Unit tests for Phase 2 spatial mapping module."""
+"""Unit tests for Phase 2 spatial mapping module + Phase 4 zone themes."""
 import pytest
-from src.mapping import compute_map_bounds, compute_bubble_style, prepare_map_layer_data
+from src.mapping import (
+    compute_map_bounds,
+    compute_bubble_style,
+    prepare_map_layer_data,
+    distinct_zones,
+    map_points,
+    normalize_zone,
+    to_geojson,
+    zone_color,
+)
 
 
 def test_compute_map_bounds_empty():
@@ -67,3 +76,37 @@ def test_prepare_map_layer_data():
     assert "visual_radius" in layer_data["nodes"][0]
     assert "color_hex" in layer_data["nodes"][0]
     assert layer_data["nodes"][0]["visual_radius"] < layer_data["nodes"][1]["visual_radius"]
+
+
+def test_zone_color_defaults_and_custom():
+    assert zone_color("Residential") == "#10b981"
+    assert zone_color("Commercial") == "#3b82f6"
+    assert zone_color("Residential", {"Residential": "#123456"}) == "#123456"
+    # Deterministic fallback for unknown zones
+    assert zone_color("Old Town") == zone_color("Old Town")
+    assert zone_color(None) == zone_color("Unzoned")
+    assert normalize_zone("  ") == "Unzoned"
+
+
+def test_distinct_zones_sorted():
+    nodes = [
+        {"neighborhood_id": "N1", "zone": "Commercial"},
+        {"neighborhood_id": "N2", "zone": "Residential"},
+        {"neighborhood_id": "N3", "zone": "Commercial"},
+        {"neighborhood_id": "N4"},
+    ]
+    assert distinct_zones(nodes) == ["Commercial", "Residential", "Unzoned"]
+
+
+def test_map_points_zone_passthrough():
+    nodes = [
+        {"neighborhood_id": "N1", "name": "A", "latitude": 17.38, "longitude": 78.48,
+         "daily_orders": 100, "zone": "Residential"},
+    ]
+    pts = map_points(nodes)
+    assert pts[0]["zone"] == "Residential"
+    assert pts[0]["zone_color"] == "#10b981"
+    gj = to_geojson(nodes, [], [])
+    props = gj["features"][0]["properties"]
+    assert props["zone"] == "Residential"
+    assert props["zone_color"] == "#10b981"

@@ -2,12 +2,14 @@ import React, { useEffect, useMemo } from 'react';
 import { MapContainer, TileLayer, CircleMarker, Popup, Tooltip, useMap } from 'react-leaflet';
 import L from 'leaflet';
 import { Eye, EyeOff } from 'lucide-react';
-import { Neighborhood, BasemapStyle, MapLayerOptions } from '../types';
+import { Neighborhood, BasemapStyle, MapLayerOptions, ZoneColorMap } from '../types';
+import { colorForZone, zoneCounts } from './mapThemes';
 
 interface MapVisualizerProps {
   neighborhoods: Neighborhood[];
   layerOptions: MapLayerOptions;
   setLayerOptions: React.Dispatch<React.SetStateAction<MapLayerOptions>>;
+  zoneColors: ZoneColorMap;
 }
 
 // Subcomponent to automatically fly to or fit bounds
@@ -29,7 +31,10 @@ export const MapVisualizer: React.FC<MapVisualizerProps> = ({
   neighborhoods,
   layerOptions,
   setLayerOptions,
+  zoneColors,
 }) => {
+  // Phase 2 has no warehouse assignments — 'warehouse' mode falls back to demand.
+  const effectiveColorBy = layerOptions.colorBy === 'warehouse' ? 'demand' : layerOptions.colorBy;
   // Compute demand statistics
   const { minOrders, maxOrders, totalOrders } = useMemo(() => {
     const orders = neighborhoods.map((n) => Number(n.daily_orders) || 0);
@@ -62,10 +67,15 @@ export const MapVisualizer: React.FC<MapVisualizerProps> = ({
   }, [neighborhoods]);
 
   // Bubble color & radius calculations per cartographic standards
-  const getBubbleProperties = (orders: number) => {
+  const getBubbleProperties = (orders: number, zone?: string | null) => {
     const ratio = maxOrders <= minOrders ? 0.5 : Math.max(0, Math.min(1, (orders - minOrders) / (maxOrders - minOrders)));
     // Radius proportional to sqrt(demand) between 7px and 26px
     const radius = 7 + (26 - 7) * Math.sqrt(ratio);
+
+    if (effectiveColorBy === 'zone') {
+      const z = (zone || 'Unzoned').trim() || 'Unzoned';
+      return { radius, color: colorForZone(z, zoneColors), category: z, ratio };
+    }
 
     // Color gradient
     let color = '#10b981'; // Emerald
@@ -80,6 +90,9 @@ export const MapVisualizer: React.FC<MapVisualizerProps> = ({
 
     return { radius, color, category, ratio };
   };
+
+  const counts = useMemo(() => zoneCounts(neighborhoods), [neighborhoods]);
+  const zoneList = useMemo(() => Object.keys(counts).sort((a, b) => a.localeCompare(b)), [counts]);
 
   // Basemap Tile URLs
   const basemapUrls: Record<BasemapStyle, { url: string; attribution: string }> = {
@@ -148,6 +161,25 @@ export const MapVisualizer: React.FC<MapVisualizerProps> = ({
             </button>
           </div>
 
+          {/* Color-by Theme Switcher (Zone / Demand) */}
+          <div className="flex items-center bg-white border border-slate-200 rounded-xl p-0.5 text-xs">
+            {([
+              { id: 'zone', label: 'Zones' },
+              { id: 'demand', label: 'Demand' }
+            ] as const).map((m) => (
+              <button
+                key={m.id}
+                onClick={() => setLayerOptions((prev) => ({ ...prev, colorBy: m.id }))}
+                title={m.id === 'zone' ? 'Color bubbles by zone / category' : 'Color bubbles by demand intensity'}
+                className={`px-2.5 py-1 rounded-lg font-medium transition ${
+                  effectiveColorBy === m.id ? 'bg-violet-600 text-white shadow-xs' : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                {m.label}
+              </button>
+            ))}
+          </div>
+
           {/* Demand Bubble Toggle */}
           <button
             onClick={() => setLayerOptions((prev) => ({ ...prev, showBubbles: !prev.showBubbles }))}
@@ -184,7 +216,7 @@ export const MapVisualizer: React.FC<MapVisualizerProps> = ({
               if (n.latitude == null || n.longitude == null || isNaN(n.latitude) || isNaN(n.longitude)) {
                 return null;
               }
-              const { radius, color, category } = getBubbleProperties(n.daily_orders);
+              const { radius, color, category } = getBubbleProperties(n.daily_orders, n.zone);
 
               return (
                 <CircleMarker
@@ -214,7 +246,10 @@ export const MapVisualizer: React.FC<MapVisualizerProps> = ({
                           {n.neighborhood_id}
                         </span>
                         {n.zone && (
-                          <span className="text-[10px] font-medium text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full">
+                          <span
+                            className="text-[10px] font-medium px-2 py-0.5 rounded-full text-white"
+                            style={{ background: colorForZone(n.zone, zoneColors) }}
+                          >
                             {n.zone}
                           </span>
                         )}
@@ -241,35 +276,60 @@ export const MapVisualizer: React.FC<MapVisualizerProps> = ({
             })}
         </MapContainer>
 
-        {/* Floating Map Legend */}
+        {/* Floating Map Legend (switches with color theme) */}
         <div className="absolute bottom-4 left-4 z-[400] bg-white/95 backdrop-blur-sm border border-slate-200/80 rounded-2xl p-3 shadow-lg max-w-[220px]">
-          <div className="text-xs font-bold text-slate-800 mb-2 flex items-center gap-1.5">
-            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-            Demand Intensity (Orders/Day)
-          </div>
-          <div className="space-y-1.5 text-[11px] text-slate-600">
-            <div className="flex items-center justify-between">
-              <span className="flex items-center gap-2">
-                <span className="w-3 h-3 rounded-full bg-[#10b981] border border-white shadow-xs"></span>
-                Low Demand
-              </span>
-              <span className="font-mono text-slate-400">{minOrders}</span>
-            </div>
-            <div className="flex items-center justify-between">
-              <span className="flex items-center gap-2">
-                <span className="w-3.5 h-3.5 rounded-full bg-[#f59e0b] border border-white shadow-xs"></span>
-                Medium Demand
-              </span>
-              <span className="font-mono text-slate-400">{Math.round((minOrders + maxOrders) / 2)}</span>
-            </div>
-            <div className="flex items-center justify-between">
-              <span className="flex items-center gap-2">
-                <span className="w-4 h-4 rounded-full bg-[#ef4444] border border-white shadow-xs"></span>
-                High Demand
-              </span>
-              <span className="font-mono text-slate-400">{maxOrders}</span>
-            </div>
-          </div>
+          {effectiveColorBy === 'zone' ? (
+            <>
+              <div className="text-xs font-bold text-slate-800 mb-2 flex items-center gap-1.5">
+                <span className="w-2 h-2 rounded-full bg-violet-500 animate-pulse"></span>
+                Zones / Categories
+              </div>
+              <div className="space-y-1.5 text-[11px] text-slate-600 max-h-36 overflow-y-auto pr-1">
+                {zoneList.map((z) => (
+                  <div key={z} className="flex items-center justify-between gap-2">
+                    <span className="flex items-center gap-2 truncate">
+                      <span
+                        className="w-3 h-3 rounded-full border border-white shadow-xs shrink-0"
+                        style={{ background: colorForZone(z, zoneColors) }}
+                      ></span>
+                      <span className="truncate">{z}</span>
+                    </span>
+                    <span className="font-mono text-slate-400">{counts[z]}</span>
+                  </div>
+                ))}
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="text-xs font-bold text-slate-800 mb-2 flex items-center gap-1.5">
+                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                Demand Intensity (Orders/Day)
+              </div>
+              <div className="space-y-1.5 text-[11px] text-slate-600">
+                <div className="flex items-center justify-between">
+                  <span className="flex items-center gap-2">
+                    <span className="w-3 h-3 rounded-full bg-[#10b981] border border-white shadow-xs"></span>
+                    Low Demand
+                  </span>
+                  <span className="font-mono text-slate-400">{minOrders}</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="flex items-center gap-2">
+                    <span className="w-3.5 h-3.5 rounded-full bg-[#f59e0b] border border-white shadow-xs"></span>
+                    Medium Demand
+                  </span>
+                  <span className="font-mono text-slate-400">{Math.round((minOrders + maxOrders) / 2)}</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="flex items-center gap-2">
+                    <span className="w-4 h-4 rounded-full bg-[#ef4444] border border-white shadow-xs"></span>
+                    High Demand
+                  </span>
+                  <span className="font-mono text-slate-400">{maxOrders}</span>
+                </div>
+              </div>
+            </>
+          )}
           <div className="mt-2 pt-2 border-t border-slate-100 text-[10px] text-slate-400 flex items-center justify-between">
             <span>Bubble Radius ∝ √w_i</span>
             <span>Leaflet + OSM</span>

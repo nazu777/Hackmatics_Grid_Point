@@ -231,8 +231,46 @@ def assignment_lines(
     return lines
 
 
+DEFAULT_ZONE_COLORS = {
+    "Residential": "#10b981",
+    "Commercial": "#3b82f6",
+    "Industrial": "#f59e0b",
+    "Mixed": "#8b5cf6",
+}
+
+ZONE_FALLBACK_PALETTE = [
+    "#06b6d4", "#f97316", "#84cc16", "#ec4899", "#6366f1",
+    "#14b8a6", "#eab308", "#ef4444", "#a855f7", "#0ea5e9",
+]
+
+
+def normalize_zone(zone: Any) -> str:
+    """Normalize free-form zone/category, defaulting to 'Unzoned'."""
+    z = str(zone).strip() if zone is not None else ""
+    return z or "Unzoned"
+
+
+def zone_color(zone: Any, custom: Dict[str, str] | None = None) -> str:
+    """Deterministic zone color: custom map -> defaults -> hash fallback (mirrors frontend)."""
+    key = normalize_zone(zone)
+    if custom and key in custom:
+        return custom[key]
+    if key in DEFAULT_ZONE_COLORS:
+        return DEFAULT_ZONE_COLORS[key]
+    h = 0
+    for ch in key.lower():
+        h = (h * 31 + ord(ch)) & 0xFFFFFFFF
+    return ZONE_FALLBACK_PALETTE[h % len(ZONE_FALLBACK_PALETTE)]
+
+
+def distinct_zones(neighborhoods: List[Dict[str, Any]]) -> List[str]:
+    """Sorted distinct zone names in a dataset."""
+    return sorted({normalize_zone(n.get("zone")) for n in neighborhoods})
+
+
 def map_points(neighborhoods: List[Dict[str, Any]],
-               assignments: List[Dict[str, Any]] | None = None) -> List[Dict[str, Any]]:
+               assignments: List[Dict[str, Any]] | None = None,
+               zone_colors: Dict[str, str] | None = None) -> List[Dict[str, Any]]:
     """Demand nodes with cluster color + bubble radius for Leaflet/st.map."""
     max_o = max([int(n["daily_orders"]) for n in neighborhoods] + [1])
     asg_by_nb = {str(a["neighborhood_id"]): a for a in (assignments or [])}
@@ -246,6 +284,8 @@ def map_points(neighborhoods: List[Dict[str, Any]],
             "latitude": float(n["latitude"]),
             "longitude": float(n["longitude"]),
             "daily_orders": int(n["daily_orders"]),
+            "zone": normalize_zone(n.get("zone")),
+            "zone_color": zone_color(n.get("zone"), zone_colors),
             "radius": bubble_radius(int(n["daily_orders"]), max_orders=max_o),
             "color": color,
             "warehouse_id": str(a["warehouse_id"]) if a else None,

@@ -11,6 +11,8 @@ import { MapView } from './components/MapView';
 import { ComparisonDashboard } from './components/ComparisonDashboard';
 import { OptimizationControls } from './components/OptimizationControls';
 import { ScenariosPanel } from './components/ScenariosPanel';
+import { ZoneLegendEditor } from './components/ZoneLegendEditor';
+import { useZoneColors } from './components/mapThemes';
 import { Neighborhood, ValidationResult, DatasetSummary, OptimizationConfig, OptimizationResult, MapLayerOptions } from './types';
 import { validateData, localValidate } from './services/api';
 
@@ -72,8 +74,11 @@ export const App: React.FC = () => {
   const [mapLayerOptions, setMapLayerOptions] = useState<MapLayerOptions>({
     showBubbles: true,
     showLabels: true,
-    basemap: 'osm'
+    basemap: 'osm',
+    colorBy: 'demand'
   });
+
+  const { zoneColors, setZoneColor, resetZoneColors } = useZoneColors();
 
   const handleConfigChange = (updated: OptimizationConfig) => {
     setOptimizationConfig(updated);
@@ -141,6 +146,11 @@ export const App: React.FC = () => {
     triggerValidation(newNodes);
   };
 
+  const handleApplyZones = (updated: Neighborhood[]) => {
+    setNeighborhoods(updated);
+    triggerValidation(updated);
+  };
+
   return (
     <div className="min-h-screen bg-slate-50 text-slate-800 flex flex-col">
       {/* Navbar */}
@@ -198,6 +208,15 @@ export const App: React.FC = () => {
                     &larr; Need to modify coordinates or orders? Edit in Phase 1
                   </button>
                 </div>
+
+                <ZoneLegendEditor
+                  neighborhoods={neighborhoods}
+                  zoneColors={zoneColors}
+                  onZoneColorChange={setZoneColor}
+                  onResetZoneColors={resetZoneColors}
+                  onApplyZones={handleApplyZones}
+                  compact
+                />
               </div>
 
               {/* Right Column: Leaflet Map */}
@@ -206,6 +225,7 @@ export const App: React.FC = () => {
                   neighborhoods={neighborhoods}
                   layerOptions={mapLayerOptions}
                   setLayerOptions={setMapLayerOptions}
+                  zoneColors={zoneColors}
                 />
               </div>
             </div>
@@ -227,12 +247,31 @@ export const App: React.FC = () => {
           <div className="space-y-6">
             {optimizationResult ? (
               <>
-                <MapView
-                  neighborhoods={neighborhoods}
-                  warehouses={optimizationResult.warehouses}
-                  assignments={optimizationResult.assignments}
-                  radiusKm={optimizationResult.config.radius_enabled ? (optimizationResult.config.R_max_km ?? null) : null}
-                />
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-start">
+                  <div className="lg:col-span-2">
+                    <MapView
+                      neighborhoods={neighborhoods}
+                      warehouses={optimizationResult.warehouses}
+                      assignments={optimizationResult.assignments}
+                      radiusKm={optimizationResult.config.radius_enabled ? (optimizationResult.config.R_max_km ?? null) : null}
+                      basemap={mapLayerOptions.basemap}
+                      onBasemapChange={(b) => setMapLayerOptions((prev) => ({ ...prev, basemap: b }))}
+                      colorBy={mapLayerOptions.colorBy}
+                      onColorByChange={(c) => setMapLayerOptions((prev) => ({ ...prev, colorBy: c }))}
+                      zoneColors={zoneColors}
+                    />
+                  </div>
+                  <div className="lg:col-span-1">
+                    <ZoneLegendEditor
+                      neighborhoods={neighborhoods}
+                      zoneColors={zoneColors}
+                      onZoneColorChange={setZoneColor}
+                      onResetZoneColors={resetZoneColors}
+                      onApplyZones={handleApplyZones}
+                      compact
+                    />
+                  </div>
+                </div>
                 <ComparisonDashboard result={optimizationResult} />
               </>
             ) : (

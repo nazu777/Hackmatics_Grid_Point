@@ -162,10 +162,17 @@ export interface OptimizationConfig {
 
 export type BasemapStyle = 'osm' | 'positron' | 'dark';
 
+/** Bubble color theme for map overlays. */
+export type ColorByMode = 'warehouse' | 'zone' | 'demand';
+
+/** Custom zone/category → hex color overrides (persisted to localStorage). */
+export type ZoneColorMap = Record<string, string>;
+
 export interface MapLayerOptions {
   showBubbles: boolean;
   showLabels: boolean;
   basemap: BasemapStyle;
+  colorBy: ColorByMode;
 }
 
 export interface TradeoffPoint {
