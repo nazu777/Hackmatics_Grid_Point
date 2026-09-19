@@ -1,5 +1,9 @@
 # Python
 __pycache__/
+# Local Census/AOI caches (large, machine-generated, never commit)
+data/census_cache/
+data/*.json
+!data/samples/
 *.py[cod]
 *$py.class
 *.so
