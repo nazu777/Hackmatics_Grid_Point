@@ -11,8 +11,10 @@ def _clean(monkeypatch, tmp_path):
     monkeypatch.delenv("TOMTOM_KEY", raising=False)
     monkeypatch.setenv("TRAFFIC_HISTORY_PATH", str(tmp_path / "hist.json"))
     routing.clear_matrix_cache()
+    routing.clear_route_cache()
     yield
     routing.clear_matrix_cache()
+    routing.clear_route_cache()
 
 
 def _pts():
@@ -119,3 +121,86 @@ def test_optimize_road_metric_uses_provider(monkeypatch):
     assert all(a.travel_time_min == pytest.approx(6.0) for a in res.assignments)
     assert res.routing_note and "mock roads" in res.routing_note
     assert res.comparison is not None
+
+
+def test_route_geometry_tomtom(monkeypatch):
+    import urllib.request
+
+    class FakeResp:
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+        def read(self):
+            import json
+            return json.dumps({
+                "routes": [{
+                    "summary": {"lengthInMeters": 7363, "travelTimeInSeconds": 1075},
+                    "legs": [{"points": [
+                        {"latitude": 12.93, "longitude": 77.62},
+                        {"latitude": 12.95, "longitude": 77.60},
+                        {"latitude": 12.97, "longitude": 77.59},
+                    ]}],
+                }],
+            }).encode()
+
+    monkeypatch.setenv("TOMTOM_KEY", "k")
+    monkeypatch.setattr(urllib.request, "urlopen", lambda req, timeout=15: FakeResp())
+    got = routing.route_geometry((12.93, 77.62), (12.97, 77.59), live_traffic=True)
+    assert got["provider"] == "tomtom-live"
+    assert got["distance_km"] == pytest.approx(7.36)
+    assert got["duration_min"] == pytest.approx(17.9, abs=0.1)
+    assert len(got["line"]) == 3 and got["line"][0][0] == pytest.approx(77.62)
+
+
+def test_route_geometry_osrm_fallback(monkeypatch):
+    import urllib.request
+
+    class FakeResp:
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+        def read(self):
+            import json
+            return json.dumps({
+                "code": "Ok",
+                "routes": [{"distance": 5200.0, "duration": 480.0,
+                            "geometry": {"coordinates": [[77.62, 12.93], [77.59, 12.97]]}}],
+            }).encode()
+
+    monkeypatch.delenv("TOMTOM_KEY", raising=False)
+    monkeypatch.setattr(urllib.request, "urlopen", lambda req, timeout=15: FakeResp())
+    got = routing.route_geometry((12.93, 77.62), (12.97, 77.59))
+    assert got["provider"] == "osrm"
+    assert got["distance_km"] == pytest.approx(5.2)
+
+
+def test_route_geometry_straight_fallback(monkeypatch):
+    import urllib.request
+
+    def boom(req, timeout=15):
+        raise OSError("offline")
+
+    monkeypatch.delenv("TOMTOM_KEY", raising=False)
+    monkeypatch.setattr(urllib.request, "urlopen", boom)
+    got = routing.route_geometry((12.93, 77.62), (12.97, 77.59))
+    assert got["provider"] == "haversine"
+    assert len(got["line"]) == 2 and got["duration_min"] is None
+
+
+def test_routes_api(monkeypatch):
+    import urllib.request
+    monkeypatch.delenv("TOMTOM_KEY", raising=False)
+
+    def boom(req, timeout=15):
+        raise OSError("offline")
+
+    monkeypatch.setattr(urllib.request, "urlopen", boom)
+    from src.api import app
+    from fastapi.testclient import TestClient
+    client = TestClient(app)
+    body = {"pairs": [{"frm": {"lat": 12.93, "lon": 77.62}, "to": {"lat": 12.97, "lon": 77.59}}]}
+    r = client.post("/api/routes/geometry", json=body)
+    assert r.status_code == 200
+    routes = r.json()["routes"]
+    assert len(routes) == 1 and routes[0]["provider"] == "haversine"
+    assert "d3rZl2" not in r.text
+    big = {"pairs": [{"frm": {"lat": 0.0, "lon": 0.0}, "to": {"lat": 1.0, "lon": 1.0}}] * 61}
+    assert client.post("/api/routes/geometry", json=big).status_code == 400

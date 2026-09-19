@@ -19,13 +19,15 @@ import os
 import time
 import urllib.request
 import urllib.parse
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 
 from .distance import haversine_distance_matrix
 
 TOMTOM_MATRIX_URL = "https://api.tomtom.com/routing/matrix/2/summary/json"
+TOMTOM_ROUTE_URL = "https://api.tomtom.com/routing/1/calculateRoute"
+MAX_ROUTE_PAIRS_PER_CALL = 60  # cap per batch request (quota + latency)
 OSRM_TABLE_URL = "https://router.project-osrm.org/table/v1/driving"
 MATRIX_TTL_S = 15 * 60
 MAX_COORDS_PER_CALL = 95  # stay under OSRM's 100-coordinate request limit
@@ -185,6 +187,99 @@ def fetch_matrix(origins: List[Tuple[float, float]],
     }.get(used, f"Road distances via {used}")
     _matrix_cache[key] = (now, dist.copy(), dur.copy() if dur is not None else None, used)
     return dist, dur, note
+
+
+def _tomtom_route(frm: Tuple[float, float], to: Tuple[float, float],
+                    live_traffic: bool) -> Optional[Dict[str, Any]]:
+    """Single TomTom calculateRoute. Returns {line, distance_km, duration_min} or None."""
+    key = os.environ.get("TOMTOM_KEY", "").strip()
+    if not key:
+        return None
+    url = (f"{TOMTOM_ROUTE_URL}/{frm[0]},{frm[1]}:{to[0]},{to[1]}/json"
+           f"?key={urllib.parse.quote(key)}&traffic={'true' if live_traffic else 'false'}")
+    req = urllib.request.Request(url, headers={"Content-Type": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            payload = json.loads(resp.read().decode("utf-8"))
+    except Exception:
+        return None
+    try:
+        route = payload["routes"][0]
+        summary = route["summary"]
+        pts: List[List[float]] = []
+        for leg in route.get("legs", []):
+            for p in leg.get("points", []):
+                pts.append([float(p["longitude"]), float(p["latitude"])])
+        if len(pts) < 2:
+            return None
+        return {"line": pts,
+                "distance_km": round(float(summary["lengthInMeters"]) / 1000.0, 2),
+                "duration_min": round(float(summary["travelTimeInSeconds"]) / 60.0, 1)}
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
+def _osrm_route(frm: Tuple[float, float], to: Tuple[float, float]) -> Optional[Dict[str, Any]]:
+    """Single OSRM route with full geometry. Returns {line, distance_km, duration_min} or None."""
+    try:
+        url = (f"https://router.project-osrm.org/route/v1/driving/"
+               f"{frm[1]},{frm[0]};{to[1]},{to[0]}"
+               f"?overview=full&geometries=geojson")
+        req = urllib.request.Request(url, headers={"Content-Type": "application/json"})
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            payload = json.loads(resp.read().decode("utf-8"))
+        if not isinstance(payload, dict) or payload.get("code") != "Ok":
+            return None
+        route = payload["routes"][0]
+        line = route["geometry"]["coordinates"]
+        if not isinstance(line, list) or len(line) < 2:
+            return None
+        return {"line": [[float(x[0]), float(x[1])] for x in line],
+                "distance_km": round(float(route["distance"]) / 1000.0, 2),
+                "duration_min": round(float(route["duration"]) / 60.0, 1)}
+    except Exception:
+        return None
+
+
+_route_cache: Dict[str, Tuple[float, Dict[str, Any]]] = {}
+
+
+def clear_route_cache() -> None:
+    _route_cache.clear()
+
+
+def route_geometry(frm: Tuple[float, float], to: Tuple[float, float],
+                   live_traffic: bool = False) -> Dict[str, Any]:
+    """
+    Driving path between two points as [[lon, lat], ...] plus distance/duration.
+    TomTom first (live traffic when requested + keyed), OSRM fallback,
+    straight line last resort. Cached 15 min. Never raises.
+    """
+    a, b = _round_pt(*frm), _round_pt(*to)
+    key = f"{a[0]:.4f},{a[1]:.4f}|{b[0]:.4f},{b[1]:.4f}|{int(bool(live_traffic))}"
+    now = time.time()
+    hit = _route_cache.get(key)
+    if hit and (now - hit[0]) < MATRIX_TTL_S:
+        return {**hit[1], "provider": hit[1]["provider"] + " (cached)"}
+    got = _tomtom_route(a, b, live_traffic) if live_traffic else None
+    provider = "tomtom-live" if got else None
+    if got is None:
+        # TomTom without traffic flag still gives road geometry when keyed;
+        # otherwise fall through to the keyless OSRM service.
+        if os.environ.get("TOMTOM_KEY", "").strip():
+            got = _tomtom_route(a, b, False)
+            provider = "tomtom" if got else None
+    if got is None:
+        got = _osrm_route(a, b)
+        provider = "osrm" if got else None
+    if got is None:
+        got = {"line": [[a[1], a[0]], [b[1], b[0]]],
+               "distance_km": round(_haversine_km(a, b), 2),
+               "duration_min": None}
+        provider = "haversine"
+    out = {**got, "provider": provider}
+    _route_cache[key] = (now, {**got, "provider": provider or "haversine"})
+    return out
 
 
 def road_matrices(coords1: np.ndarray, coords2: np.ndarray,

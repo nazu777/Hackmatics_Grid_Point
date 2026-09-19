@@ -200,6 +200,30 @@ export async function exportMetricsCsv(result: OptimizationResult): Promise<stri
   throw new Error('Metrics export unavailable offline — use dashboard CSV button');
 }
 
+export interface RouteGeometry {
+  line: number[][];
+  distance_km: number;
+  duration_min: number | null;
+  provider: string;
+}
+
+/** Driving path per origin→destination pair (TomTom → OSRM → straight fallback). */
+export async function fetchRouteGeometries(
+  pairs: { from: { lat: number; lon: number }; to: { lat: number; lon: number } }[],
+  liveTraffic = false
+): Promise<RouteGeometry[]> {
+  const res = await fetch(`${API_BASE}/routes/geometry`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ pairs, live_traffic: liveTraffic })
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: 'Route fetch failed' }));
+    throw new Error(err.detail || 'Route fetch failed');
+  }
+  return (await res.json()).routes as RouteGeometry[];
+}
+
 export async function exportAssignmentsCsv(result: OptimizationResult): Promise<string> {
   try {
     const res = await fetch(`${API_BASE}/export/assignments`, {

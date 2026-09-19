@@ -27,7 +27,7 @@ import {
   searchNeighborhoods
 } from './components/panelStore';
 import { Neighborhood, ValidationResult, DatasetSummary, OptimizationConfig, OptimizationResult, MapLayerOptions, BasemapStyle } from './types';
-import { validateData, localValidate, optimizeNetwork, exportCsv } from './services/api';
+import { validateData, localValidate, optimizeNetwork, exportCsv, fetchRouteGeometries } from './services/api';
 
 // Initial Hyderabad seed dataset per schema.md
 const INITIAL_DATASET: Neighborhood[] = [
@@ -95,6 +95,62 @@ export const App: React.FC = () => {
 
   // Map layer chips
   const [layers, setLayers] = useState<LayerFlags>({ warehouses: true, routes: true, demand: true, radius: true, traffic: false });
+
+  // Route line rendering: straight displacement (default) or traced road paths
+  const [linesMode, setLinesMode] = useState<'displacement' | 'roads'>('displacement');
+  const [roadGeometries, setRoadGeometries] = useState<Record<string, number[][]>>({});
+  const [tracing, setTracing] = useState(false);
+  const [routeNotice, setRouteNotice] = useState<string | null>(null);
+
+  const traceRoutes = useCallback(async (ids: string[]) => {
+    if (!optimizationResult || ids.length === 0) return;
+    const whById = new Map(optimizationResult.warehouses.map((w) => [w.warehouse_id, w]));
+    const nbById = new Map(neighborhoods.map((n) => [n.neighborhood_id, n]));
+    const pairs: { id: string; from: { lat: number; lon: number }; to: { lat: number; lon: number } }[] = [];
+    ids.forEach((id) => {
+      const a = optimizationResult.assignments.find((x) => x.neighborhood_id === id);
+      const nb = nbById.get(id);
+      const wh = a ? whById.get(a.warehouse_id) : undefined;
+      if (a && nb && wh) pairs.push({ id, from: { lat: nb.latitude, lon: nb.longitude }, to: { lat: wh.latitude, lon: wh.longitude } });
+    });
+    if (pairs.length === 0) return;
+    setTracing(true);
+    try {
+      const routes = await fetchRouteGeometries(
+        pairs.map((p) => ({ from: p.from, to: p.to })),
+        !!optimizationResult.config.use_live_traffic
+      );
+      setRoadGeometries((prev) => {
+        const next = { ...prev };
+        routes.forEach((r, i) => {
+          if (r.line && r.line.length >= 2) next[pairs[i].id] = r.line;
+        });
+        return next;
+      });
+      const providers = [...new Set(routes.map((r) => r.provider.replace(' (cached)', '')))].join(' + ');
+      setRouteNotice(`Road paths via ${providers} (${Object.keys(roadGeometries).length + routes.length}/${optimizationResult.assignments.length} traced)`);
+    } catch (e: any) {
+      setRouteNotice(e.message || 'Road tracing failed — showing displacement lines.');
+    } finally {
+      setTracing(false);
+    }
+  }, [optimizationResult, neighborhoods, roadGeometries]);
+
+  const handleLinesMode = useCallback((mode: 'displacement' | 'roads') => {
+    setLinesMode(mode);
+    setRouteNotice(null);
+    if (mode === 'roads' && optimizationResult) {
+      const missing = optimizationResult.assignments
+        .map((a) => a.neighborhood_id)
+        .filter((id) => !roadGeometries[id]);
+      if (missing.length === 0) return;
+      if (missing.length > 60) {
+        setRouteNotice(`${missing.length} routes is a lot — tracing on demand. Click any route line to trace its road path.`);
+        return;
+      }
+      traceRoutes(missing);
+    }
+  }, [optimizationResult, roadGeometries, traceRoutes]);
 
   // Resizable sidebar (drag the right edge; width persisted)
   const SIDEBAR_MIN = 280;
@@ -310,6 +366,12 @@ export const App: React.FC = () => {
   };
 
   const toggleLayer = (key: keyof LayerFlags) => setLayers((prev) => ({ ...prev, [key]: !prev[key] }));
+
+  // Traced road paths belong to a specific result/dataset — drop them on change
+  useEffect(() => {
+    setRoadGeometries({});
+    setRouteNotice(null);
+  }, [optimizationResult, neighborhoods]);
 
   const railTab: RailTab =
     panel === 'results' || panel === 'detail' ? 'ask' : (panel as RailTab);
@@ -527,6 +589,9 @@ export const App: React.FC = () => {
             focus={focus}
             routeColor={theme === 'dark' && !layers.traffic ? '#F0A0EA' : undefined}
             colorRoutesByTraffic={layers.traffic}
+            linesMode={linesMode}
+            roadGeometries={roadGeometries}
+            onRouteClick={(id) => traceRoutes([id])}
             theme={theme}
             highlightId={highlightId}
           />
@@ -590,13 +655,35 @@ export const App: React.FC = () => {
           </button>
         </div>
 
-        {/* Layer chips */}
+        {/* Layer chips + displacement/roads toggle */}
         <div
-          className="absolute top-[76px] z-10"
+          className="absolute top-[76px] z-10 flex flex-wrap items-center gap-2"
           style={{ left: sidebarWidth + 32 }}
         >
           <MapChips layers={layers} onToggle={toggleLayer} hasResult={!!optimizationResult} />
+          {optimizationResult && layers.routes && (
+            <div className="flex items-center bg-white border border-white rounded-full p-1 text-[12px] shadow-sm">
+              {(['displacement', 'roads'] as const).map((m) => (
+                <button
+                  key={m}
+                  onClick={() => handleLinesMode(m)}
+                  title={m === 'roads' ? 'Draw actual driving paths (fetched per route)' : 'Straight hub-spoke lines'}
+                  className={`px-3 py-1.5 rounded-full font-semibold capitalize transition cursor-pointer ${
+                    linesMode === m ? 'bg-[#14424E] text-white' : 'text-ink-faint hover:text-ink'
+                  }`}
+                >
+                  {tracing && m === 'roads' ? 'Tracing…' : m}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
+        {routeNotice && (
+          <div className="absolute top-[124px] z-10 text-[11px] font-semibold text-ink bg-white/95 rounded-full px-4 py-1.5 shadow border border-black/5"
+            style={{ left: sidebarWidth + 32 }}>
+            {routeNotice}
+          </div>
+        )}
 
         {/* Layers card (basemap + color-by + zones) */}
         <div className="absolute bottom-6 right-4 z-10">

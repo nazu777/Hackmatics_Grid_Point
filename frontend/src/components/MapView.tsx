@@ -79,6 +79,12 @@ interface MapViewProps {
   routeColor?: string;
   /** Color route lines by corridor congestion (green→amber→red) instead of warehouse. */
   colorRoutesByTraffic?: boolean;
+  /** Route line rendering: straight displacement (default) or actual road paths. */
+  linesMode?: 'displacement' | 'roads';
+  /** Traced road paths by neighborhood_id ([[lon, lat], ...]). Missing entries fall back to straight lines. */
+  roadGeometries?: Record<string, number[][]>;
+  /** Click a route line to trace its road path (roads mode, large datasets). */
+  onRouteClick?: (neighborhoodId: string) => void;
   /** 'light' | 'dark' website theme — adjusts pin chrome. */
   theme?: 'light' | 'dark';
   /** Hide the built-in header/legend chrome (shell provides its own). */
@@ -159,6 +165,9 @@ export const MapView: React.FC<MapViewProps> = ({
   focus = null,
   routeColor,
   colorRoutesByTraffic = false,
+  linesMode = 'displacement',
+  roadGeometries = {},
+  onRouteClick,
   theme = 'light',
   minimal = false,
   highlightId = null
@@ -166,6 +175,8 @@ export const MapView: React.FC<MapViewProps> = ({
   const divRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<mapboxgl.Map | null>(null);
   const markersRef = useRef<mapboxgl.Marker[]>([]);
+  const routeClickRef = useRef<((id: string) => void) | undefined>(undefined);
+  routeClickRef.current = onRouteClick;
   const styleRef = useRef<string>('');
   const threeDRef = useRef(false);
   const threeDBtnRef = useRef<HTMLButtonElement | null>(null);
@@ -232,6 +243,13 @@ export const MapView: React.FC<MapViewProps> = ({
       setStyleReady(true);
       sync3DBuildings(map, threeDRef.current);
     });
+    // Click a route line to trace its road path (roads mode, large datasets)
+    const onLineClick = (e: mapboxgl.MapMouseEvent & { features?: { properties?: Record<string, unknown> }[] }) => {
+      const id = e.features?.[0]?.properties?.neighborhood_id;
+      if (typeof id === 'string' && routeClickRef.current) routeClickRef.current(id);
+    };
+    map.on('click', ROUTES_OK, onLineClick);
+    map.on('click', ROUTES_BAD, onLineClick);
     mapRef.current = map;
     return () => {
       markersRef.current.forEach((m) => m.remove());
@@ -382,7 +400,8 @@ export const MapView: React.FC<MapViewProps> = ({
       } catch { /* style race — next render retries */ }
     }
 
-    // Assignment lines neighborhood → warehouse (must match assignment table)
+    // Assignment lines neighborhood → warehouse (must match assignment table).
+    // Roads mode draws traced driving paths where available, straight lines otherwise.
     if (showRoutes && assignments.length > 0) {
       const okFeatures: unknown[] = [];
       const badFeatures: unknown[] = [];
@@ -390,12 +409,20 @@ export const MapView: React.FC<MapViewProps> = ({
         const nb = neighborhoods.find((n) => n.neighborhood_id === a.neighborhood_id);
         const wh = whById.get(a.warehouse_id);
         if (!nb || !wh) return;
+        const traced = linesMode === 'roads' ? roadGeometries[a.neighborhood_id] : undefined;
+        const coords = traced && traced.length >= 2
+          ? traced
+          : [[nb.longitude, nb.latitude], [wh.longitude, wh.latitude]];
         const feat = {
           type: 'Feature',
-          properties: { color: routePaint(a) },
+          properties: {
+            color: routePaint(a),
+            neighborhood_id: a.neighborhood_id,
+            traced: traced && traced.length >= 2 ? 1 : 0
+          },
           geometry: {
             type: 'LineString',
-            coordinates: [[nb.longitude, nb.latitude], [wh.longitude, wh.latitude]]
+            coordinates: coords
           }
         };
         (a.is_feasible ? okFeatures : badFeatures).push(feat);
@@ -434,7 +461,7 @@ export const MapView: React.FC<MapViewProps> = ({
     try {
       map.resize();
     } catch { /* ignore */ }
-  }, [neighborhoods, warehouses, assignments, radiusKm, basemap, styleReady, token, colorBy, zoneColors, showWarehouses, showRoutes, showDemand, showRadius, routeColor, colorRoutesByTraffic, theme, highlightId, focus]);
+  }, [neighborhoods, warehouses, assignments, radiusKm, basemap, styleReady, token, colorBy, zoneColors, showWarehouses, showRoutes, showDemand, showRadius, routeColor, colorRoutesByTraffic, linesMode, roadGeometries, theme, highlightId, focus]);
 
   // Fly-to on focus requests (gmaps "Center" action)
   useEffect(() => {

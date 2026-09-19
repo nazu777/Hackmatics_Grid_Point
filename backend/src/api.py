@@ -315,6 +315,39 @@ def census_demand(
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(e))
 
 
+class RoutePair(BaseModel):
+    frm: Dict[str, float]
+    to: Dict[str, float]
+
+
+class RouteGeometryRequest(BaseModel):
+    pairs: List[RoutePair]
+    live_traffic: bool = False
+
+
+@app.post("/api/routes/geometry")
+def route_geometries(payload: RouteGeometryRequest):
+    """
+    Driving path per origin→destination pair ([[lon, lat], ...] + distance +
+    duration). TomTom first (live when requested + keyed), OSRM fallback,
+    straight line last resort. Capped per request for quota/latency.
+    """
+    from .routing import MAX_ROUTE_PAIRS_PER_CALL, route_geometry
+    if len(payload.pairs) > MAX_ROUTE_PAIRS_PER_CALL:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
+                            detail=f"Max {MAX_ROUTE_PAIRS_PER_CALL} pairs per request.")
+    out = []
+    for p in payload.pairs:
+        try:
+            frm = (float(p.frm["lat"]), float(p.frm["lon"]))
+            to = (float(p.to["lat"]), float(p.to["lon"]))
+        except (KeyError, TypeError, ValueError):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
+                                detail="Each pair needs {frm:{lat,lon}, to:{lat,lon}}.")
+        out.append(route_geometry(frm, to, live_traffic=payload.live_traffic))
+    return {"routes": out}
+
+
 @app.post("/api/export/assignments")
 def export_assignments(payload: MetricsExportRequest):
     """Export full neighborhood→warehouse assignment table as CSV (map lines match table)."""
