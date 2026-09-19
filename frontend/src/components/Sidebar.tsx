@@ -3,9 +3,9 @@ import {
   LayoutDashboard,
   Warehouse,
   Package,
-  Truck,
-  Boxes,
-  Route,
+  Scale,
+  Map as MapIcon,
+  FlaskConical,
   FileDown,
   Settings,
   Headphones
@@ -29,13 +29,13 @@ interface SidebarProps {
 }
 
 const MAIN_NAV: { id: AppView; label: string; icon: React.ElementType; needsResult?: boolean }[] = [
-  { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
-  { id: 'warehouses', label: 'Warehouses', icon: Warehouse },
-  { id: 'orders', label: 'Orders', icon: Package },
-  { id: 'shipments', label: 'Shipments', icon: Truck },
-  { id: 'inventory', label: 'Inventory', icon: Boxes },
-  { id: 'tracking', label: 'Tracking', icon: Route },
-  { id: 'export', label: 'Export Reports', icon: FileDown },
+  { id: 'dashboard', label: 'Overview', icon: LayoutDashboard },
+  { id: 'warehouses', label: 'Optimize', icon: Warehouse },
+  { id: 'orders', label: 'Demand Data', icon: Package },
+  { id: 'shipments', label: 'Compare', icon: Scale },
+  { id: 'inventory', label: 'Demand Map', icon: MapIcon },
+  { id: 'tracking', label: 'Scenarios', icon: FlaskConical },
+  { id: 'export', label: 'Export', icon: FileDown },
 ];
 
 const BOTTOM_NAV: { id: AppView; label: string; icon: React.ElementType }[] = [

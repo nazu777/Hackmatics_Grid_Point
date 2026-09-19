@@ -47,6 +47,51 @@ body {
   border-radius: 999px;
 }
 
+/* ---------- Website dark mode (class strategy) ---------- */
+.dark body {
+  background-color: #0B1B21;
+  color: #E8EDEF;
+}
+.dark .bg-cream { background-color: #0B1B21 !important; }
+.dark .bg-cream-deep { background-color: #143038 !important; }
+.dark .card {
+  background: #10262E !important;
+  border-color: #1E4550 !important;
+  box-shadow: none;
+}
+.dark .bg-white { background-color: #10262E !important; }
+.dark .bg-slate-50 { background-color: #0C1E25 !important; }
+.dark .bg-slate-100 { background-color: #143038 !important; }
+.dark .text-ink { color: #EAF1F2 !important; }
+.dark .text-ink-soft { color: #B9CBD0 !important; }
+.dark .text-ink-faint { color: #7E979E !important; }
+.dark .text-slate-900, .dark .text-slate-800 { color: #EAF1F2 !important; }
+.dark .text-slate-700, .dark .text-slate-600 { color: #B9CBD0 !important; }
+.dark .text-slate-500, .dark .text-slate-400 { color: #7E979E !important; }
+.dark .border-slate-200, .dark .border-slate-100 { border-color: #1E4550 !important; }
+.dark .border-\[\#E4E1D2\], .dark .border-\[\#E7E3D3\], .dark .border-\[\#ECE9DB\] { border-color: #1E4550 !important; }
+.dark .tile-hatch {
+  background-image: repeating-linear-gradient(
+    -45deg,
+    transparent,
+    transparent 5px,
+    rgba(232, 237, 239, 0.10) 5px,
+    rgba(232, 237, 239, 0.10) 6px
+  );
+}
+.dark input, .dark select {
+  color-scheme: dark;
+}
+.dark input[type="text"], .dark input[type="number"], .dark select {
+  background-color: #0C1E25 !important;
+  border-color: #1E4550 !important;
+  color: #EAF1F2 !important;
+}
+.dark table thead tr { background-color: #0C1E25 !important; }
+.dark .divide-slate-100 > :not([hidden]) ~ :not([hidden]) { border-color: #1E4550 !important; }
+.dark .hover\:bg-slate-50\/70:hover { background-color: rgba(20, 48, 56, 0.7) !important; }
+.dark .leaflet-container { background: #0C1E25; }
+
 /* Custom Leaflet Popups and Controls */
 .leaflet-popup-content-wrapper {
   background: #ffffff;

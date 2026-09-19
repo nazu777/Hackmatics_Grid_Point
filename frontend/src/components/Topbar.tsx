@@ -1,14 +1,18 @@
 import React from 'react';
 import { Search, Bell, CalendarDays, Sun, Moon, ChevronDown } from 'lucide-react';
 
+export type ThemeMode = 'light' | 'dark';
+
 interface TopbarProps {
   query: string;
   onQuery: (q: string) => void;
   errorCount: number;
   onOpenErrors: () => void;
+  theme: ThemeMode;
+  onThemeChange: (t: ThemeMode) => void;
 }
 
-export const Topbar: React.FC<TopbarProps> = ({ query, onQuery, errorCount, onOpenErrors }) => {
+export const Topbar: React.FC<TopbarProps> = ({ query, onQuery, errorCount, onOpenErrors, theme, onThemeChange }) => {
   return (
     <div className="flex items-center gap-3 py-5">
       {/* Search */}
@@ -47,14 +51,26 @@ export const Topbar: React.FC<TopbarProps> = ({ query, onQuery, errorCount, onOp
         <CalendarDays className="w-[18px] h-[18px]" />
       </button>
 
-      {/* Light / dark segmented (decorative, matches reference) */}
+      {/* Light / dark website theme */}
       <div className="flex items-center bg-white border border-[#E4E1D2] rounded-full p-1 gap-1">
-        <span className="w-8 h-8 rounded-full bg-gold flex items-center justify-center text-ink">
+        <button
+          onClick={() => onThemeChange('light')}
+          title="Light mode"
+          className={`w-8 h-8 rounded-full flex items-center justify-center transition cursor-pointer ${
+            theme === 'light' ? 'bg-gold text-ink' : 'text-ink-faint hover:text-ink'
+          }`}
+        >
           <Sun className="w-4 h-4" />
-        </span>
-        <span className="w-8 h-8 rounded-full flex items-center justify-center text-ink-faint">
+        </button>
+        <button
+          onClick={() => onThemeChange('dark')}
+          title="Dark mode"
+          className={`w-8 h-8 rounded-full flex items-center justify-center transition cursor-pointer ${
+            theme === 'dark' ? 'bg-gold text-ink' : 'text-ink-faint hover:text-ink'
+          }`}
+        >
           <Moon className="w-4 h-4" />
-        </span>
+        </button>
       </div>
 
       {/* User */}
