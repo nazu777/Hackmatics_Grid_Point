@@ -7,9 +7,11 @@ interface DataTableProps {
   neighborhoods: Neighborhood[];
   errors: ValidationErrorItem[];
   onChange: (updated: Neighborhood[]) => void;
+  /** Extra filter from the top-bar search (combined with the table's own search). */
+  externalQuery?: string;
 }
 
-export const DataTable: React.FC<DataTableProps> = ({ neighborhoods, errors, onChange }) => {
+export const DataTable: React.FC<DataTableProps> = ({ neighborhoods, errors, onChange, externalQuery = '' }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
   const rowsPerPage = 15;
@@ -27,17 +29,19 @@ export const DataTable: React.FC<DataTableProps> = ({ neighborhoods, errors, onC
     return map;
   }, [errors]);
 
-  // Filter rows
+  // Filter rows (top-bar query AND table search both apply)
   const filtered = useMemo(() => {
-    if (!searchTerm.trim()) return neighborhoods;
-    const term = searchTerm.toLowerCase();
-    return neighborhoods.filter(
-      (n) =>
-        n.neighborhood_id.toLowerCase().includes(term) ||
-        (n.name && n.name.toLowerCase().includes(term)) ||
-        (n.zone && n.zone.toLowerCase().includes(term))
+    const terms = [externalQuery, searchTerm].map((t) => t.trim().toLowerCase()).filter(Boolean);
+    if (terms.length === 0) return neighborhoods;
+    return neighborhoods.filter((n) =>
+      terms.every(
+        (term) =>
+          n.neighborhood_id.toLowerCase().includes(term) ||
+          (n.name && n.name.toLowerCase().includes(term)) ||
+          (n.zone && n.zone.toLowerCase().includes(term))
+      )
     );
-  }, [neighborhoods, searchTerm]);
+  }, [neighborhoods, searchTerm, externalQuery]);
 
   // Pagination
   const totalPages = Math.max(1, Math.ceil(filtered.length / rowsPerPage));
