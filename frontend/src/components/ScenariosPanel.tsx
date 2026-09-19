@@ -61,6 +61,8 @@ export const ScenariosPanel: React.FC<ScenariosPanelProps> = ({
   const [trafficPct, setTrafficPct] = useState<number>(Math.round((config.traffic_factor || 0) * 100));
   const [selectedVehicle, setSelectedVehicle] = useState<'bike' | 'van' | 'truck'>('van');
   const [fuelCost, setFuelCost] = useState<number>(config.fuel_cost_per_km || 0.2);
+  const [liveFuel, setLiveFuel] = useState<boolean>(!!config.use_live_fuel);
+  const [fuelCity, setFuelCity] = useState<string>(config.fuel_city || 'Bengaluru');
   const [fleetETA, setFleetETA] = useState<FleetETAResult | null>(null);
 
   // Scenario 4: Diagnostics State
@@ -94,11 +96,14 @@ export const ScenariosPanel: React.FC<ScenariosPanelProps> = ({
     const currentConfig: OptimizationConfig = {
       ...config,
       traffic_factor: trafficPct / 100.0,
-      fuel_cost_per_km: fuelCost
+      fuel_cost_per_km: fuelCost,
+      use_live_fuel: liveFuel,
+      fuel_state: 'Karnataka',
+      fuel_city: fuelCity || null
     };
 
     getFleetETA(lastResult.assignments, currentConfig, selectedVehicle).then(setFleetETA);
-  }, [lastResult, trafficPct, selectedVehicle, fuelCost]);
+  }, [lastResult, trafficPct, selectedVehicle, fuelCost, liveFuel, fuelCity]);
 
   // Compute Diagnostics whenever result changes
   useEffect(() => {
@@ -483,6 +488,27 @@ export const ScenariosPanel: React.FC<ScenariosPanelProps> = ({
                   className="w-full h-1.5 bg-[#E4E1D2] rounded-lg appearance-none cursor-pointer accent-amber-600"
                 />
               </div>
+
+              <div className="flex items-center gap-2">
+                <label className="flex items-center gap-1.5 text-[11px] font-semibold text-slate-700 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={liveFuel}
+                    onChange={(e) => setLiveFuel(e.target.checked)}
+                    className="rounded text-emerald-600 focus:ring-emerald-500"
+                  />
+                  Live pump prices (Karnataka)
+                </label>
+                {liveFuel && (
+                  <input
+                    type="text"
+                    value={fuelCity}
+                    onChange={(e) => setFuelCity(e.target.value)}
+                    placeholder="City (e.g. Bengaluru)"
+                    className="flex-1 min-w-0 bg-white border border-slate-200 rounded-lg px-2 py-1 text-[11px]"
+                  />
+                )}
+              </div>
             </div>
 
             {/* ETA & Fuel Metrics */}
@@ -501,7 +527,11 @@ export const ScenariosPanel: React.FC<ScenariosPanelProps> = ({
                 <div className="bg-cream-deep p-3 rounded-2xl border border-[#E4E1D2] text-center">
                   <span className="text-[10px] font-semibold text-ink-faint uppercase block">Fuel Burned</span>
                   <span className="text-base font-extrabold text-amber-600">{fleetETA.fuel_consumed_liters} L</span>
-                  <span className="text-[10px] text-ink-faint block mt-0.5">{fleetETA.effective_km} km dist</span>
+                  <span className="text-[10px] text-ink-faint block mt-0.5">
+                    {fleetETA.fuel_cost != null && fleetETA.fuel_cost > 0
+                      ? `$${fleetETA.fuel_cost.toLocaleString()} @ ₹${fleetETA.fuel_price_per_litre?.toFixed(2)}/L${fleetETA.fuel_live ? ' • live' : ''}`
+                      : `${fleetETA.effective_km} km dist`}
+                  </span>
                 </div>
               </div>
             )}
@@ -516,7 +546,10 @@ export const ScenariosPanel: React.FC<ScenariosPanelProps> = ({
                 onUpdateConfig({
                   ...config,
                   traffic_factor: trafficPct / 100.0,
-                  fuel_cost_per_km: fuelCost
+                  fuel_cost_per_km: fuelCost,
+                  use_live_fuel: liveFuel,
+                  fuel_state: 'Karnataka',
+                  fuel_city: fuelCity || null
                 });
               }}
               className="px-3 py-1.5 bg-[#14424E] hover:bg-[#0d333d] text-white rounded-xl text-xs font-semibold transition cursor-pointer"

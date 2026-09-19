@@ -7,12 +7,13 @@ Formulas:
   Total Weighted Distance   = Σ w_i * d_i          (km·orders)
   Total Delivery Cost       = Σ w_i * d_eff_i * rate_eff + Σ infra_cost_k
     where d_eff_i = d_i * (1 + traffic_factor)
-          rate_eff = fleet-weighted avg cost_per_km if vehicle_fleet else
-                     cost_per_km + fuel_cost_per_km
+          rate_eff = base_rate + fuel_rate
+          base_rate = fleet-weighted avg cost_per_km if vehicle_fleet else cost_per_km
+          fuel_rate = fleet-weighted fuel burn (live ₹/L ÷ mileage) + fuel_cost_per_km
   Avg Distance per Order    = Total Weighted Distance / Σ w_i
   Avg Weighted Distance     = Total Weighted Distance / N
 """
-from typing import List, Dict, Any, Tuple
+from typing import List, Dict, Any, Optional, Tuple
 import math
 
 from .schema import (
@@ -25,16 +26,81 @@ from .schema import (
     Warehouse,
     WarehouseMetric,
 )
+from .fuel import FALLBACK_PRICES, price_for
 
 
-def effective_rate(config: OptimizationConfig) -> float:
-    """Unified $/km·order rate: fleet-weighted avg if fleet given, else cost+fuel."""
+def resolve_fuel_prices(config: OptimizationConfig) -> Tuple[Dict[str, float], bool, str]:
+    """
+    ₹/litre by fuel type for this run + live flag + human note.
+    Live lookup happens only when config.use_live_fuel is set; otherwise the
+    manual fuel_cost_per_km surcharge alone drives the fuel portion.
+    """
+    if not config.use_live_fuel:
+        return {}, False, "Manual fuel surcharge (live prices off)"
+    prices: Dict[str, float] = {}
+    live_any = False
+    cities: List[str] = []
+    for fuel in ("petrol", "diesel", "cng", "autogas"):
+        price, live, city = price_for(fuel, config.fuel_city, config.fuel_state)
+        if price is not None:
+            prices[fuel] = price
+            live_any = live_any or live
+            if city and city not in cities:
+                cities.append(city)
+    where = cities[0] if cities else config.fuel_state
+    petrol = prices.get("petrol")
+    note = (
+        f"Live {where} petrol ₹{petrol:.2f}/L" if (live_any and petrol)
+        else f"{where} fallback rates (live API unreachable)"
+    )
+    return prices, live_any, note
+
+
+def _fleet_burn_rate(config: OptimizationConfig, prices: Dict[str, float]) -> float:
+    """Fleet-weighted fuel burn ₹/km·order from live prices ÷ mileage (0 if unset)."""
+    if not config.vehicle_fleet or not prices:
+        return 0.0
+    total_cap = 0
+    weighted = 0.0
+    for v in config.vehicle_fleet:
+        if not v.mileage_kmpl or v.mileage_kmpl <= 0:
+            continue
+        price = prices.get((v.fuel_type or "petrol").strip().lower())
+        if price is None:
+            continue
+        cap = max(1, v.capacity)
+        total_cap += cap
+        weighted += (price / v.mileage_kmpl) * cap
+    return weighted / max(1, total_cap)
+
+
+def split_rate(config: OptimizationConfig,
+               prices: Optional[Dict[str, float]] = None) -> Tuple[float, float]:
+    """(base_rate, fuel_rate) operating vs fuel portions of the unified rate."""
+    if prices is None:
+        prices, _, _ = resolve_fuel_prices(config)
     if config.vehicle_fleet:
         total_cap = sum(max(1, v.capacity) for v in config.vehicle_fleet)
         weighted = sum(v.cost_per_km * max(1, v.capacity) for v in config.vehicle_fleet)
         base = weighted / max(1, total_cap)
-        return base + float(config.fuel_cost_per_km or 0.0)
-    return float(config.cost_per_km or 0.0) + float(config.fuel_cost_per_km or 0.0)
+    else:
+        base = float(config.cost_per_km or 0.0)
+    fuel = _fleet_burn_rate(config, prices) + float(config.fuel_cost_per_km or 0.0)
+    return base, fuel
+
+
+def effective_rate(config: OptimizationConfig,
+                   prices: Optional[Dict[str, float]] = None) -> float:
+    """Unified $/km·order rate: base operating rate + fuel rate."""
+    base, fuel = split_rate(config, prices)
+    return base + fuel
+
+
+def assignment_fuel_cost(w_i: int, d_km: float, config: OptimizationConfig,
+                         prices: Optional[Dict[str, float]] = None) -> float:
+    """Fuel-only portion of one neighborhood's delivery cost."""
+    _, fuel_rate = split_rate(config, prices)
+    return float(w_i) * effective_distance(d_km, config) * fuel_rate
 
 
 def effective_distance(d_km: float, config: OptimizationConfig) -> float:
@@ -42,9 +108,10 @@ def effective_distance(d_km: float, config: OptimizationConfig) -> float:
     return float(d_km) * (1.0 + float(config.traffic_factor or 0.0))
 
 
-def assignment_cost(w_i: int, d_km: float, config: OptimizationConfig) -> float:
+def assignment_cost(w_i: int, d_km: float, config: OptimizationConfig,
+                      prices: Optional[Dict[str, float]] = None) -> float:
     """Delivery cost for one neighborhood: w_i * d_eff * rate_eff."""
-    return float(w_i) * effective_distance(d_km, config) * effective_rate(config)
+    return float(w_i) * effective_distance(d_km, config) * effective_rate(config, prices)
 
 
 def compute_metrics(
@@ -52,11 +119,16 @@ def compute_metrics(
     assignments: List[Assignment],
     warehouses: List[Warehouse],
     config: OptimizationConfig,
+    prices: Optional[Dict[str, float]] = None,
+    fuel_live: bool = False,
 ) -> Metrics:
     """Aggregate Metrics from per-assignment distances (distances are raw km)."""
+    if prices is None:
+        prices, fuel_live, _ = resolve_fuel_prices(config)
     total_unweighted = 0.0
     total_weighted = 0.0
     total_cost = 0.0
+    total_fuel = 0.0
     infeasible = sum(1 for a in assignments if not a.is_feasible)
 
     orders_by_wh: Dict[str, int] = {w.warehouse_id: 0 for w in warehouses}
@@ -71,6 +143,7 @@ def compute_metrics(
         total_unweighted += float(a.distance_km)
         total_weighted += float(a.weighted_distance)
         total_cost += float(a.cost)
+        total_fuel += assignment_fuel_cost(w_i, float(a.distance_km), config, prices)
         if a.warehouse_id in orders_by_wh:
             orders_by_wh[a.warehouse_id] += w_i
             dists_by_wh[a.warehouse_id].append(float(a.distance_km))
@@ -104,6 +177,8 @@ def compute_metrics(
         total_unweighted_distance_km=round(total_unweighted, 2),
         total_weighted_distance_km_orders=round(total_weighted, 2),
         total_cost=round(total_cost, 2),
+        total_fuel_cost=round(total_fuel, 2),
+        fuel_live=fuel_live,
         avg_distance_per_order_km=round(total_weighted / max(1, total_demand), 2),
         avg_weighted_distance_km=round(total_weighted / n, 2),
         warehouses=wh_metrics,
@@ -161,6 +236,7 @@ def metrics_table_rows(
         ("total_unweighted_distance_km", baseline.total_unweighted_distance_km, optimized.total_unweighted_distance_km),
         ("total_weighted_distance_km_orders", baseline.total_weighted_distance_km_orders, optimized.total_weighted_distance_km_orders),
         ("total_cost", baseline.total_cost, optimized.total_cost),
+        ("total_fuel_cost", baseline.total_fuel_cost, optimized.total_fuel_cost),
         ("avg_distance_per_order_km", baseline.avg_distance_per_order_km, optimized.avg_distance_per_order_km),
         ("avg_weighted_distance_km", baseline.avg_weighted_distance_km, optimized.avg_weighted_distance_km),
         ("feasibility_ratio", baseline.feasibility_ratio, optimized.feasibility_ratio),

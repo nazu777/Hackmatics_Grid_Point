@@ -38,9 +38,10 @@ class VehicleType(BaseModel):
     """Vehicle fleet specification for bonus cost modeling."""
     vehicle_type: str = Field(..., description="e.g. bike, van, truck")
     capacity: int = Field(..., gt=0, description="Orders per trip")
-    cost_per_km: float = Field(..., ge=0.0, description="Cost per km")
-    fuel_type: Optional[str] = Field("petrol", description="petrol/diesel/electric")
+    cost_per_km: float = Field(..., ge=0.0, description="Operating cost per km (excl. fuel)")
+    fuel_type: Optional[str] = Field("petrol", description="petrol/diesel/cng/autogas/electric")
     avg_speed_kmph: Optional[float] = Field(30.0, gt=0.0)
+    mileage_kmpl: Optional[float] = Field(None, gt=0.0, description="Fuel economy; fuel burn = live price / mileage per km")
 
 
 class OptimizationConfig(BaseModel):
@@ -55,6 +56,9 @@ class OptimizationConfig(BaseModel):
     fuel_cost_per_km: float = Field(0.0, ge=0.0)
     infra_cost_per_warehouse: float = Field(0.0, ge=0.0)
     traffic_factor: float = Field(0.0, ge=0.0)
+    use_live_fuel: bool = Field(False, description="Use live RapidAPI fuel prices for fuel burn")
+    fuel_state: str = Field("Karnataka", description="Indian state for live fuel rates")
+    fuel_city: Optional[str] = Field(None, description="City for live fuel rates (default: first city)")
     vehicle_fleet: List[VehicleType] = Field(default_factory=list)
     random_seed: int = Field(42)
     baseline_mode: Literal["centroid", "mean", "single_center", "custom"] = Field("centroid")
@@ -123,6 +127,8 @@ class Metrics(BaseModel):
     total_unweighted_distance_km: float = 0.0
     total_weighted_distance_km_orders: float = 0.0
     total_cost: float = 0.0
+    total_fuel_cost: float = 0.0
+    fuel_live: bool = False
     avg_distance_per_order_km: float = 0.0
     avg_weighted_distance_km: float = 0.0
     warehouses: List[WarehouseMetric] = Field(default_factory=list)
@@ -162,4 +168,5 @@ class OptimizationResult(BaseModel):
     comparison: Optional[ComparisonResult] = None
     is_feasible: bool = True
     infeasibility_reason: Optional[str] = None
+    fuel_note: Optional[str] = None
 

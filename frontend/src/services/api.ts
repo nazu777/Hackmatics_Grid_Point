@@ -13,7 +13,8 @@ import {
   TradeoffResult,
   DemandShiftStats,
   FleetETAResult,
-  ConstraintDiagnostics
+  ConstraintDiagnostics,
+  FuelRates
 } from '../types';
 
 // In production (single Vercel deployment) API is same-origin at /api
@@ -187,6 +188,42 @@ export async function exportAssignmentsCsv(result: OptimizationResult): Promise<
     if (res.ok) return await res.text();
   } catch (e) {}
   throw new Error('Assignments export unavailable offline — use dashboard CSV button');
+}
+
+// --------------------------------------------------------------------------
+// Live fuel prices (RapidAPI, server-side key, cached 12h)
+// --------------------------------------------------------------------------
+
+const FALLBACK_FUEL: FuelRates = {
+  state: 'Karnataka',
+  live: false,
+  cities: [],
+  defaults: { petrol: 105.0, diesel: 92.0, cng: 90.0, autogas: 40.0 }
+};
+
+/** Daily ₹/litre rates by city. Falls back to static defaults when offline/keyless. */
+export async function fetchFuelRates(state = 'Karnataka'): Promise<FuelRates> {
+  try {
+    const res = await fetch(`${API_BASE}/fuel/rates?state=${encodeURIComponent(state)}`);
+    if (res.ok) return await res.json();
+  } catch (e) {
+    // offline -> fallback below
+  }
+  return { ...FALLBACK_FUEL, state };
+}
+
+/** ₹/litre for a fuel type in a city (case-insensitive), else static default. */
+export function fuelPriceFor(rates: FuelRates, fuelType: string, city?: string | null): { price: number; live: boolean; city: string | null } {
+  const key = (fuelType || 'petrol').trim().toLowerCase() as keyof FuelRates['cities'][number];
+  const match = city
+    ? rates.cities.find((c) => c.city.trim().toLowerCase() === city.trim().toLowerCase())
+    : undefined;
+  const row = match || rates.cities[0];
+  const livePrice = row ? (row[key] as unknown as number | null) : null;
+  if (typeof livePrice === 'number' && livePrice > 0) {
+    return { price: livePrice, live: rates.live, city: row.city };
+  }
+  return { price: rates.defaults[key as string] ?? 0, live: false, city: null };
 }
 
 // Client-side local validation fallback adhering to schema.md §4
@@ -499,6 +536,7 @@ function localOptimizeNetwork(
   let totalWeightedDist = 0;
   let totalUnweightedDist = 0;
   let totalCost = 0;
+  let totalFuelCost = 0;
   let infeasibleCount = 0;
 
   neighborhoods.forEach((node) => {
@@ -514,6 +552,7 @@ function localOptimizeNetwork(
     const w = Number(node.daily_orders) || 0;
     const weightedD = w * minDist;
     const cost = weightedD * config.cost_per_km + (weightedD * config.fuel_cost_per_km);
+    const fuelCost = weightedD * config.fuel_cost_per_km;
     const withinRadius = config.radius_enabled && config.R_max_km ? minDist <= config.R_max_km : true;
     if (!withinRadius) infeasibleCount++;
 
@@ -531,6 +570,7 @@ function localOptimizeNetwork(
     totalUnweightedDist += minDist;
     totalWeightedDist += weightedD;
     totalCost += cost;
+    totalFuelCost += fuelCost;
   });
 
   const totalDemand = neighborhoods.reduce((sum, n) => sum + (Number(n.daily_orders) || 0), 0);
@@ -539,6 +579,8 @@ function localOptimizeNetwork(
     total_unweighted_distance_km: parseFloat(totalUnweightedDist.toFixed(2)),
     total_weighted_distance_km_orders: parseFloat(totalWeightedDist.toFixed(2)),
     total_cost: parseFloat((totalCost + K * config.infra_cost_per_warehouse).toFixed(2)),
+    total_fuel_cost: parseFloat(totalFuelCost.toFixed(2)),
+    fuel_live: false,
     avg_distance_per_order_km: parseFloat((totalWeightedDist / Math.max(1, totalDemand)).toFixed(2)),
     avg_weighted_distance_km: parseFloat((totalWeightedDist / Math.max(1, N)).toFixed(2)),
     warehouses: warehouses.map(w => ({
@@ -567,6 +609,7 @@ function localOptimizeNetwork(
     baseWeightedDist += w * d;
   });
   const baseCost = baseWeightedDist * config.cost_per_km + (baseWeightedDist * config.fuel_cost_per_km) + config.infra_cost_per_warehouse;
+  const baseFuelCost = baseWeightedDist * config.fuel_cost_per_km;
 
   const distSaved = Math.max(0, baseWeightedDist - totalWeightedDist);
   const costSaved = Math.max(0, baseCost - metrics.total_cost);
@@ -577,6 +620,8 @@ function localOptimizeNetwork(
         total_unweighted_distance_km: parseFloat(baseUnweightedDist.toFixed(2)),
         total_weighted_distance_km_orders: parseFloat(baseWeightedDist.toFixed(2)),
         total_cost: parseFloat(baseCost.toFixed(2)),
+        total_fuel_cost: parseFloat(baseFuelCost.toFixed(2)),
+        fuel_live: false,
         avg_distance_per_order_km: parseFloat((baseWeightedDist / Math.max(1, totalDemand)).toFixed(2)),
         avg_weighted_distance_km: parseFloat((baseWeightedDist / Math.max(1, N)).toFixed(2)),
         warehouses: [{ warehouse_id: 'W_BASE', assigned_orders: totalDemand, avg_distance_km: 0, neighborhood_count: N }],

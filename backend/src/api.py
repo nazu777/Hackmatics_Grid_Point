@@ -238,6 +238,34 @@ def export_metrics(payload: MetricsExportRequest):
     return PlainTextResponse(content="\n".join(lines), media_type="text/csv")
 
 
+@app.get("/api/fuel/rates")
+def fuel_rates(state: str = Query("Karnataka", description="Indian state for fuel rates")):
+    """
+    Daily petrol/diesel/CNG/autogas ₹/litre by city. Served live from RapidAPI
+    when RAPIDAPI_KEY is configured, else static fallbacks with live=false.
+    The key is never exposed — only prices leave the server.
+    """
+    from .fuel import api_key_configured, get_state_rates
+    info = get_state_rates(state)
+    return {**info, "key_configured": api_key_configured()}
+
+
+@app.get("/api/fuel/price")
+def fuel_price(
+    fuel_type: str = Query(..., description="petrol|diesel|cng|autogas"),
+    city: Optional[str] = Query(None, description="City (default: first city)"),
+    state: str = Query("Karnataka", description="Indian state for fuel rates"),
+):
+    """Single ₹/litre quote for a fuel type."""
+    from .fuel import price_for
+    price, live, city_used = price_for(fuel_type, city, state)
+    if price is None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
+                            detail=f"Unknown fuel type '{fuel_type}'. Use petrol|diesel|cng|autogas.")
+    return {"fuel_type": fuel_type.strip().lower(), "price_per_litre": price,
+            "live": live, "city": city_used, "state": state}
+
+
 @app.post("/api/export/assignments")
 def export_assignments(payload: MetricsExportRequest):
     """Export full neighborhood→warehouse assignment table as CSV (map lines match table)."""

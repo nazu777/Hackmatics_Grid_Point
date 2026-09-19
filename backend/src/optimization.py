@@ -21,7 +21,7 @@ from .schema import (
     ComparisonDelta
 )
 from .distance import compute_distance_matrix
-from .cost import assignment_cost, compute_comparison
+from .cost import assignment_cost, assignment_fuel_cost, compute_comparison, resolve_fuel_prices
 
 
 def weiszfeld_geometric_median(
@@ -247,10 +247,14 @@ def evaluate_network_layout(
     neighborhoods: List[Dict[str, Any]],
     warehouse_coords: np.ndarray,
     labels: np.ndarray,
-    config: OptimizationConfig
+    config: OptimizationConfig,
+    fuel_prices: Optional[Dict[str, float]] = None,
+    fuel_live: bool = False,
 ) -> Tuple[List[Warehouse], List[Assignment], Metrics]:
     """
     Computes all distances, costs, and warehouse utilization metrics for a given layout (schema.md §2.5, §2.6).
+    fuel_prices/fuel_live are resolved once per run in run_optimization so both
+    layouts share identical fuel economics (cached, single lookup).
     """
     N = len(neighborhoods)
     K = len(warehouse_coords)
@@ -276,6 +280,7 @@ def evaluate_network_layout(
     total_unweighted_dist = 0.0
     total_weighted_dist = 0.0
     total_cost = 0.0
+    total_fuel_cost = 0.0
     infeasible_count = 0
 
     warehouse_orders = [0 for _ in range(K)]
@@ -291,7 +296,7 @@ def evaluate_network_layout(
 
         d_km = float(dist_matrix[i, assigned_k])
         weighted_d = w_i * d_km
-        cost_i = assignment_cost(w_i, d_km, config)
+        cost_i = assignment_cost(w_i, d_km, config, fuel_prices)
 
         within_rad = True
         if config.radius_enabled and config.R_max_km is not None:
@@ -314,6 +319,7 @@ def evaluate_network_layout(
         total_unweighted_dist += d_km
         total_weighted_dist += weighted_d
         total_cost += cost_i
+        total_fuel_cost += assignment_fuel_cost(w_i, d_km, config, fuel_prices)
 
         warehouse_orders[assigned_k] += w_i
         warehouse_distances[assigned_k].append(d_km)
@@ -355,6 +361,8 @@ def evaluate_network_layout(
         total_unweighted_distance_km=round(total_unweighted_dist, 2),
         total_weighted_distance_km_orders=round(total_weighted_dist, 2),
         total_cost=round(total_cost, 2),
+        total_fuel_cost=round(total_fuel_cost, 2),
+        fuel_live=fuel_live,
         avg_distance_per_order_km=round(avg_dist_per_order, 2),
         avg_weighted_distance_km=round(avg_weighted_dist, 2),
         warehouses=warehouse_metrics,
@@ -367,7 +375,9 @@ def evaluate_network_layout(
 
 def compute_baseline_layout(
     neighborhoods: List[Dict[str, Any]],
-    config: OptimizationConfig
+    config: OptimizationConfig,
+    fuel_prices: Optional[Dict[str, float]] = None,
+    fuel_live: bool = False,
 ) -> LayoutEvaluation:
     """
     Computes baseline / original layout according to config.baseline_mode (schema.md §2.4, PRD §5.7).
@@ -397,7 +407,9 @@ def compute_baseline_layout(
         neighborhoods,
         base_centers,
         labels,
-        config
+        config,
+        fuel_prices=fuel_prices,
+        fuel_live=fuel_live,
     )
 
     return LayoutEvaluation(
@@ -427,6 +439,10 @@ def run_optimization(
 
     is_feasible = True
     infeasibility_reason = None
+
+    # Resolve live fuel prices once per run (TTL-cached) so baseline and
+    # optimized layouts share identical fuel economics.
+    fuel_prices, fuel_live, fuel_note = resolve_fuel_prices(config)
 
     # Determine optimization approach: Unconstrained vs Constrained MILP
     use_milp = (config.capacity_enabled or config.radius_enabled) and N <= 500
@@ -477,11 +493,14 @@ def run_optimization(
         neighborhoods,
         opt_centers,
         opt_labels,
-        config
+        config,
+        fuel_prices=fuel_prices,
+        fuel_live=fuel_live,
     )
 
     # Compute baseline comparison (Phase 4 cost engine)
-    baseline_eval = compute_baseline_layout(neighborhoods, config)
+    baseline_eval = compute_baseline_layout(neighborhoods, config,
+                                            fuel_prices=fuel_prices, fuel_live=fuel_live)
     opt_eval = LayoutEvaluation(metrics=metrics, warehouses=warehouses, assignments=assignments)
     comparison = compute_comparison(baseline_eval, opt_eval)
 
@@ -492,5 +511,6 @@ def run_optimization(
         metrics=metrics,
         comparison=comparison,
         is_feasible=is_feasible,
-        infeasibility_reason=infeasibility_reason
+        infeasibility_reason=infeasibility_reason,
+        fuel_note=fuel_note,
     )

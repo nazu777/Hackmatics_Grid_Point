@@ -16,6 +16,7 @@ export const ComparisonDashboard: React.FC<Props> = ({ result }) => {
       ['Total unweighted distance (km)', b.total_unweighted_distance_km, o.total_unweighted_distance_km],
       ['Total weighted distance (km·orders)', b.total_weighted_distance_km_orders, o.total_weighted_distance_km_orders],
       ['Total delivery cost ($)', b.total_cost, o.total_cost],
+      ['Fuel cost portion ($)', b.total_fuel_cost ?? 0, o.total_fuel_cost ?? 0],
       ['Avg distance / order (km)', b.avg_distance_per_order_km, o.avg_distance_per_order_km],
       ['Avg weighted distance (km)', b.avg_weighted_distance_km, o.avg_weighted_distance_km],
       ['Feasibility ratio', b.feasibility_ratio, o.feasibility_ratio]
@@ -116,8 +117,15 @@ export const ComparisonDashboard: React.FC<Props> = ({ result }) => {
           </div>
         </div>
 
+        {/* Fuel provenance line */}
+        <p className="text-[11px] text-slate-500 mt-3">
+          ⛽ Fuel portion: ${(result.metrics.total_fuel_cost ?? 0).toLocaleString()} of ${result.metrics.total_cost.toLocaleString()} total
+          {result.metrics.fuel_live ? ' • live pump prices' : ' • manual rates'}
+          {result.fuel_note ? ` — ${result.fuel_note}` : ''}
+        </p>
+
         {/* Full metrics table */}
-        <div className="overflow-x-auto mt-5">
+        <div className="overflow-x-auto mt-3">
           <table className="w-full text-left text-xs border-collapse">
             <thead>
               <tr className="bg-cream-deep/60 border-b border-[#E4E1D2] text-ink-faint uppercase tracking-wider">

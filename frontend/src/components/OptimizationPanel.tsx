@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Cpu, CheckCircle2, AlertTriangle, Zap, TrendingDown, DollarSign, ArrowRight } from 'lucide-react';
 import { Neighborhood, OptimizationConfig, OptimizationResult } from '../types';
 import { optimizeNetwork } from '../services/api';
+import { FuelCard } from './FuelCard';
 
 interface OptimizationPanelProps {
   neighborhoods: Neighborhood[];
@@ -202,6 +203,8 @@ export const OptimizationPanel: React.FC<OptimizationPanelProps> = ({
                 <option value="single_center">Single Centered Facility (K=1)</option>
               </select>
             </div>
+
+            <FuelCard config={config} onChange={(patch) => setConfig({ ...config, ...patch })} />
           </div>
         </div>
 
@@ -268,6 +271,21 @@ export const OptimizationPanel: React.FC<OptimizationPanelProps> = ({
               </div>
             </div>
           )}
+
+          {/* Fuel economics line */}
+          <div className="p-4 bg-amber-50/60 border border-amber-200/70 rounded-2xl flex items-start gap-3">
+            <span className="text-lg leading-none">⛽</span>
+            <div className="text-xs">
+              <span className="font-bold text-slate-800">
+                Fuel: ${lastResult.metrics.total_fuel_cost?.toLocaleString() ?? 0}
+              </span>
+              <span className="text-slate-600">
+                {' '}of ${lastResult.metrics.total_cost.toLocaleString()} total
+                {lastResult.metrics.fuel_live ? ' • live prices' : ' • manual rates'}
+                {lastResult.fuel_note ? ` — ${lastResult.fuel_note}` : ''}
+              </span>
+            </div>
+          </div>
 
           {/* Infeasibility Warning if any */}
           {!lastResult.is_feasible && lastResult.infeasibility_reason && (

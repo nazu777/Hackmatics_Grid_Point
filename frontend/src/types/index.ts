@@ -59,6 +59,8 @@ export interface Metrics {
   total_unweighted_distance_km: number;
   total_weighted_distance_km_orders: number;
   total_cost: number;
+  total_fuel_cost?: number;
+  fuel_live?: boolean;
   avg_distance_per_order_km: number;
   avg_weighted_distance_km: number;
   warehouses: WarehouseMetric[];
@@ -94,6 +96,7 @@ export interface OptimizationResult {
   comparison?: ComparisonResult | null;
   is_feasible: boolean;
   infeasibility_reason?: string | null;
+  fuel_note?: string | null;
 }
 
 export interface ValidationErrorItem {
@@ -142,6 +145,7 @@ export interface VehicleType {
   cost_per_km: number;
   fuel_type?: string;
   avg_speed_kmph?: number;
+  mileage_kmpl?: number | null;
 }
 
 export interface OptimizationConfig {
@@ -155,6 +159,9 @@ export interface OptimizationConfig {
   fuel_cost_per_km: number;
   infra_cost_per_warehouse: number;
   traffic_factor: number;
+  use_live_fuel?: boolean;
+  fuel_state?: string;
+  fuel_city?: string | null;
   vehicle_fleet: VehicleType[];
   random_seed: number;
   baseline_mode: 'centroid' | 'mean' | 'single_center' | 'custom';
@@ -205,9 +212,30 @@ export interface FleetETAResult {
   total_trips: number;
   effective_km: number;
   fuel_consumed_liters: number;
+  fuel_price_per_litre?: number | null;
+  fuel_type?: string;
+  fuel_cost?: number;
+  fuel_live?: boolean;
+  fuel_note?: string;
   vehicle_used: string;
   avg_speed_kmph: number;
   traffic_congestion_pct: number;
+}
+
+export interface FuelCityRate {
+  city: string;
+  petrol: number | null;
+  diesel: number | null;
+  cng: number | null;
+  autogas: number | null;
+}
+
+export interface FuelRates {
+  state: string;
+  live: boolean;
+  cities: FuelCityRate[];
+  defaults: Record<string, number>;
+  key_configured?: boolean;
 }
 
 export interface ConstraintDiagnostics {

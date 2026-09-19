@@ -171,8 +171,7 @@ def calculate_fleet_eta(
 
     avg_eta = sum(etas) / max(1, len(etas))
     max_eta = max(etas) if etas else 0.0
-
-    # Approx fuel consumption: ~8 liters / 100km for vans, 3L/100km for bikes, 22L/100km for trucks
+    # Approx fuel consumption: 8L/100km vans, 3L/100km bikes, 22L/100km trucks
     fuel_rate_per_km = 0.08
     if "bike" in v_name.lower():
         fuel_rate_per_km = 0.03
@@ -180,8 +179,17 @@ def calculate_fleet_eta(
         fuel_rate_per_km = 0.20
     elif "electric" in v_name.lower():
         fuel_rate_per_km = 0.00  # electric (kWh modeled separately)
+    if vehicle and vehicle.mileage_kmpl and vehicle.mileage_kmpl > 0:
+        fuel_rate_per_km = 1.0 / vehicle.mileage_kmpl
 
     fuel_consumed = total_effective_km * fuel_rate_per_km
+
+    # Live fuel price for this vehicle's fuel type (cached; falls back offline)
+    from .cost import resolve_fuel_prices
+    fuel_prices, fuel_live, fuel_note = resolve_fuel_prices(config)
+    fuel_type = (vehicle.fuel_type if vehicle and vehicle.fuel_type else "petrol").strip().lower()
+    fuel_price = fuel_prices.get(fuel_type)
+    fuel_cost = round(fuel_consumed * fuel_price, 2) if fuel_price is not None else 0.0
 
     return {
         "avg_eta_minutes": round(avg_eta, 1),
@@ -189,6 +197,11 @@ def calculate_fleet_eta(
         "total_trips": total_trips,
         "effective_km": round(total_effective_km, 1),
         "fuel_consumed_liters": round(fuel_consumed, 1),
+        "fuel_price_per_litre": fuel_price,
+        "fuel_type": fuel_type,
+        "fuel_cost": fuel_cost,
+        "fuel_live": fuel_live,
+        "fuel_note": fuel_note,
         "vehicle_used": v_name,
         "avg_speed_kmph": speed_kmph,
         "traffic_congestion_pct": round(traffic * 100.0, 1),
