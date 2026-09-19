@@ -4,6 +4,9 @@
 > Built for the **HACK-A-MATICS** Hackathon.  
 > Aligned to [problem_statement.md](docs/problem_statement.md), [prd.md](docs/prd.md), [schema.md](docs/schema.md), and [phases.md](docs/phases.md).
 
+**Live Production Deployment**: [https://hackmatics-grid-point.vercel.app](https://hackmatics-grid-point.vercel.app)  
+**Database**: Neon Serverless Postgres (`gridpoint` on `aws-ap-southeast-1`)
+
 ---
 
 ## 🌟 Overview & Pipeline
