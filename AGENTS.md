@@ -135,7 +135,7 @@ Client fallback `frontend/src/services/api.ts:88 localValidate()` must stay in s
 | `/api/synthetic?N=&lat_center=&lon_center=&spread_km=&distribution=&num_clusters=&orders_min=&orders_max=&seed=` | GET | `Neighborhood[]` |
 | `/api/census/cities` | GET | Supported Census city presets |
 | `/api/census/demand?city=&orders_per_1000=` | GET | Real ACS tract demand → `Neighborhood[]` |
-| `/api/upload` | POST multipart `file` (`?dataset=neighborhoods\|vehicles\|warehouses`) | SHIPPED trio ingest + `POST /api/vehicles/validate, POST /api/warehouses/validate, GET /api/synthetic/vehicles\|warehouses, POST /api/export/vehicles\|warehouses` |
+| `/api/upload` | POST multipart `file` (`?dataset=neighborhoods\|vehicles\|warehouses\|assignments`) | SHIPPED trio ingest + assignments plan import + `POST /api/vehicles/validate, POST /api/warehouses/validate, POST /api/assignments/validate, GET /api/synthetic/vehicles\|warehouses, POST /api/export/vehicles\|warehouses\|assignments-imported` |
 | `/api/export/csv` | POST `{neighborhoods}` | CSV text |
 | `/api/export/json` | POST `{neighborhoods}` | JSON text |
 | `/api/export/metrics` | POST | Metrics table export |
@@ -160,7 +160,7 @@ Client fallback `frontend/src/services/api.ts:88 localValidate()` must stay in s
 | `/api/auth/signup` | POST | PBKDF2 signup → JWT (24h TTL) |
 | `/api/auth/login` | POST | Login → JWT |
 | `/api/auth/me` | GET | Current user via `Authorization: Bearer` |
-| `/api/user/data` | GET / PUT | Per-user workspace (warehouses/vehicles/demand/config), JWT required; pull on login, debounced push; file-backed (`GRIDPOINT_DATA_FILE`) |
+| `/api/user/data` | GET / PUT | Per-user workspace (warehouses/vehicles/demand/assignments/config), JWT required; pull on login, debounced push; file-backed (`GRIDPOINT_DATA_FILE`) |
 
 Always keep CORS `allow_origins=["*"]` (`backend/src/api.py:35`) for Vercel proxy.
 

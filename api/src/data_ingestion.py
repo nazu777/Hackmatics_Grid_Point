@@ -8,7 +8,7 @@ import csv
 from typing import List, Dict, Any, Tuple, Optional, Union
 import pandas as pd
 from .schema import ValidationErrorItem, ValidationResult
-from .validation import validate_neighborhoods, validate_vehicles, validate_warehouses
+from .validation import validate_neighborhoods, validate_vehicles, validate_warehouses, validate_assignments
 
 # Canonical aliases map
 COLUMN_ALIASES: Dict[str, List[str]] = {
@@ -181,6 +181,14 @@ WAREHOUSE_COLUMN_ALIASES: Dict[str, List[str]] = {
 VEHICLE_REQUIRED = ["vehicle_type", "capacity", "cost_per_km"]
 WAREHOUSE_REQUIRED = ["warehouse_id", "latitude", "longitude"]
 
+ASSIGNMENT_COLUMN_ALIASES: Dict[str, List[str]] = {
+    "neighborhood_id": ["neighborhood_id", "id", "nid", "node_id", "neighborhood", "node", "location_id"],
+    "warehouse_id": ["warehouse_id", "wid", "warehouse", "site_id", "site", "facility_id"],
+    "distance_km": ["distance_km", "distance", "dist", "dist_km", "km"],
+}
+
+ASSIGNMENT_REQUIRED = ["neighborhood_id", "warehouse_id"]
+
 
 def _normalize_with_aliases(item: Dict[str, Any], aliases: Dict[str, List[str]]) -> Dict[str, Any]:
     out: Dict[str, Any] = {}
@@ -315,6 +323,79 @@ def parse_warehouses_json(content_str: str) -> Tuple[ValidationResult, List[Dict
             error="Expected a JSON list/array of warehouse objects.", code="INVALID_JSON_STRUCTURE")]), []
     rows = [_normalize_with_aliases(i, WAREHOUSE_COLUMN_ALIASES) for i in data if isinstance(i, dict)]
     return validate_warehouses(rows)
+
+
+def parse_assignments_csv(content_str: str) -> Tuple[ValidationResult, List[Dict[str, Any]]]:
+    """Parse imported-assignment CSV with alias mapping (neighborhood → warehouse)."""
+    if not content_str or not content_str.strip():
+        return ValidationResult(valid=False, errors=[ValidationErrorItem(
+            field="file", value="", error="Uploaded CSV file is empty.", code="EMPTY_FILE")]), []
+    try:
+        sample = content_str[:2048]
+        try:
+            dialect = csv.Sniffer().sniff(sample, delimiters=",\t;|")
+            delimiter = dialect.delimiter
+        except Exception:
+            delimiter = ","
+        df = pd.read_csv(io.StringIO(content_str), sep=delimiter, skipinitialspace=True)
+    except Exception as e:
+        return ValidationResult(valid=False, errors=[ValidationErrorItem(
+            field="file", value="", error=f"Failed to parse CSV: {e}", code="MALFORMED_CSV")]), []
+    renamed, _, missing = _map_df_with_aliases(df, ASSIGNMENT_COLUMN_ALIASES, ASSIGNMENT_REQUIRED)
+    if missing:
+        return ValidationResult(valid=False, errors=[ValidationErrorItem(
+            field="headers", value=list(df.columns),
+            error=f"CSV is missing required assignment columns: {', '.join(missing)}.",
+            code="MISSING_REQUIRED_COLUMNS")], total_rows=len(df)), []
+    return validate_assignments(renamed)
+
+
+def parse_assignments_json(content_str: str) -> Tuple[ValidationResult, List[Dict[str, Any]]]:
+    """Parse imported-assignment JSON (array or {assignments:[...]} wrapper)."""
+    if not content_str or not content_str.strip():
+        return ValidationResult(valid=False, errors=[ValidationErrorItem(
+            field="file", value="", error="Uploaded JSON file is empty.", code="EMPTY_FILE")]), []
+    try:
+        data = json.loads(content_str)
+    except Exception as e:
+        return ValidationResult(valid=False, errors=[ValidationErrorItem(
+            field="file", value="", error=f"Failed to parse JSON: {e}", code="MALFORMED_JSON")]), []
+    if isinstance(data, dict):
+        for key in ("assignments", "mappings", "routes"):
+            if isinstance(data.get(key), list):
+                data = data[key]
+                break
+        else:
+            return ValidationResult(valid=False, errors=[ValidationErrorItem(
+                field="format", value=list(data.keys()),
+                error="Expected a JSON array of assignment objects or an object with an 'assignments' key.",
+                code="INVALID_JSON_STRUCTURE")]), []
+    if not isinstance(data, list):
+        return ValidationResult(valid=False, errors=[ValidationErrorItem(
+            field="format", value=type(data).__name__,
+            error="Expected a JSON list/array of assignment objects.", code="INVALID_JSON_STRUCTURE")]), []
+    rows = [_normalize_with_aliases(i, ASSIGNMENT_COLUMN_ALIASES) for i in data if isinstance(i, dict)]
+    return validate_assignments(rows)
+
+
+def export_imported_assignments_to_csv(assignments: List[Dict[str, Any]]) -> str:
+    """Export imported-assignment records to canonical CSV."""
+    df = pd.DataFrame(assignments)
+    columns = ["neighborhood_id", "warehouse_id", "distance_km"]
+    for col in columns:
+        if col not in df.columns:
+            df[col] = ""
+    return df[columns].to_csv(index=False)
+
+
+def compute_assignment_summary(assignments: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Imported-plan rollup (rows + per-warehouse counts)."""
+    per_warehouse: Dict[str, int] = {}
+    for a in assignments:
+        wid = str(a.get("warehouse_id", ""))
+        per_warehouse[wid] = per_warehouse.get(wid, 0) + 1
+    return {"count": len(assignments), "warehouses_used": len(per_warehouse),
+            "per_warehouse": per_warehouse}
 
 
 def export_vehicles_to_csv(vehicles: List[Dict[str, Any]]) -> str:

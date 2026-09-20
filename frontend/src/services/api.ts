@@ -231,7 +231,7 @@ export async function uploadFile(file: File): Promise<{
   return await res.json();
 }
 
-export type OnboardingDataset = 'neighborhoods' | 'vehicles' | 'warehouses';
+export type OnboardingDataset = 'neighborhoods' | 'vehicles' | 'warehouses' | 'assignments';
 
 /** Generic onboarding upload: neighborhoods (default) + vehicles + warehouses (Phase A #4). */
 export async function uploadDatasetFile(file: File, dataset: OnboardingDataset = 'neighborhoods'): Promise<any> {
@@ -388,6 +388,97 @@ export async function validateWarehouses(warehouses: Warehouse[]): Promise<Valid
     if (res.ok) return await res.json();
   } catch { /* fallback */ }
   return localValidateWarehouses(warehouses);
+}
+
+// --------------------------------------------------------------------------
+// Imported assignments (user-supplied neighborhood → warehouse plan)
+// --------------------------------------------------------------------------
+
+export interface ImportedAssignment {
+  neighborhood_id: string;
+  warehouse_id: string;
+  distance_km?: number | null;
+}
+
+/** Offline mirror of backend validation.validate_assignments (errors only). */
+export function localValidateAssignments(rows: ImportedAssignment[]): ValidationResult {
+  const errors: ValidationResult['errors'] = [];
+  const seen = new Map<string, number>();
+  let validCount = 0;
+  rows.forEach((r, i) => {
+    const row = i + 1;
+    const rowErrors: string[] = [];
+    const nid = (r?.neighborhood_id ?? '').toString().trim();
+    const wid = (r?.warehouse_id ?? '').toString().trim();
+    if (!nid) rowErrors.push('neighborhood_id is required');
+    if (!wid) rowErrors.push('warehouse_id is required');
+    if (nid) {
+      if (seen.has(nid)) rowErrors.push(`Duplicate neighborhood_id '${nid}'`);
+      else seen.set(nid, row);
+    }
+    const d = (r as { distance_km?: unknown })?.distance_km;
+    if (d != null && d !== '' && !(Number(d) >= 0)) rowErrors.push('distance_km must be >= 0');
+    rowErrors.forEach((e, k) => errors.push({
+      row, field: k === 0 ? 'neighborhood_id' : 'distance_km', value: nid,
+      error: e, code: 'OUT_OF_RANGE'
+    }));
+    if (rowErrors.length === 0) validCount++;
+  });
+  if (rows.length === 0) {
+    errors.push({ row: null as unknown as number, field: 'dataset', value: 0,
+      error: 'Assignment dataset is empty.', code: 'EMPTY_DATASET' });
+  }
+  return { valid: errors.length === 0, errors, warnings: [], total_rows: rows.length, valid_rows: validCount };
+}
+
+/** Server validation (with unknown-reference warnings) + offline fallback. */
+export async function validateAssignments(
+  rows: ImportedAssignment[],
+  neighborhoods: Neighborhood[] = [],
+  warehouses: Warehouse[] = []
+): Promise<ValidationResult> {
+  try {
+    const res = await fetch(`${API_BASE}/assignments/validate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ assignments: rows, neighborhoods, warehouses })
+    });
+    if (res.ok) return await res.json();
+  } catch { /* fallback */ }
+  return localValidateAssignments(rows);
+}
+
+/** Enrich imported pairs into map-ready Assignment rows (haversine distances). */
+export function enrichImportedAssignments(
+  rows: ImportedAssignment[],
+  neighborhoods: Neighborhood[],
+  warehouses: Warehouse[]
+): Assignment[] {
+  const nbById = new Map(neighborhoods.map((n) => [n.neighborhood_id, n]));
+  const whById = new Map(warehouses.map((w) => [w.warehouse_id, w]));
+  const out: Assignment[] = [];
+  rows.forEach((r) => {
+    const nid = (r?.neighborhood_id ?? '').toString().trim();
+    const wid = (r?.warehouse_id ?? '').toString().trim();
+    const nb = nbById.get(nid);
+    const wh = whById.get(wid);
+    if (!nb || !wh || !Number.isFinite(nb.latitude) || !Number.isFinite(wh.latitude)) return;
+    const d = haversineKm(nb.latitude, nb.longitude, wh.latitude, wh.longitude);
+    const w = Number(nb.daily_orders) || 0;
+    out.push({
+      neighborhood_id: nid,
+      warehouse_id: wid,
+      distance_km: Math.round(d * 100) / 100,
+      weighted_distance: Math.round(d * w * 100) / 100,
+      cost: 0,
+      fuel_cost: 0,
+      within_radius: true,
+      is_feasible: true,
+      congestion_pct: null,
+      travel_time_min: null
+    });
+  });
+  return out;
 }
 
 export async function exportCsv(neighborhoods: Neighborhood[]): Promise<string> {
@@ -783,6 +874,7 @@ export interface UserWorkspace {
   neighborhoods: Neighborhood[];
   vehicles: VehicleType[];
   warehouses: Warehouse[];
+  assignments: Assignment[];
   config: OptimizationConfig | null;
 }
 
@@ -792,6 +884,7 @@ export function isWorkspaceEmpty(ws: UserWorkspace | null | undefined): boolean 
     (ws.neighborhoods?.length ?? 0) === 0 &&
     (ws.vehicles?.length ?? 0) === 0 &&
     (ws.warehouses?.length ?? 0) === 0 &&
+    (ws.assignments?.length ?? 0) === 0 &&
     !ws.config
   );
 }
@@ -808,6 +901,8 @@ export async function fetchUserWorkspace(): Promise<UserWorkspace | null> {
       neighborhoods: Array.isArray(body.neighborhoods) ? body.neighborhoods as Neighborhood[] : [],
       vehicles: Array.isArray(body.vehicles) ? body.vehicles as VehicleType[] : [],
       warehouses: Array.isArray(body.warehouses) ? body.warehouses as Warehouse[] : [],
+      assignments: Array.isArray((body as { assignments?: unknown }).assignments)
+        ? (body as { assignments: Assignment[] }).assignments : [],
       config: body.config && typeof body.config === 'object' ? body.config as OptimizationConfig : null
     };
   } catch {
@@ -820,6 +915,7 @@ export async function saveUserWorkspace(ws: {
   neighborhoods?: Neighborhood[];
   vehicles?: VehicleType[];
   warehouses?: Warehouse[];
+  assignments?: Assignment[];
   config?: OptimizationConfig | null;
   updated_at?: number;
 }): Promise<UserWorkspace | null> {
@@ -838,6 +934,8 @@ export async function saveUserWorkspace(ws: {
       neighborhoods: Array.isArray(body.neighborhoods) ? body.neighborhoods as Neighborhood[] : [],
       vehicles: Array.isArray(body.vehicles) ? body.vehicles as VehicleType[] : [],
       warehouses: Array.isArray(body.warehouses) ? body.warehouses as Warehouse[] : [],
+      assignments: Array.isArray((body as { assignments?: unknown }).assignments)
+        ? (body as { assignments: Assignment[] }).assignments : [],
       config: body.config && typeof body.config === 'object' ? body.config as OptimizationConfig : null
     };
   } catch {
@@ -1157,7 +1255,7 @@ function localGenerateSynthetic(config: SyntheticConfig): Neighborhood[] {
 }
 
 // Client-side Haversine distance in km
-function haversineKm(lat1: number, lon1: number, lat2: number, lon2: number): number {
+export function haversineKm(lat1: number, lon1: number, lat2: number, lon2: number): number {
   const R = 6371.0088;
   const dLat = (lat2 - lat1) * Math.PI / 180;
   const dLon = (lon2 - lon1) * Math.PI / 180;

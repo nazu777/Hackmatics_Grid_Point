@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
   Package, Truck, Warehouse as WarehouseIcon, UploadCloud, AlertCircle,
-  Sparkles, Flag, FileUp, X
+  Sparkles, Flag, FileUp, X, Route
 } from 'lucide-react';
 import {
   Neighborhood, ValidationResult, DatasetSummary, VehicleType,
@@ -9,10 +9,11 @@ import {
 } from '../types';
 import {
   uploadFile, uploadDatasetFile, fetchSynthetic,
-  fetchSyntheticVehicles, fetchSyntheticWarehouses
+  fetchSyntheticVehicles, fetchSyntheticWarehouses,
+  type ImportedAssignment
 } from '../services/api';
 
-export type AddDataset = 'orders' | 'vehicles' | 'warehouses';
+export type AddDataset = 'orders' | 'vehicles' | 'warehouses' | 'assignments';
 
 interface AddDataModalProps {
   isOpen: boolean;
@@ -22,6 +23,7 @@ interface AddDataModalProps {
   onOrdersLoaded: (nodes: Neighborhood[], validation: ValidationResult, summary: DatasetSummary) => void;
   onVehiclesLoaded: (vehicles: VehicleType[], validation: ValidationResult, summary: any) => void;
   onWarehousesLoaded: (warehouses: WarehouseType[], validation: ValidationResult, summary: any) => void;
+  onAssignmentsLoaded: (rows: ImportedAssignment[], validation: ValidationResult, summary: any) => void;
   onOrdersChange: (nodes: Neighborhood[]) => void;
   onVehiclesChange: (v: VehicleType[]) => void;
   onWarehousesChange: (w: WarehouseType[]) => void;
@@ -41,7 +43,8 @@ const FLEET_ROTATION = ['bike', 'van', 'truck', 'ev_van'];
 const DATASET_META: Record<AddDataset, { title: string; subtitle: string; icon: React.ElementType }> = {
   orders: { title: 'Import orders', subtitle: 'Upload a CSV/JSON file or generate synthetic demand', icon: Package },
   vehicles: { title: 'Import vehicles', subtitle: 'Upload a fleet CSV/JSON file or generate vehicles', icon: Truck },
-  warehouses: { title: 'Import warehouses', subtitle: 'Upload a sites CSV/JSON file or generate warehouses', icon: WarehouseIcon }
+  warehouses: { title: 'Import warehouses', subtitle: 'Upload a sites CSV/JSON file or generate warehouses', icon: WarehouseIcon },
+  assignments: { title: 'Import assignments', subtitle: 'Upload a neighborhood → warehouse plan (drawn on the map)', icon: Route }
 };
 
 /** Compact per-dataset upload dropzone (CSV/JSON). */
@@ -368,7 +371,7 @@ const WarehousesGenerator: React.FC<{
  */
 export const AddDataModal: React.FC<AddDataModalProps> = ({
   isOpen, onClose, dataset, center,
-  onOrdersLoaded, onVehiclesLoaded, onWarehousesLoaded,
+  onOrdersLoaded, onVehiclesLoaded, onWarehousesLoaded, onAssignmentsLoaded,
   onOrdersChange, onVehiclesChange, onWarehousesChange,
   onOpenCensus, onLoadSample
 }) => {
@@ -456,6 +459,21 @@ export const AddDataModal: React.FC<AddDataModalProps> = ({
               onClose();
             }}
           />
+        )}
+        {tab === 'upload' && dataset === 'assignments' && (
+          <DatasetDropzone
+            hint={<span>Headers: <code className="bg-cream-deep px-1 rounded">neighborhood_id</code> <code className="bg-cream-deep px-1 rounded">warehouse_id</code> (aliases: node / warehouse / dist) + optional <code className="bg-cream-deep px-1 rounded">distance_km</code>. Unknown ids warn; one node → one warehouse.</span>}
+            onFile={async (file) => {
+              const result = await uploadDatasetFile(file, 'assignments');
+              onAssignmentsLoaded(result.assignments || [], result.validation, result.summary);
+              onClose();
+            }}
+          />
+        )}
+        {tab === 'generate' && dataset === 'assignments' && (
+          <p className="text-xs text-ink-faint bg-cream-deep border border-[#E4E1D2] p-3 rounded-xl">
+            Assignments come from your own plan — upload a file, or run Optimize to generate them automatically.
+          </p>
         )}
 
         {tab === 'generate' && dataset === 'orders' && (

@@ -1,34 +1,40 @@
 import React, { useState } from 'react';
 import {
-  Package, Truck, Warehouse as WarehouseIcon, Upload, Download, Database
+  Package, Truck, Warehouse as WarehouseIcon, Upload, Download, Database, Route
 } from 'lucide-react';
 import {
   Neighborhood, ValidationResult, DatasetSummary, VehicleType,
-  Warehouse as WarehouseType
+  Warehouse as WarehouseType, Assignment
 } from '../types';
 import { DataTable } from './DataTable';
 import { VehicleTable } from './VehicleTable';
 import { WarehouseTable } from './WarehouseTable';
+import { AssignmentTable } from './AssignmentTable';
 import { AddDataModal, type AddDataset } from './AddDataModal';
 import { ExportDataModal } from './ExportDataModal';
+import type { ImportedAssignment } from '../services/api';
 
-export type DataSubtab = 'orders' | 'vehicles' | 'warehouses';
+export type DataSubtab = 'orders' | 'vehicles' | 'warehouses' | 'assignments';
 
 interface DataTabProps {
   neighborhoods: Neighborhood[];
   vehicles: VehicleType[];
   warehouses: WarehouseType[];
+  assignments: Assignment[];
   ordersValidation: ValidationResult;
   vehiclesValidation: ValidationResult;
   warehousesValidation: ValidationResult;
+  assignmentsValidation: ValidationResult;
   summary: DatasetSummary;
   center: { lat: number; lon: number } | null;
   onOrdersChange: (nodes: Neighborhood[]) => void;
   onVehiclesChange: (v: VehicleType[]) => void;
   onWarehousesChange: (w: WarehouseType[]) => void;
+  onAssignmentsChange: (rows: Assignment[]) => void;
   onOrdersLoaded: (nodes: Neighborhood[], validation: ValidationResult, summary: DatasetSummary) => void;
   onVehiclesLoaded: (vehicles: VehicleType[], validation: ValidationResult, summary: any) => void;
   onWarehousesLoaded: (warehouses: WarehouseType[], validation: ValidationResult, summary: any) => void;
+  onAssignmentsLoaded: (rows: ImportedAssignment[], validation: ValidationResult, summary: any) => void;
   onOpenCensus: () => void;
   onLoadSample: () => void;
 }
@@ -36,23 +42,24 @@ interface DataTabProps {
 const IMPORT_LABEL: Record<AddDataset, string> = {
   orders: 'Import orders',
   vehicles: 'Import vehicles',
-  warehouses: 'Import warehouses'
+  warehouses: 'Import warehouses',
+  assignments: 'Import assignments'
 };
 
 export const DataTab: React.FC<DataTabProps> = (props) => {
   const {
-    neighborhoods, vehicles, warehouses,
-    ordersValidation, vehiclesValidation, warehousesValidation,
+    neighborhoods, vehicles, warehouses, assignments,
+    ordersValidation, vehiclesValidation, warehousesValidation, assignmentsValidation,
     summary, center,
-    onOrdersChange, onVehiclesChange, onWarehousesChange,
-    onOrdersLoaded, onVehiclesLoaded, onWarehousesLoaded,
+    onOrdersChange, onVehiclesChange, onWarehousesChange, onAssignmentsChange,
+    onOrdersLoaded, onVehiclesLoaded, onWarehousesLoaded, onAssignmentsLoaded,
     onOpenCensus, onLoadSample
   } = props;
 
   const [subtab, setSubtab] = useState<DataSubtab>(() => {
     try {
       const v = localStorage.getItem('gridpoint_data_subtab') as DataSubtab | null;
-      return v === 'vehicles' || v === 'warehouses' ? v : 'orders';
+      return v === 'vehicles' || v === 'warehouses' || v === 'assignments' ? v : 'orders';
     } catch { return 'orders'; }
   });
   const setSubtabPersist = (t: DataSubtab) => {
@@ -66,7 +73,8 @@ export const DataTab: React.FC<DataTabProps> = (props) => {
   const tabs: { id: DataSubtab; label: string; icon: React.ElementType; count: number }[] = [
     { id: 'orders', label: 'Orders', icon: Package, count: neighborhoods.length },
     { id: 'vehicles', label: 'Vehicles', icon: Truck, count: vehicles.length },
-    { id: 'warehouses', label: 'Warehouses', icon: WarehouseIcon, count: warehouses.length }
+    { id: 'warehouses', label: 'Warehouses', icon: WarehouseIcon, count: warehouses.length },
+    { id: 'assignments', label: 'Assignments', icon: Route, count: assignments.length }
   ];
 
   return (
@@ -189,6 +197,29 @@ export const DataTab: React.FC<DataTabProps> = (props) => {
         </div>
       )}
 
+      {subtab === 'assignments' && (
+        <div className="space-y-4">
+          <div className="card p-4 flex items-center gap-3">
+            <div className="min-w-0 flex-1">
+              <p className="font-bold text-[13px] text-ink">{assignments.length} imported assignments</p>
+              <p className="text-[11px] text-ink-faint">
+                {(assignmentsValidation.valid || assignments.length === 0)
+                  ? 'Drawn on the map until you run Optimize (which replaces them).'
+                  : `${assignmentsValidation.errors.length} validation issue${assignmentsValidation.errors.length === 1 ? '' : 's'} — see table.`}
+              </p>
+            </div>
+            <div className="flex items-center gap-1.5 shrink-0">
+              <button onClick={() => setAddOpen(true)}
+                className="flex items-center gap-1.5 px-4 py-2 bg-[#14424E] hover:bg-[#0d333d] text-white rounded-full text-xs font-bold transition cursor-pointer">
+                <Upload className="w-4 h-4" />
+                <span>{IMPORT_LABEL.assignments}</span>
+              </button>
+            </div>
+          </div>
+          <AssignmentTable assignments={assignments} errors={assignmentsValidation.errors} onChange={onAssignmentsChange} externalQuery="" />
+        </div>
+      )}
+
       <AddDataModal
         isOpen={addOpen}
         onClose={() => setAddOpen(false)}
@@ -197,6 +228,7 @@ export const DataTab: React.FC<DataTabProps> = (props) => {
         onOrdersLoaded={onOrdersLoaded}
         onVehiclesLoaded={onVehiclesLoaded}
         onWarehousesLoaded={onWarehousesLoaded}
+        onAssignmentsLoaded={onAssignmentsLoaded}
         onOrdersChange={onOrdersChange}
         onVehiclesChange={onVehiclesChange}
         onWarehousesChange={onWarehousesChange}
@@ -210,6 +242,7 @@ export const DataTab: React.FC<DataTabProps> = (props) => {
         neighborhoods={neighborhoods}
         vehicles={vehicles}
         warehouses={warehouses}
+        assignments={assignments}
       />
     </div>
   );

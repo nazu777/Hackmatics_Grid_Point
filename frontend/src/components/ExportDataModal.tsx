@@ -1,15 +1,15 @@
 import React from 'react';
 import {
-  Package, Truck, Warehouse as WarehouseIcon,
+  Package, Truck, Warehouse as WarehouseIcon, Route,
   FileSpreadsheet, FileJson, Download, X
 } from 'lucide-react';
 import {
-  Neighborhood, VehicleType, Warehouse as WarehouseType
+  Neighborhood, VehicleType, Warehouse as WarehouseType, Assignment
 } from '../types';
 import { exportCsv, exportJson } from '../services/api';
 import { downloadFile } from './panelStore';
 
-export type ExportDataset = 'orders' | 'vehicles' | 'warehouses';
+export type ExportDataset = 'orders' | 'vehicles' | 'warehouses' | 'assignments';
 
 interface ExportDataModalProps {
   isOpen: boolean;
@@ -18,6 +18,7 @@ interface ExportDataModalProps {
   neighborhoods: Neighborhood[];
   vehicles: VehicleType[];
   warehouses: WarehouseType[];
+  assignments: Assignment[];
 }
 
 const DATASET_META: Record<ExportDataset, { title: string; subtitle: string; icon: React.ElementType; count: (d: ExportDataModalProps) => number }> = {
@@ -32,6 +33,10 @@ const DATASET_META: Record<ExportDataset, { title: string; subtitle: string; ico
   warehouses: {
     title: 'Export warehouses', subtitle: 'Download the sites table as CSV or JSON',
     icon: WarehouseIcon, count: (d) => d.warehouses.length
+  },
+  assignments: {
+    title: 'Export assignments', subtitle: 'Download the imported plan as CSV or JSON',
+    icon: Route, count: (d) => d.assignments.length
   }
 };
 
@@ -51,9 +56,15 @@ function warehousesCsv(rows: WarehouseType[]): string {
   return [header, ...lines].join('\n');
 }
 
+function assignmentsCsv(rows: Assignment[]): string {
+  const header = 'neighborhood_id,warehouse_id,distance_km';
+  const lines = rows.map((a) => [a.neighborhood_id, a.warehouse_id, a.distance_km].join(','));
+  return [header, ...lines].join('\n');
+}
+
 /**
  * Export window mirroring the import window: two options — CSV or JSON —
- * for the active dataset (orders / vehicles / warehouses).
+ * for the active dataset (orders / vehicles / warehouses / assignments).
  */
 export const ExportDataModal: React.FC<ExportDataModalProps> = (props) => {
   const { isOpen, onClose, dataset } = props;
@@ -70,6 +81,8 @@ export const ExportDataModal: React.FC<ExportDataModalProps> = (props) => {
       downloadFile('gridpoint_neighborhoods.csv', await exportCsv(props.neighborhoods));
     } else if (dataset === 'vehicles') {
       downloadFile('gridpoint_vehicles.csv', vehiclesCsv(props.vehicles));
+    } else if (dataset === 'assignments') {
+      downloadFile('gridpoint_assignments.csv', assignmentsCsv(props.assignments));
     } else {
       downloadFile('gridpoint_warehouses.csv', warehousesCsv(props.warehouses));
     }
@@ -80,6 +93,8 @@ export const ExportDataModal: React.FC<ExportDataModalProps> = (props) => {
       downloadFile('gridpoint_neighborhoods.json', await exportJson(props.neighborhoods), 'application/json');
     } else if (dataset === 'vehicles') {
       downloadFile('gridpoint_vehicles.json', JSON.stringify(props.vehicles, null, 2), 'application/json');
+    } else if (dataset === 'assignments') {
+      downloadFile('gridpoint_assignments.json', JSON.stringify(props.assignments, null, 2), 'application/json');
     } else {
       downloadFile('gridpoint_warehouses.json', JSON.stringify(props.warehouses, null, 2), 'application/json');
     }

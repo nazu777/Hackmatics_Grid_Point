@@ -164,7 +164,7 @@ Env: copy `.env.example` → `.env` for optional `RAPIDAPI_KEY`, `TOMTOM_KEY`, `
 | POST | `/api/overview` | Overview aggregate (vehicles/fuel/infra/orders/costs/alerts) |
 | POST | `/api/auth/signup` / `/api/auth/login` | PBKDF2 signup + HS256 login (24h TTL) |
 | GET | `/api/auth/me` | Current user from `Authorization: Bearer <token>` |
-| GET / PUT | `/api/user/data` | Per-user workspace (warehouses/vehicles/demand/config) persisted across sessions (JWT required) |
+| GET / PUT | `/api/user/data` | Per-user workspace (warehouses/vehicles/demand/assignments/config) persisted across sessions (JWT required) |
 
 Canonical `Neighborhood`: `neighborhood_id (PK), name?, latitude [-90,90], longitude [-180,180], daily_orders int ≥0, zone?`. CSV header `neighborhood_id,name,latitude,longitude,daily_orders`. Aliases: `id→neighborhood_id, lat→latitude, lng|lon→longitude, orders|demand→daily_orders`.
 

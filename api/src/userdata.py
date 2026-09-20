@@ -24,6 +24,7 @@ from typing import Any, Dict, List, Optional, Tuple
 MAX_NEIGHBORHOODS = 5000
 MAX_VEHICLES = 500
 MAX_WAREHOUSES = 64
+MAX_ASSIGNMENTS = 5000
 
 
 def _data_file() -> Path:
@@ -66,7 +67,7 @@ def _persist() -> None:
 
 def empty_workspace() -> Dict[str, Any]:
     return {"updated_at": 0, "neighborhoods": [], "vehicles": [],
-            "warehouses": [], "config": None}
+            "warehouses": [], "assignments": [], "config": None}
 
 
 def get_workspace(user_id: str) -> Dict[str, Any]:
@@ -75,7 +76,7 @@ def get_workspace(user_id: str) -> Dict[str, Any]:
     if not isinstance(ws, dict):
         return empty_workspace()
     merged = empty_workspace()
-    for k in ("neighborhoods", "vehicles", "warehouses"):
+    for k in ("neighborhoods", "vehicles", "warehouses", "assignments"):
         v = ws.get(k)
         merged[k] = v if isinstance(v, list) else []
     cfg = ws.get("config")
@@ -107,7 +108,8 @@ def save_workspace(user_id: str, payload: Dict[str, Any]) -> Tuple[Optional[dict
         return None, "workspace payload must be an object"
     for name, cap in (("neighborhoods", MAX_NEIGHBORHOODS),
                       ("vehicles", MAX_VEHICLES),
-                      ("warehouses", MAX_WAREHOUSES)):
+                      ("warehouses", MAX_WAREHOUSES),
+                      ("assignments", MAX_ASSIGNMENTS)):
         if name in payload:
             err = _check_list(name, payload[name], cap)
             if err:
@@ -115,7 +117,7 @@ def save_workspace(user_id: str, payload: Dict[str, Any]) -> Tuple[Optional[dict
     if "config" in payload and payload["config"] is not None and not isinstance(payload["config"], dict):
         return None, "config must be an object"
     ws = get_workspace(user_id)
-    for name in ("neighborhoods", "vehicles", "warehouses"):
+    for name in ("neighborhoods", "vehicles", "warehouses", "assignments"):
         if name in payload and payload[name] is not None:
             ws[name] = payload[name]
     if "config" in payload:
@@ -138,4 +140,4 @@ def clear_workspaces() -> None:
 
 
 def workspace_counts(ws: Dict[str, Any]) -> Dict[str, int]:
-    return {k: len(ws.get(k) or []) for k in ("neighborhoods", "vehicles", "warehouses")}
+    return {k: len(ws.get(k) or []) for k in ("neighborhoods", "vehicles", "warehouses", "assignments")}

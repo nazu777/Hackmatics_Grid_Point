@@ -23,7 +23,7 @@ from .schema import (
     OverviewAggregate,
 )
 from .validation import (validate_neighborhoods, validate_optimization_config,
-                         validate_vehicles, validate_warehouses)
+                         validate_vehicles, validate_warehouses, validate_assignments)
 from .data_ingestion import (
     parse_csv_content,
     parse_json_content,
@@ -34,10 +34,14 @@ from .data_ingestion import (
     parse_vehicles_json,
     parse_warehouses_csv,
     parse_warehouses_json,
+    parse_assignments_csv,
+    parse_assignments_json,
     export_vehicles_to_csv,
     export_warehouses_to_csv,
+    export_imported_assignments_to_csv,
     compute_fleet_summary,
-    compute_warehouse_summary
+    compute_warehouse_summary,
+    compute_assignment_summary
 )
 from .synthetic import (generate_synthetic_dataset, generate_synthetic_vehicles,
                         generate_synthetic_warehouses)
@@ -238,6 +242,12 @@ class WarehousesValidateRequest(BaseModel):
     warehouses: List[Dict[str, Any]]
 
 
+class AssignmentsValidateRequest(BaseModel):
+    assignments: List[Dict[str, Any]]
+    neighborhoods: List[Dict[str, Any]] = []
+    warehouses: List[Dict[str, Any]] = []
+
+
 @app.post("/api/vehicles/validate", response_model=ValidationResult)
 def validate_vehicles_endpoint(payload: VehiclesValidateRequest):
     """Validate an owned-fleet dataset (Phase A #4)."""
@@ -250,6 +260,23 @@ def validate_warehouses_endpoint(payload: WarehousesValidateRequest):
     """Validate an existing-warehouse dataset (Phase A #4/#8)."""
     result, _ = validate_warehouses(payload.warehouses)
     return result
+
+
+@app.post("/api/assignments/validate", response_model=ValidationResult)
+def validate_assignments_endpoint(payload: AssignmentsValidateRequest):
+    """Validate an imported assignment dataset. Known node/warehouse ids
+    produce UNKNOWN_REFERENCE warnings for unresolvable rows."""
+    known_nb = [str(n.get("neighborhood_id", "")) for n in (payload.neighborhoods or [])]
+    known_wh = [str(w.get("warehouse_id", "")) for w in (payload.warehouses or [])]
+    result, _ = validate_assignments(payload.assignments, known_nb, known_wh)
+    return result
+
+
+@app.post("/api/export/assignments-imported")
+def export_imported_assignments(payload: Dict[str, Any]):
+    """Export imported-assignment records to canonical CSV."""
+    rows = payload.get("assignments", [])
+    return PlainTextResponse(content=export_imported_assignments_to_csv(rows), media_type="text/csv")
 
 
 @app.get("/api/synthetic/vehicles", response_model=List[VehicleType])
@@ -292,7 +319,7 @@ def export_warehouses(payload: Dict[str, Any]):
 async def upload_file(file: UploadFile = File(...), dataset: str = Query("neighborhoods")):
     """
     Ingest and validate an uploaded CSV or JSON file.
-    `?dataset=neighborhoods|vehicles|warehouses` selects the onboarding
+    `?dataset=neighborhoods|vehicles|warehouses|assignments` selects the onboarding
     dataset (default neighborhoods for backward compatibility).
     Returns validation result, clean records, and summary.
     """
@@ -341,6 +368,21 @@ async def upload_file(file: UploadFile = File(...), dataset: str = Query("neighb
             val_result, clean_records = parse_warehouses_csv(content_str)
         return val_result, clean_records
 
+    def _parse_assignments():
+        if filename.lower().endswith(".json"):
+            return parse_assignments_json(content_str)
+        elif filename.lower().endswith(".csv") or filename.lower().endswith(".txt"):
+            return parse_assignments_csv(content_str)
+        val_result, clean_records = parse_assignments_json(content_str)
+        if not val_result.valid and not clean_records:
+            val_result, clean_records = parse_assignments_csv(content_str)
+        return val_result, clean_records
+
+    if kind in ("assignments", "assignment", "mappings", "routes"):
+        val_result, clean_records = _parse_assignments()
+        return {"filename": filename, "dataset": "assignments",
+                "validation": val_result.model_dump(), "assignments": clean_records,
+                "summary": compute_assignment_summary(clean_records)}
     if kind in ("vehicles", "fleet", "vehicle"):
         val_result, clean_records = _parse_vehicles()
         return {"filename": filename, "dataset": "vehicles",
@@ -896,6 +938,7 @@ class UserWorkspacePayload(BaseModel):
     neighborhoods: Optional[List[Dict[str, Any]]] = None
     vehicles: Optional[List[Dict[str, Any]]] = None
     warehouses: Optional[List[Dict[str, Any]]] = None
+    assignments: Optional[List[Dict[str, Any]]] = None
     config: Optional[Dict[str, Any]] = None
     updated_at: Optional[float] = None
 

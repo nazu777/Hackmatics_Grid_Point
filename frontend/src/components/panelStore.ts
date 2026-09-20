@@ -1,4 +1,4 @@
-import type { Neighborhood, OptimizationConfig, OptimizationResult, VehicleType, Warehouse } from '../types';
+import type { Neighborhood, OptimizationConfig, OptimizationResult, VehicleType, Warehouse, Assignment } from '../types';
 
 /**
  * Suggest a feasible per-warehouse capacity for a dataset: 1.5× fair share,
@@ -105,6 +105,7 @@ function nsKey(key: string): string {
 const NEIGHBORHOODS_KEY = 'gridpoint_neighborhoods';
 const VEHICLES_KEY = 'gridpoint_vehicles';
 const WAREHOUSES_KEY = 'gridpoint_warehouses';
+const ASSIGNMENTS_KEY = 'gridpoint_assignments';
 const WORKSPACE_UPDATED_KEY = 'gridpoint_workspace_updated';
 export const WORKSPACE_CHANGED_EVENT = 'gridpoint-workspace-changed';
 
@@ -157,6 +158,15 @@ export function getStoredWarehouses(): Warehouse[] {
 
 export function setStoredWarehouses(rows: Warehouse[]) {
   write(WAREHOUSES_KEY, rows);
+  touchWorkspace();
+}
+
+export function getStoredAssignments(): Assignment[] {
+  return read<Assignment>(ASSIGNMENTS_KEY);
+}
+
+export function setStoredAssignments(rows: Assignment[]) {
+  write(ASSIGNMENTS_KEY, rows);
   touchWorkspace();
 }
 
