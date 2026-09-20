@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import {
-  Package, Truck, Warehouse as WarehouseIcon, Plus, Database
+  Package, Truck, Warehouse as WarehouseIcon, Upload, Download, Database
 } from 'lucide-react';
 import {
   Neighborhood, ValidationResult, DatasetSummary, VehicleType,
@@ -10,6 +10,7 @@ import { DataTable } from './DataTable';
 import { VehicleTable } from './VehicleTable';
 import { WarehouseTable } from './WarehouseTable';
 import { AddDataModal, type AddDataset } from './AddDataModal';
+import { ExportDataModal } from './ExportDataModal';
 
 export type DataSubtab = 'orders' | 'vehicles' | 'warehouses';
 
@@ -32,10 +33,10 @@ interface DataTabProps {
   onLoadSample: () => void;
 }
 
-const ADD_LABEL: Record<AddDataset, string> = {
-  orders: 'Add order',
-  vehicles: 'Add vehicle',
-  warehouses: 'Add warehouse'
+const IMPORT_LABEL: Record<AddDataset, string> = {
+  orders: 'Import orders',
+  vehicles: 'Import vehicles',
+  warehouses: 'Import warehouses'
 };
 
 export const DataTab: React.FC<DataTabProps> = (props) => {
@@ -60,6 +61,7 @@ export const DataTab: React.FC<DataTabProps> = (props) => {
   };
 
   const [addOpen, setAddOpen] = useState(false);
+  const [exportOpen, setExportOpen] = useState(false);
 
   const tabs: { id: DataSubtab; label: string; icon: React.ElementType; count: number }[] = [
     { id: 'orders', label: 'Orders', icon: Package, count: neighborhoods.length },
@@ -108,17 +110,24 @@ export const DataTab: React.FC<DataTabProps> = (props) => {
                     return `${issues.length} validation issue${issues.length === 1 ? '' : 's'} — see table.`;
                   }
                   if (neighborhoods.length === 0) {
-                    return 'No data yet — use Add order to upload or generate.';
+                    return 'No data yet — use Import orders to upload or generate.';
                   }
                   return 'All rows valid — ready to optimize.';
                 })()}
               </p>
             </div>
-            <button onClick={() => setAddOpen(true)}
-              className="flex items-center gap-1.5 px-4 py-2 bg-[#14424E] hover:bg-[#0d333d] text-white rounded-full text-xs font-bold transition cursor-pointer shrink-0">
-              <Plus className="w-4 h-4" />
-              <span>{ADD_LABEL.orders}</span>
-            </button>
+            <div className="flex items-center gap-1.5 shrink-0">
+              <button onClick={() => setAddOpen(true)}
+                className="flex items-center gap-1.5 px-4 py-2 bg-[#14424E] hover:bg-[#0d333d] text-white rounded-full text-xs font-bold transition cursor-pointer">
+                <Upload className="w-4 h-4" />
+                <span>{IMPORT_LABEL.orders}</span>
+              </button>
+              <button onClick={() => setExportOpen(true)}
+                className="flex items-center gap-1.5 px-4 py-2 bg-white border border-[#E4E1D2] hover:border-gold text-ink rounded-full text-xs font-bold transition cursor-pointer">
+                <Download className="w-4 h-4" />
+                <span>Export</span>
+              </button>
+            </div>
           </div>
           <DataTable neighborhoods={neighborhoods} errors={ordersValidation.errors} onChange={onOrdersChange} externalQuery="" />
         </div>
@@ -135,11 +144,18 @@ export const DataTab: React.FC<DataTabProps> = (props) => {
                   : `${vehiclesValidation.errors.length} validation issue${vehiclesValidation.errors.length === 1 ? '' : 's'} — see table.`}
               </p>
             </div>
-            <button onClick={() => setAddOpen(true)}
-              className="flex items-center gap-1.5 px-4 py-2 bg-[#14424E] hover:bg-[#0d333d] text-white rounded-full text-xs font-bold transition cursor-pointer shrink-0">
-              <Plus className="w-4 h-4" />
-              <span>{ADD_LABEL.vehicles}</span>
-            </button>
+            <div className="flex items-center gap-1.5 shrink-0">
+              <button onClick={() => setAddOpen(true)}
+                className="flex items-center gap-1.5 px-4 py-2 bg-[#14424E] hover:bg-[#0d333d] text-white rounded-full text-xs font-bold transition cursor-pointer">
+                <Upload className="w-4 h-4" />
+                <span>{IMPORT_LABEL.vehicles}</span>
+              </button>
+              <button onClick={() => setExportOpen(true)}
+                className="flex items-center gap-1.5 px-4 py-2 bg-white border border-[#E4E1D2] hover:border-gold text-ink rounded-full text-xs font-bold transition cursor-pointer">
+                <Download className="w-4 h-4" />
+                <span>Export</span>
+              </button>
+            </div>
           </div>
           <VehicleTable vehicles={vehicles} errors={vehiclesValidation.errors} onChange={onVehiclesChange} externalQuery="" />
         </div>
@@ -156,13 +172,20 @@ export const DataTab: React.FC<DataTabProps> = (props) => {
                   : `${warehousesValidation.errors.length} validation issue${warehousesValidation.errors.length === 1 ? '' : 's'} — see table.`}
               </p>
             </div>
-            <button onClick={() => setAddOpen(true)}
-              className="flex items-center gap-1.5 px-4 py-2 bg-[#14424E] hover:bg-[#0d333d] text-white rounded-full text-xs font-bold transition cursor-pointer shrink-0">
-              <Plus className="w-4 h-4" />
-              <span>{ADD_LABEL.warehouses}</span>
-            </button>
+            <div className="flex items-center gap-1.5 shrink-0">
+              <button onClick={() => setAddOpen(true)}
+                className="flex items-center gap-1.5 px-4 py-2 bg-[#14424E] hover:bg-[#0d333d] text-white rounded-full text-xs font-bold transition cursor-pointer">
+                <Upload className="w-4 h-4" />
+                <span>{IMPORT_LABEL.warehouses}</span>
+              </button>
+              <button onClick={() => setExportOpen(true)}
+                className="flex items-center gap-1.5 px-4 py-2 bg-white border border-[#E4E1D2] hover:border-gold text-ink rounded-full text-xs font-bold transition cursor-pointer">
+                <Download className="w-4 h-4" />
+                <span>Export</span>
+              </button>
+            </div>
           </div>
-          <WarehouseTable warehouses={warehouses} errors={warehousesValidation.errors} onChange={onWarehousesChange} externalQuery="" center={center} />
+          <WarehouseTable warehouses={warehouses} errors={warehousesValidation.errors} onChange={onWarehousesChange} externalQuery="" />
         </div>
       )}
 
@@ -179,6 +202,14 @@ export const DataTab: React.FC<DataTabProps> = (props) => {
         onWarehousesChange={onWarehousesChange}
         onOpenCensus={onOpenCensus}
         onLoadSample={onLoadSample}
+      />
+      <ExportDataModal
+        isOpen={exportOpen}
+        onClose={() => setExportOpen(false)}
+        dataset={subtab}
+        neighborhoods={neighborhoods}
+        vehicles={vehicles}
+        warehouses={warehouses}
       />
     </div>
   );

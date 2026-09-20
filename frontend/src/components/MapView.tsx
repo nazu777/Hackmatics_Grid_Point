@@ -59,6 +59,8 @@ export interface MapFocus {
 interface MapViewProps {
   neighborhoods: Neighborhood[];
   warehouses?: Warehouse[];
+  /** User-owned sites: always visible (distinct pins) even before optimizing. */
+  ownedWarehouses?: Warehouse[];
   assignments?: Assignment[];
   radiusKm?: number | null;
   height?: number;
@@ -181,6 +183,7 @@ function removeLayerAndSource(map: mapboxgl.Map, layerId: string, sourceId: stri
 export const MapView: React.FC<MapViewProps> = ({
   neighborhoods,
   warehouses = [],
+  ownedWarehouses = [],
   assignments = [],
   radiusKm = null,
   height = 420,
@@ -554,6 +557,35 @@ export const MapView: React.FC<MapViewProps> = ({
         const marker = new mapboxgl.Marker({ element: el }).setLngLat([w.longitude, w.latitude]).setPopup(popup).addTo(map);
         markersRef.current.push(marker);
       });
+      // Owned sites stay visible even with no result. A site already covered
+      // by an optimized pin (same spot) is skipped to avoid double markers.
+      (ownedWarehouses || []).forEach((w) => {
+        if (!Number.isFinite(w.latitude) || !Number.isFinite(w.longitude)) return;
+        extend(w.latitude, w.longitude);
+        const covered = warehouses.some((r) => {
+          const dLat = (Number(r.latitude) - Number(w.latitude)) * 111.0;
+          const dLon = (Number(r.longitude) - Number(w.longitude)) * 111.0;
+          return Math.hypot(dLat, dLon) < 0.5;
+        });
+        if (covered) return;
+        const el = document.createElement('div');
+        el.style.background = '#fff';
+        el.style.color = '#111827';
+        el.style.fontWeight = '800';
+        el.style.fontSize = '11px';
+        el.style.borderRadius = '10px';
+        el.style.padding = '3px 9px';
+        el.style.border = `2px dashed ${pinBorder}`;
+        el.style.boxShadow = '0 2px 6px rgba(0,0,0,.3)';
+        el.style.whiteSpace = 'nowrap';
+        el.title = `${w.warehouse_id} — your owned site (run Optimize to plan around it)`;
+        el.textContent = `⌂ ${w.warehouse_id}`;
+        const popup = new mapboxgl.Popup({ offset: 14, closeButton: false }).setHTML(
+          `<b>⌂ ${w.warehouse_id}</b> — owned site<br/>${Number(w.latitude).toFixed(4)}, ${Number(w.longitude).toFixed(4)}<br/>Run Optimize to anchor the plan to it`
+        );
+        const marker = new mapboxgl.Marker({ element: el }).setLngLat([w.longitude, w.latitude]).setPopup(popup).addTo(map);
+        markersRef.current.push(marker);
+      });
     }
 
     // Service-radius overlay. Roads mode draws the road-network service area
@@ -740,7 +772,7 @@ export const MapView: React.FC<MapViewProps> = ({
     try {
       map.resize();
     } catch { /* ignore */ }
-  }, [neighborhoods, warehouses, assignments, radiusKm, basemap, styleReady, token, colorBy, zoneColors, showWarehouses, showRoutes, showDemand, showRadius, routeColor, colorRoutesByTraffic, linesMode, roadGeometries, isochrones, theme, highlightId, focus, focusedWarehouseId, coverageCells, coverageMeta, showHeatmap, liveMoves, showLive, trafficZones, showZones, onWarehouseClick]);
+  }, [neighborhoods, warehouses, ownedWarehouses, assignments, radiusKm, basemap, styleReady, token, colorBy, zoneColors, showWarehouses, showRoutes, showDemand, showRadius, routeColor, colorRoutesByTraffic, linesMode, roadGeometries, isochrones, theme, highlightId, focus, focusedWarehouseId, coverageCells, coverageMeta, showHeatmap, liveMoves, showLive, trafficZones, showZones, onWarehouseClick]);
 
   // Fly-to on focus requests (gmaps "Center" action)
   useEffect(() => {

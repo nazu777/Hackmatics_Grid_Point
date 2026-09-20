@@ -39,9 +39,9 @@ const CITY_PRESETS = [
 const FLEET_ROTATION = ['bike', 'van', 'truck', 'ev_van'];
 
 const DATASET_META: Record<AddDataset, { title: string; subtitle: string; icon: React.ElementType }> = {
-  orders: { title: 'Add order', subtitle: 'Upload a CSV/JSON file or generate synthetic demand', icon: Package },
-  vehicles: { title: 'Add vehicle', subtitle: 'Upload a fleet CSV/JSON file or generate vehicles', icon: Truck },
-  warehouses: { title: 'Add warehouse', subtitle: 'Upload a sites CSV/JSON file or generate warehouses', icon: WarehouseIcon }
+  orders: { title: 'Import orders', subtitle: 'Upload a CSV/JSON file or generate synthetic demand', icon: Package },
+  vehicles: { title: 'Import vehicles', subtitle: 'Upload a fleet CSV/JSON file or generate vehicles', icon: Truck },
+  warehouses: { title: 'Import warehouses', subtitle: 'Upload a sites CSV/JSON file or generate warehouses', icon: WarehouseIcon }
 };
 
 /** Compact per-dataset upload dropzone (CSV/JSON). */

@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { CheckCircle2, AlertTriangle, Zap, TrendingDown, DollarSign, ArrowRight, Route } from 'lucide-react';
-import { Neighborhood, OptimizationConfig, OptimizationResult } from '../types';
+import { Neighborhood, OptimizationConfig, OptimizationResult, Warehouse, VehicleType } from '../types';
 import { optimizeNetwork, rerouteOnTraffic, type RerouteResult } from '../services/api';
 import { FuelCard } from './FuelCard';
 import { TrafficCard } from './TrafficCard';
@@ -12,13 +12,17 @@ interface OptimizationPanelProps {
   onOptimizationComplete: (result: OptimizationResult) => void;
   lastResult: OptimizationResult | null;
   onGoToComparison?: () => void;
+  ownedWarehouses?: Warehouse[];
+  fleet?: VehicleType[];
 }
 
 export const OptimizationPanel: React.FC<OptimizationPanelProps> = ({
   neighborhoods,
   onOptimizationComplete,
   lastResult,
-  onGoToComparison
+  onGoToComparison,
+  ownedWarehouses = [],
+  fleet = []
 }) => {
   const [config, setConfig] = useState<OptimizationConfig>(() => ({
     K: 2,
@@ -64,7 +68,13 @@ export const OptimizationPanel: React.FC<OptimizationPanelProps> = ({
     setReroute(null);
     setRerouteError(null);
     try {
-      const result = await optimizeNetwork(neighborhoods, config);
+      // Owned sites anchor placement; the fleet rides along for assignment.
+      const result = await optimizeNetwork(neighborhoods, {
+        ...config,
+        owned_warehouses: ownedWarehouses,
+        respect_owned: true,
+        vehicle_fleet: config.vehicle_fleet.length > 0 ? config.vehicle_fleet : fleet
+      });
       onOptimizationComplete(result);
     } catch (err: any) {
       setError(err.message || 'Optimization failed');
@@ -440,7 +450,12 @@ export const OptimizationPanel: React.FC<OptimizationPanelProps> = ({
                 return (
                   <div key={w.warehouse_id} className="p-4 rounded-2xl border border-[#E4E1D2] bg-cream-deep">
                     <div className="flex justify-between items-center mb-2">
-                      <span className="font-extrabold text-ink font-mono text-sm">{w.warehouse_id}</span>
+                      <span className="font-extrabold text-ink font-mono text-sm flex items-center gap-2">
+                        {w.warehouse_id}
+                        {(w.is_owned || metric?.is_owned) && (
+                          <span className="text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-[#14424E] text-white tracking-wide">OWNED</span>
+                        )}
+                      </span>
                       <span className="text-[11px] text-ink-faint font-semibold">{metric?.neighborhood_count || 0} nodes assigned</span>
                     </div>
                     <p className="font-mono text-xs text-ink-soft">{w.latitude.toFixed(4)}°N, {w.longitude.toFixed(4)}°E</p>
@@ -453,6 +468,14 @@ export const OptimizationPanel: React.FC<OptimizationPanelProps> = ({
                         <span className="text-ink-faint">Utilization:</span>
                         <span className={`font-bold font-mono ${w.utilization_pct > 100 ? 'text-rose-500' : 'text-ink'}`}>
                           {w.utilization_pct}%
+                        </span>
+                      </div>
+                    )}
+                    {(metric?.assigned_vehicles?.length ?? 0) > 0 && (
+                      <div className="mt-1 text-xs flex justify-between items-center gap-2">
+                        <span className="text-ink-faint shrink-0">Vehicles:</span>
+                        <span className="font-bold font-mono text-ink text-right truncate" title={metric!.assigned_vehicles!.join(', ')}>
+                          {metric!.assigned_vehicles!.join(', ')}
                         </span>
                       </div>
                     )}

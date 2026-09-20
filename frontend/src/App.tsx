@@ -427,6 +427,21 @@ const AppShell: React.FC = () => {
     localStorage.setItem(optConfigKey, JSON.stringify(updated));
   };
 
+  // Owned warehouses ride in the optimizer config: every optimize path
+  // (Ask, Scenario lab, roads re-opt via echoed config) anchors placement
+  // to owned sites, compares against the current network, and assigns the
+  // fleet — with no per-panel plumbing.
+  useEffect(() => {
+    setOptimizationConfig((prev) => {
+      const cur = prev.owned_warehouses ?? [];
+      if (prev.respect_owned === true && cur.length === warehouses.length &&
+          cur.every((w, i) => w === warehouses[i])) return prev;
+      const next = { ...prev, owned_warehouses: warehouses, respect_owned: true };
+      try { localStorage.setItem(optConfigKey, JSON.stringify(next)); } catch { /* ignore */ }
+      return next;
+    });
+  }, [warehouses, optConfigKey]);
+
   // Phase F: Overview aggregate (refreshed on demand + when the panel opens)
   const [overview, setOverview] = useState<OverviewAggregate | null>(null);
   const [overviewLoading, setOverviewLoading] = useState(false);
@@ -685,14 +700,22 @@ const AppShell: React.FC = () => {
   // ---- Ask actions ----
   const runOptimize = useCallback(async (k: number): Promise<OptimizationResult | null> => {
     try {
-      const res = await optimizeNetwork(neighborhoods, { ...optimizationConfig, K: k });
+      // Owned warehouses ride along: placement anchors to them, the baseline
+      // compares against the current network, and the fleet gets assigned.
+      const cfg = {
+        ...optimizationConfig,
+        K: k,
+        owned_warehouses: warehouses,
+        respect_owned: true
+      };
+      const res = await optimizeNetwork(neighborhoods, cfg);
       setOptimizationResult(res);
       setHighlightId(null);
       return res;
     } catch {
       return null;
     }
-  }, [neighborhoods, optimizationConfig]);
+  }, [neighborhoods, optimizationConfig, warehouses]);
 
   const handleExportDataset = useCallback(async () => {
     downloadFile('gridpoint_neighborhoods.csv', await exportCsv(neighborhoods));
@@ -1090,6 +1113,8 @@ const AppShell: React.FC = () => {
               onOptimizationComplete={setOptimizationResult}
               lastResult={optimizationResult}
               onGoToComparison={() => goTab('compare')}
+              ownedWarehouses={warehouses}
+              fleet={vehicles}
             />
           </SidePanel>
         )}
@@ -1267,6 +1292,7 @@ const AppShell: React.FC = () => {
           <MapView
             neighborhoods={neighborhoods}
             warehouses={mapWarehouses}
+            ownedWarehouses={warehouses}
             assignments={mapAssignments}
             radiusKm={effectiveRadiusKm}
             fill

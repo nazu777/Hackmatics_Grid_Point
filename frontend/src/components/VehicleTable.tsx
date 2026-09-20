@@ -1,8 +1,6 @@
 import React, { useState, useMemo } from 'react';
-import { Plus, Trash2, Download, Search, AlertCircle, ChevronLeft, ChevronRight, Sparkles, Star } from 'lucide-react';
+import { Trash2, Search, AlertCircle, ChevronLeft, ChevronRight } from 'lucide-react';
 import { VehicleType, ValidationErrorItem } from '../types';
-import { fetchSyntheticVehicles } from '../services/api';
-import { isBookmarked, toggleBookmark } from './panelStore';
 
 interface VehicleTableProps {
   vehicles: VehicleType[];
@@ -16,9 +14,6 @@ const FUEL_OPTIONS = ['petrol', 'diesel', 'cng', 'autogas', 'electric'];
 export const VehicleTable: React.FC<VehicleTableProps> = ({ vehicles, errors, onChange, externalQuery = '' }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
-  const [seeding, setSeeding] = useState(false);
-  // Phase H: star toggles are self-contained — a version bump re-renders.
-  const [bookmarkTick, setBookmarkTick] = useState(0);
   const rowsPerPage = 15;
 
   const errorMap = useMemo(() => {
@@ -59,44 +54,6 @@ export const VehicleTable: React.FC<VehicleTableProps> = ({ vehicles, errors, on
     onChange(updated);
   };
 
-  const handleAddRow = () => {
-    const n = vehicles.length + 1;
-    const row: VehicleType = {
-      vehicle_type: `van_${n}`,
-      capacity: 100,
-      cost_per_km: 10.0,
-      fuel_type: 'diesel',
-      avg_speed_kmph: 35,
-      mileage_kmpl: 12
-    };
-    onChange([...vehicles, row]);
-    setCurrentPage(Math.ceil((vehicles.length + 1) / rowsPerPage));
-  };
-
-  const handleSeed = async () => {
-    setSeeding(true);
-    try {
-      const seed = await fetchSyntheticVehicles(42, 4);
-      onChange(seed);
-    } finally {
-      setSeeding(false);
-    }
-  };
-
-  const handleExport = () => {
-    const header = 'vehicle_type,capacity,cost_per_km,fuel_type,avg_speed_kmph,mileage_kmpl';
-    const rows = vehicles.map((v) =>
-      [v.vehicle_type, v.capacity, v.cost_per_km, v.fuel_type || 'petrol', v.avg_speed_kmph ?? 30, v.mileage_kmpl ?? ''].join(',')
-    );
-    const blob = new Blob([[header, ...rows].join('\n')], { type: 'text/csv' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'gridpoint_vehicles.csv';
-    a.click();
-    URL.revokeObjectURL(url);
-  };
-
   return (
     <div className="bg-white rounded-2xl border border-[#E4E1D2] shadow-sm overflow-hidden">
       <div className="p-3 border-b border-[#E4E1D2] flex flex-col items-stretch gap-2.5">
@@ -116,23 +73,6 @@ export const VehicleTable: React.FC<VehicleTableProps> = ({ vehicles, errors, on
           <span className="text-xs text-ink-faint font-medium">
             Showing {filtered.length} of {vehicles.length} vehicles
           </span>
-          <div className="flex items-center gap-1.5">
-            <button onClick={handleSeed} disabled={seeding}
-              className="flex items-center gap-1.5 px-3 py-1.5 bg-[#14424E] hover:bg-[#0d333d] text-white rounded-full text-xs font-semibold transition cursor-pointer disabled:opacity-50">
-              <Sparkles className="w-3.5 h-3.5" />
-              <span>{seeding ? 'Seeding...' : 'Seed demo fleet (seed=42)'}</span>
-            </button>
-            <button onClick={handleAddRow}
-              className="flex items-center gap-1.5 px-3 py-1.5 bg-grape-100 text-grape-600 hover:bg-grape-200 rounded-full text-xs font-semibold transition cursor-pointer">
-              <Plus className="w-3.5 h-3.5" />
-              <span>Add Vehicle</span>
-            </button>
-            <button onClick={handleExport}
-              className="flex items-center gap-1.5 px-3 py-1.5 bg-cream-deep hover:bg-gold-100 text-ink rounded-full text-xs font-semibold transition cursor-pointer">
-              <Download className="w-3.5 h-3.5" />
-              <span>Export CSV</span>
-            </button>
-          </div>
         </div>
       </div>
 
@@ -141,7 +81,6 @@ export const VehicleTable: React.FC<VehicleTableProps> = ({ vehicles, errors, on
           <thead>
             <tr className="bg-cream-deep border-b border-[#E4E1D2] text-ink-faint font-semibold uppercase tracking-wider">
               <th className="py-3 px-4 w-12 text-center">#</th>
-              <th className="py-3 px-2 w-10 text-center" title="Bookmark vehicle for quick access (Saved)">★</th>
               <th className="py-3 px-4">Vehicle Type (unique)</th>
               <th className="py-3 px-4 w-28">Capacity</th>
               <th className="py-3 px-4 w-28">Cost/km</th>
@@ -154,8 +93,8 @@ export const VehicleTable: React.FC<VehicleTableProps> = ({ vehicles, errors, on
           <tbody className="divide-y divide-slate-100">
             {paginatedRows.length === 0 ? (
               <tr>
-                <td colSpan={9} className="py-8 text-center text-ink-faint">
-                  No vehicles yet — add rows manually, upload a CSV/JSON, or seed the demo fleet.
+                <td colSpan={8} className="py-8 text-center text-ink-faint">
+                  No vehicles yet — use Import vehicle above to upload a file or generate a fleet.
                 </td>
               </tr>
             ) : (
@@ -164,8 +103,6 @@ export const VehicleTable: React.FC<VehicleTableProps> = ({ vehicles, errors, on
                 const rowNum = actualIndex + 1;
                 const rowErrors = errorMap.get(rowNum) || [];
                 const hasError = rowErrors.length > 0;
-                void bookmarkTick;
-                const starred = isBookmarked('vehicle', row.vehicle_type);
                 return (
                   <tr key={row.vehicle_type || actualIndex} className={`hover:bg-cream-deep transition-colors ${hasError ? 'bg-rose-50/40' : ''}`}>
                     <td className="py-2.5 px-4 text-center font-mono text-ink-faint">
@@ -174,18 +111,6 @@ export const VehicleTable: React.FC<VehicleTableProps> = ({ vehicles, errors, on
                           <AlertCircle className="w-4 h-4 text-rose-500 inline" />
                         </span>
                       ) : rowNum}
-                    </td>
-                    <td className="py-2.5 px-2 text-center">
-                      <button
-                        onClick={() => {
-                          toggleBookmark('vehicle', row.vehicle_type);
-                          setBookmarkTick((t) => t + 1);
-                        }}
-                        title={starred ? 'Remove bookmark' : 'Bookmark this vehicle'}
-                        className={`transition cursor-pointer ${starred ? 'text-amber-500' : 'text-ink-faint hover:text-amber-500'}`}
-                      >
-                        <Star className="w-4 h-4" fill={starred ? 'currentColor' : 'none'} />
-                      </button>
                     </td>
                     <td className="py-2.5 px-4">
                       <input type="text" value={row.vehicle_type}

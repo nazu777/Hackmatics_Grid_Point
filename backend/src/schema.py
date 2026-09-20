@@ -32,6 +32,7 @@ class Warehouse(BaseModel):
     infra_cost: Optional[float] = Field(0.0, ge=0.0, description="Fixed infrastructure cost")
     assigned_orders: Optional[int] = Field(0, ge=0, description="Sum of daily orders assigned")
     utilization_pct: Optional[float] = Field(0.0, ge=0.0, le=100.0, description="Percentage of capacity used")
+    is_owned: bool = Field(False, description="Site coincides with a user-owned warehouse")
 
 
 class VehicleType(BaseModel):
@@ -71,6 +72,8 @@ class OptimizationConfig(BaseModel):
     random_seed: int = Field(42)
     baseline_mode: Literal["centroid", "mean", "single_center", "custom"] = Field("centroid")
     custom_baseline_warehouses: Optional[List[Warehouse]] = Field(None)
+    owned_warehouses: List[Warehouse] = Field(default_factory=list, description="User-owned existing sites; optimization anchors to them when respect_owned")
+    respect_owned: bool = Field(True, description="Anchor placement to owned sites + compare against them as baseline")
 
 
 class Assignment(BaseModel):
@@ -131,6 +134,8 @@ class WarehouseMetric(BaseModel):
     utilization_pct: Optional[float] = None
     avg_distance_km: float = 0.0
     neighborhood_count: int = 0
+    is_owned: bool = False
+    assigned_vehicles: List[str] = Field(default_factory=list, description="Fleet vehicle ids (V{i} = vehicle_fleet order) based at this warehouse")
 
 
 class Metrics(BaseModel):
@@ -171,6 +176,14 @@ class ComparisonResult(BaseModel):
     delta: ComparisonDelta
 
 
+class FleetAssignment(BaseModel):
+    """One fleet vehicle based at its nearest optimized warehouse."""
+    vehicle_id: str = Field(..., description="V{i} = position in config.vehicle_fleet (1-based), or the row's vehicle_id when present")
+    vehicle_type: str = ""
+    warehouse_id: str
+    distance_km: float = 0.0
+
+
 class OptimizationResult(BaseModel):
     """Complete output of optimization engine (schema.md §3.3)."""
     config: OptimizationConfig
@@ -183,6 +196,7 @@ class OptimizationResult(BaseModel):
     fuel_note: Optional[str] = None
     traffic_note: Optional[str] = None
     routing_note: Optional[str] = None
+    fleet_assignment: List[FleetAssignment] = Field(default_factory=list)
 
 
 class SpilloverEvent(BaseModel):
