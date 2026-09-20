@@ -200,10 +200,16 @@ export const MapView: React.FC<MapViewProps> = ({
       style: BASEMAPS[basemap].style,
       center: [78.486, 17.385],
       zoom: 11,
-      maxPitch: 75
+      maxPitch: 75,
+      // Attribution must stay on the map (Mapbox ToS + ODbL) — it is added
+      // back below as a compact "(i)" toggle to keep it compliant but subtle.
+      attributionControl: false
     });
     styleRef.current = BASEMAPS[basemap].style;
     map.addControl(new mapboxgl.NavigationControl({ visualizePitch: true }), 'bottom-right');
+    // Attribution sits bottom-left, right beside the Mapbox wordmark —
+    // Mapbox's own CSS mirrors the compact pill for left corners.
+    map.addControl(new mapboxgl.AttributionControl({ compact: true }), 'bottom-left');
 
     // One-click 2D ⇄ 3D toggle (pitch + building extrusions). Refs only, so the
     // closure stays valid for the map's lifetime.
@@ -228,6 +234,10 @@ export const MapView: React.FC<MapViewProps> = ({
     btn.type = 'button';
     btn.textContent = '3D';
     btn.title = 'Tilt into 3D with buildings';
+    // Colors come from .gp-3d-toggle in index.css (explicit per-theme rules —
+    // the button must NOT inherit the app's adaptive text color, which goes
+    // invisible on the white control surface in dark website mode).
+    btn.className = 'gp-3d-toggle';
     btn.style.fontSize = '12px';
     btn.style.fontWeight = '800';
     btn.style.width = '30px';

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
-import { Search, X, Plus, Download } from 'lucide-react';
 import { BrowserRouter, Routes, Route, Navigate, useParams, useNavigate } from 'react-router-dom';
+import { Search, X, Plus, Download, GripVertical } from 'lucide-react';
 import { GmapsRail, type RailTab, isRailTab } from './components/GmapsRail';
 import { LandingPage } from './components/LandingPage';
 import { LoginPage, SignupPage } from './components/AuthPages';
@@ -472,8 +472,6 @@ const AppShell: React.FC = () => {
     }
   }, [railTab, sidebarCollapsed, setCollapsedPersist, navigate]);
 
-  const today = new Date().toLocaleDateString(undefined, { day: '2-digit', month: '2-digit', year: 'numeric' });
-  const kCount = optimizationResult?.warehouses.length ?? optimizationConfig.K;
   /** Back navigation from transient panels (detail/results) — tab targets go via URL. */
   const goBack = useCallback((back: PanelMode) => {
     if (back === 'results' || back === 'detail') setPanel(back);
@@ -503,7 +501,7 @@ const AppShell: React.FC = () => {
           bottom: 16,
           display: sidebarCollapsed ? 'none' : undefined
         }}
-        className="absolute z-20 bg-white border border-[#E4E1D2] rounded-3xl shadow-xl shadow-black/10 overflow-hidden"
+        className="absolute z-20 bg-white border border-[#E4E1D2] rounded-3xl shadow-xl shadow-black/10 overflow-hidden pr-5"
       >
         {/* Close button — pinned top-right above all tab content */}
         <div className="absolute top-3 right-3 z-30 pointer-events-none">
@@ -688,14 +686,16 @@ const AppShell: React.FC = () => {
             ))}
           </SidePanel>
         )}
-        {/* Drag handle: resize panel (double-click resets) */}
+        {/* Resize grip: proper 6-dot handle docked inside the panel's
+            right gutter (double-click resets). The aside reserves pr-5 so
+            panel content never slides under it. */}
         <div
           onPointerDown={startSidebarResize}
           onDoubleClick={resetSidebarWidth}
           title="Drag to resize panel • double-click to reset"
-          className="absolute top-3 bottom-3 right-1 w-4 cursor-col-resize z-20 flex items-center justify-center touch-none select-none group"
+          className="absolute top-0 bottom-0 right-0 w-5 cursor-col-resize z-20 flex items-center justify-center touch-none select-none group"
         >
-          <div className="w-[5px] h-16 rounded-full bg-[#E4E1D2] group-hover:bg-gold active:bg-gold transition-colors" />
+          <GripVertical className="w-4 h-6 text-ink-faint group-hover:text-ink transition-colors" />
         </div>
       </aside>
 
@@ -759,9 +759,6 @@ const AppShell: React.FC = () => {
 
           <div className="flex-1" />
 
-          <div className="hidden lg:flex items-center gap-2 bg-white/95 rounded-full px-4 py-2 shadow-lg border border-black/5 text-[11px] font-semibold text-ink-soft whitespace-nowrap">
-            Planning for {today} • {summary.count} nodes • K={kCount} • {summary.total_orders.toLocaleString()} orders
-          </div>
           <button
             onClick={() => {
               if (window.confirm('Start a new planning run? This discards the current optimization result (data is kept).')) {
@@ -833,24 +830,13 @@ const AppShell: React.FC = () => {
               +
             </button>
             <button
-              onClick={() => setPanel('optimize')}
+              onClick={() => goTab('optimize')}
               className="px-3 py-1 rounded-full bg-[#14424E] text-white font-bold hover:bg-pine-800 transition cursor-pointer"
             >
               Set R_max
             </button>
           </div>
         )}
-
-        {/* Layers card (basemap + color-by + zones) */}
-        <div className="absolute bottom-6 right-4 z-10">
-          <button
-            onClick={() => setPanel('settings')}
-            title="Map themes & settings"
-            className="px-4 py-2.5 rounded-2xl bg-white shadow-lg border border-black/5 text-[12px] font-bold text-ink hover:bg-cream-deep transition cursor-pointer"
-          >
-            ◈ Layers • {mapLayerOptions.basemap === 'osm' ? 'Standard' : mapLayerOptions.basemap === 'positron' ? 'Light' : 'Dark'} / {mapLayerOptions.colorBy}
-          </button>
-        </div>
       </main>
 
       <SyntheticModal
