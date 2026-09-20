@@ -117,7 +117,7 @@ export async function fetchCensusDemand(cityId: string, ordersPer1000 = 5): Prom
   const res = await fetch(`${API_BASE}/census/demand?${params.toString()}`);
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: 'Census demand failed' }));
-    throw new Error(err.detail || 'Census demand failed');
+    throw new Error(apiErrorMessage(err, `Census demand failed (HTTP ${res.status})`));
   }
   return await res.json();
 }
@@ -137,7 +137,7 @@ export async function uploadFile(file: File): Promise<{
 
   if (!res.ok) {
     const errorData = await res.json().catch(() => ({ detail: 'Upload failed' }));
-    throw new Error(errorData.detail || 'Upload failed');
+    throw new Error(apiErrorMessage(errorData, `Upload failed (HTTP ${res.status})`));
   }
 
   return await res.json();
@@ -207,6 +207,37 @@ export interface RouteGeometry {
   provider: string;
 }
 
+/**
+ * Extract a human-readable message from any API error payload.
+ * FastAPI validation failures arrive as {detail: [{loc, msg, type}, ...]} —
+ * stringifying that array would render "[object Object], ..." in the UI.
+ */
+export function apiErrorMessage(err: unknown, fallback: string): string {
+  if (typeof err === 'string' && err) return err;
+  if (err && typeof err === 'object') {
+    const detail = (err as { detail?: unknown }).detail;
+    if (typeof detail === 'string' && detail) return detail;
+    if (Array.isArray(detail)) {
+      const parts = detail
+        .map((d) => {
+          if (typeof d === 'string') return d;
+          if (d && typeof d === 'object') {
+            const loc = Array.isArray((d as { loc?: unknown }).loc)
+              ? ((d as { loc?: unknown[] }).loc as unknown[]).map(String).join('.')
+              : '';
+            const msg = String((d as { msg?: unknown }).msg ?? '');
+            return loc ? `${loc}: ${msg}` : msg;
+          }
+          return '';
+        })
+        .filter(Boolean);
+      if (parts.length > 0) return parts.slice(0, 5).join('; ');
+    }
+  }
+  if (err instanceof Error && err.message) return err.message;
+  return fallback;
+}
+
 /** Driving path per origin→destination pair (TomTom → OSRM → straight fallback). */
 export async function fetchRouteGeometries(
   pairs: { from: { lat: number; lon: number }; to: { lat: number; lon: number } }[],
@@ -219,9 +250,11 @@ export async function fetchRouteGeometries(
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: 'Route fetch failed' }));
-    throw new Error(err.detail || 'Route fetch failed');
+    throw new Error(apiErrorMessage(err, `Route fetch failed (HTTP ${res.status})`));
   }
-  return (await res.json()).routes as RouteGeometry[];
+  const body = (await res.json()) as { routes?: unknown };
+  if (!body || !Array.isArray(body.routes)) throw new Error('Route service returned an unexpected shape.');
+  return body.routes as RouteGeometry[];
 }
 
 export async function exportAssignmentsCsv(result: OptimizationResult): Promise<string> {

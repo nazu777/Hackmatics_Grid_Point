@@ -120,17 +120,28 @@ export const App: React.FC = () => {
         pairs.map((p) => ({ from: p.from, to: p.to })),
         !!optimizationResult.config.use_live_traffic
       );
+      if (!Array.isArray(routes)) throw new Error('Route service returned an unexpected shape.');
+      let stored = 0;
       setRoadGeometries((prev) => {
         const next = { ...prev };
         routes.forEach((r, i) => {
-          if (r.line && r.line.length >= 2) next[pairs[i].id] = r.line;
+          const line = r && Array.isArray(r.line) ? r.line : null;
+          if (line && line.length >= 2 && pairs[i]) {
+            next[pairs[i].id] = line;
+            stored += 1;
+          }
         });
         return next;
       });
-      const providers = [...new Set(routes.map((r) => r.provider.replace(' (cached)', '')))].join(' + ');
-      setRouteNotice(`Road paths via ${providers} (${Object.keys(roadGeometries).length + routes.length}/${optimizationResult.assignments.length} traced)`);
+      const providers = [...new Set(routes.map((r) => String(r?.provider ?? 'unknown').replace(' (cached)', '')))].join(' + ');
+      const total = Object.keys(roadGeometries).length + stored;
+      setRouteNotice(
+        stored > 0
+          ? `Road paths via ${providers} (${total}/${optimizationResult.assignments.length} traced)`
+          : 'No road paths returned — showing displacement lines.'
+      );
     } catch (e: any) {
-      setRouteNotice(e.message || 'Road tracing failed — showing displacement lines.');
+      setRouteNotice(e instanceof Error ? e.message : 'Road tracing failed — showing displacement lines.');
     } finally {
       setTracing(false);
     }
@@ -373,6 +384,16 @@ export const App: React.FC = () => {
     setRouteNotice(null);
   }, [optimizationResult, neighborhoods]);
 
+  // Service-radius overlay: enforced R_max from the result when present,
+  // otherwise an adjustable preview (clearly labeled, not enforced).
+  const [previewRadiusKm, setPreviewRadiusKm] = useState(10);
+  const enforcedRadiusKm =
+    optimizationResult && optimizationResult.config.radius_enabled
+      ? (optimizationResult.config.R_max_km ?? null)
+      : null;
+  const usingPreviewRadius = layers.radius && enforcedRadiusKm == null && optimizationResult != null;
+  const effectiveRadiusKm = enforcedRadiusKm ?? (layers.radius && optimizationResult ? previewRadiusKm : null);
+
   const railTab: RailTab =
     panel === 'results' || panel === 'detail' ? 'ask' : (panel as RailTab);
 
@@ -574,7 +595,7 @@ export const App: React.FC = () => {
             neighborhoods={neighborhoods}
             warehouses={optimizationResult?.warehouses ?? []}
             assignments={optimizationResult?.assignments ?? []}
-            radiusKm={optimizationResult && optimizationResult.config.radius_enabled ? (optimizationResult.config.R_max_km ?? null) : null}
+            radiusKm={effectiveRadiusKm}
             fill
             minimal
             basemap={mapLayerOptions.basemap}
@@ -682,6 +703,30 @@ export const App: React.FC = () => {
           <div className="absolute top-[124px] z-10 text-[11px] font-semibold text-ink bg-white/95 rounded-full px-4 py-1.5 shadow border border-black/5"
             style={{ left: sidebarWidth + 32 }}>
             {routeNotice}
+          </div>
+        )}
+        {usingPreviewRadius && (
+          <div className="absolute top-[124px] z-10 flex items-center gap-2 text-[11px] font-semibold text-ink bg-white/95 rounded-full pl-4 pr-2 py-1.5 shadow border border-black/5"
+            style={{ left: sidebarWidth + 32, marginTop: routeNotice ? 34 : 0 }}>
+            <span>Preview circles ({previewRadiusKm} km) — not enforced</span>
+            <button
+              onClick={() => setPreviewRadiusKm((v) => Math.max(1, v - 5))}
+              className="w-6 h-6 rounded-full bg-cream-deep hover:bg-gold-100 font-bold cursor-pointer"
+            >
+              −
+            </button>
+            <button
+              onClick={() => setPreviewRadiusKm((v) => Math.min(200, v + 5))}
+              className="w-6 h-6 rounded-full bg-cream-deep hover:bg-gold-100 font-bold cursor-pointer"
+            >
+              +
+            </button>
+            <button
+              onClick={() => setPanel('optimize')}
+              className="px-3 py-1 rounded-full bg-[#14424E] text-white font-bold hover:bg-pine-800 transition cursor-pointer"
+            >
+              Set R_max
+            </button>
           </div>
         )}
 

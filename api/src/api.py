@@ -2,7 +2,7 @@
 GridPoint FastAPI Backend
 Provides REST endpoints for data ingestion, validation, and synthetic generation (schema.md §6).
 """
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Tuple
 from fastapi import FastAPI, UploadFile, File, Query, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import PlainTextResponse, JSONResponse
@@ -315,14 +315,41 @@ def census_demand(
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(e))
 
 
-class RoutePair(BaseModel):
-    frm: Dict[str, float]
-    to: Dict[str, float]
-
-
 class RouteGeometryRequest(BaseModel):
-    pairs: List[RoutePair]
+    # Loose input shape validated manually below so failures are always
+    # 400s with plain-string details (never FastAPI 422 detail arrays,
+    # which stringify to "[object Object], ..." on the client).
+    pairs: List[Any]
     live_traffic: bool = False
+
+
+def _parse_route_pair(p: Any, i: int) -> Tuple[float, float, float, float]:
+    def num(v: Any, name: str) -> float:
+        try:
+            f = float(v)
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
+                                detail=f"Pair #{i}: '{name}' must be a number.")
+        if not (-90.0 <= f <= 90.0 if "lat" in name else -180.0 <= f <= 180.0):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
+                                detail=f"Pair #{i}: '{name}' out of range.")
+        if f != f:  # NaN guard
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
+                                detail=f"Pair #{i}: '{name}' must be a number.")
+        return f
+
+    if not isinstance(p, dict):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
+                            detail=f"Pair #{i}: expected {{frm:{{lat,lon}}, to:{{lat,lon}}}}.")
+    try:
+        frm, to = p["frm"], p["to"]
+        flat, flon = frm["lat"], frm["lon"]
+        tlat, tlon = to["lat"], to["lon"]
+    except (KeyError, TypeError):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
+                            detail=f"Pair #{i}: expected {{frm:{{lat,lon}}, to:{{lat,lon}}}}.")
+    return (num(flat, "frm.lat"), num(flon, "frm.lon"),
+            num(tlat, "to.lat"), num(tlon, "to.lon"))
 
 
 @app.post("/api/routes/geometry")
@@ -337,14 +364,10 @@ def route_geometries(payload: RouteGeometryRequest):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
                             detail=f"Max {MAX_ROUTE_PAIRS_PER_CALL} pairs per request.")
     out = []
-    for p in payload.pairs:
-        try:
-            frm = (float(p.frm["lat"]), float(p.frm["lon"]))
-            to = (float(p.to["lat"]), float(p.to["lon"]))
-        except (KeyError, TypeError, ValueError):
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
-                                detail="Each pair needs {frm:{lat,lon}, to:{lat,lon}}.")
-        out.append(route_geometry(frm, to, live_traffic=payload.live_traffic))
+    for i, p in enumerate(payload.pairs):
+        flat, flon, tlat, tlon = _parse_route_pair(p, i)
+        out.append(route_geometry((flat, flon), (tlat, tlon),
+                                  live_traffic=payload.live_traffic))
     return {"routes": out}
 
 

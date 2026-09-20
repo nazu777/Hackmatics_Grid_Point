@@ -410,9 +410,13 @@ export const MapView: React.FC<MapViewProps> = ({
         const wh = whById.get(a.warehouse_id);
         if (!nb || !wh) return;
         const traced = linesMode === 'roads' ? roadGeometries[a.neighborhood_id] : undefined;
-        const coords = traced && traced.length >= 2
-          ? traced
-          : [[nb.longitude, nb.latitude], [wh.longitude, wh.latitude]];
+        const validRing = (pts: unknown): pts is number[][] =>
+          Array.isArray(pts) &&
+          pts.length >= 2 &&
+          pts.every((p) => Array.isArray(p) && p.length === 2 && p.every((v) => Number.isFinite(v)));
+        const fallback: number[][] = [[nb.longitude, nb.latitude], [wh.longitude, wh.latitude]];
+        if (!validRing(fallback)) return;
+        const coords = validRing(traced) ? (traced as number[][]) : fallback;
         const feat = {
           type: 'Feature',
           properties: {

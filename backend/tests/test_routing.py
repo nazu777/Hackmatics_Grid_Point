@@ -204,3 +204,9 @@ def test_routes_api(monkeypatch):
     assert "d3rZl2" not in r.text
     big = {"pairs": [{"frm": {"lat": 0.0, "lon": 0.0}, "to": {"lat": 1.0, "lon": 1.0}}] * 61}
     assert client.post("/api/routes/geometry", json=big).status_code == 400
+    # malformed pairs are 400s with STRING details (never 422 arrays that
+    # stringify to "[object Object], ..." on the client)
+    bad = {"pairs": [["a", "b"], {"frm": {"lat": "NaNx", "lon": 0.0}, "to": {"lat": 1.0, "lon": 1.0}}]}
+    r_bad = client.post("/api/routes/geometry", json=bad)
+    assert r_bad.status_code == 400
+    assert isinstance(r_bad.json()["detail"], str)
