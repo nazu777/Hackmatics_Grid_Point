@@ -1,0 +1,6 @@
+[
+  { "vehicle_type": "bike", "capacity": 20, "cost_per_km": 4.0, "fuel_type": "petrol", "avg_speed_kmph": 30.0, "mileage_kmpl": 45.0 },
+  { "vehicle_type": "van", "capacity": 120, "cost_per_km": 12.0, "fuel_type": "diesel", "avg_speed_kmph": 40.0, "mileage_kmpl": 14.0 },
+  { "vehicle_type": "truck", "capacity": 400, "cost_per_km": 22.0, "fuel_type": "diesel", "avg_speed_kmph": 35.0, "mileage_kmpl": 6.0 },
+  { "vehicle_type": "ev_van", "capacity": 100, "cost_per_km": 8.0, "fuel_type": "electric", "avg_speed_kmph": 38.0, "mileage_kmpl": 6.5 }
+]

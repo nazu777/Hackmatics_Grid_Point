@@ -4,7 +4,7 @@
 **GRIDPOINT** answers: *Where Should the Warehouse Go?* An e-commerce company serves multiple neighborhoods, each with distinct geographic coordinates and daily order volumes. GRIDPOINT is a decision-support platform that ingests neighborhood demand data, visualizes it spatially, computes optimal warehouse location(s), assigns neighborhoods to warehouses, and quantifies delivery effort saved versus the original arrangement. The objective function is **weighted delivery cost minimization**: neighborhoods with higher `daily_orders` contribute proportionally more to total cost.
 
 > Pipeline: `Neighborhood Data` → `Location Visualization` → `Warehouse Optimization` → `Neighborhood Assignment` → `Delivery Cost Comparison` → `Overview`
-> Backlog note (Sept 2026, docs-only plan — NOT built): user items #1–#14 are specified in `phases.md` §0 and threaded below as (#n). Daily orders live on nodes and flow into warehouses via assignment (#6, #8).
+> Status (Sept 20 2026): Phases A, D, E SHIPPED (onboarding trio, per-order cost truth + elbow, expansion policy). Phases B, C, F remain planned. Daily orders live on nodes and flow into warehouses via assignment (#6, #8).
 
 ## 2. Background & Problem Context
 - E-commerce demand is spatially dispersed and non-uniform; each neighborhood `i` has position `(lat_i, lon_i)` and weight `w_i = daily_orders_i`.
@@ -103,7 +103,7 @@ Directly derived from `problem_statement.md`:
 - Delta visualization: before/after map toggle or split view; bar/line chart of distance distribution.
 - Exportable summary table.
 
-### 5.9 Expansion & Scale Advisor (planned — #11)
+### 5.9 Expansion & Scale Advisor (SHIPPED Sept 20 2026 — #11)
 - Baseline is the user's REAL current state (existing warehouses + order neighborhoods + owned vehicles from §5.1).
 - Policy inputs: `allow_abandon_infra` (keep vs abandon/change/demolish + demolition cost + salvage), `allow_sell_vehicles` (keep vs sell + resale), `horizon_months`, `revenue_per_order`.
 - Candidates (new sites + added vehicles) scored on dynamic infra-vs-fuel-vs-delivery economics over the horizon; ONE recommended plan ranked by net benefit (delivery savings + future revenue − capex − abandon/sell frictions) with costed rationale + before/after map + apply-to-main-map.

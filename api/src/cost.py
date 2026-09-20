@@ -100,11 +100,81 @@ def effective_rate(config: OptimizationConfig,
 
 
 def assignment_fuel_cost(w_i: int, d_km: float, config: OptimizationConfig,
-                         prices: Optional[Dict[str, float]] = None,
-                         congestion: Optional[float] = None) -> float:
-    """Fuel-only portion of one neighborhood's delivery cost."""
+                          prices: Optional[Dict[str, float]] = None,
+                          congestion: Optional[float] = None) -> float:
+    """Fuel-only portion of one neighborhood's delivery cost.
+
+    Fuel burn = live pump price (₹/L) ÷ fleet mileage (km/L) per km·order,
+    plus any manual fuel_cost_per_km surcharge. Road distance in, fuel ₹ out.
+    """
     _, fuel_rate = split_rate(config, prices)
     return float(w_i) * effective_distance(d_km, config, congestion) * fuel_rate
+
+
+def per_order_breakdown(w_i: int, d_km: float, config: OptimizationConfig,
+                        prices: Optional[Dict[str, float]] = None,
+                        congestion: Optional[float] = None) -> Dict[str, float]:
+    """Per-order road+fuel truth for one neighborhood (Phase D #7).
+
+    Returns road km, effective km (traffic-aware), fuel cost, total cost,
+    and avg cost per order. Pure function — no I/O, uses the same
+    split_rate/effective_distance math as compute_metrics so figures reconcile.
+    """
+    if prices is None:
+        prices, _, _ = resolve_fuel_prices(config)
+    d_eff = effective_distance(d_km, config, congestion)
+    fuel = assignment_fuel_cost(w_i, d_km, config, prices, congestion)
+    total = assignment_cost(w_i, d_km, config, prices, congestion)
+    orders = max(1, int(w_i))
+    return {
+        "distance_km": round(float(d_km), 2),
+        "effective_distance_km": round(float(d_eff), 2),
+        "fuel_cost": round(float(fuel), 2),
+        "cost": round(float(total), 2),
+        "avg_cost_per_order": round(float(total) / orders, 2),
+    }
+
+
+def avg_cost_per_order(metrics: Metrics, total_orders: int) -> float:
+    """Overall avg delivery cost per order (total_cost / Σw_i)."""
+    if total_orders <= 0:
+        return 0.0
+    return round(float(metrics.total_cost) / total_orders, 2)
+
+
+def assignment_table_rows(
+    neighborhoods: List[Dict[str, Any]],
+    assignments: List[Assignment],
+) -> List[Dict[str, Any]]:
+    """Per-node exportable rows: every row carries road km + fuel + cost.
+
+    Joins demand (daily_orders) onto each assignment and derives
+    avg_cost_per_order so the table reconciles to Metrics row-for-row:
+    Σ weighted_distance == total_weighted_distance, Σ cost (+infra) == total_cost.
+    """
+    demand_by_id: Dict[str, int] = {
+        str(n.get("neighborhood_id")): int(n.get("daily_orders", 0) or 0)
+        for n in neighborhoods
+    }
+    rows: List[Dict[str, Any]] = []
+    for a in assignments:
+        w_i = demand_by_id.get(str(a.neighborhood_id), 0)
+        avg = round(float(a.cost) / max(1, w_i), 2)
+        rows.append({
+            "neighborhood_id": str(a.neighborhood_id),
+            "warehouse_id": str(a.warehouse_id),
+            "daily_orders": w_i,
+            "distance_km": round(float(a.distance_km), 2),
+            "weighted_distance": round(float(a.weighted_distance), 2),
+            "fuel_cost": round(float(a.fuel_cost or 0.0), 2),
+            "cost": round(float(a.cost), 2),
+            "avg_cost_per_order": avg,
+            "congestion_pct": a.congestion_pct,
+            "travel_time_min": a.travel_time_min,
+            "within_radius": bool(a.within_radius),
+            "is_feasible": bool(a.is_feasible),
+        })
+    return rows
 
 
 def corridor_congestion(config: OptimizationConfig,

@@ -196,3 +196,67 @@ def generate_synthetic_dataset(config: SyntheticGenerationConfig) -> List[Dict[s
         })
 
     return nodes
+
+
+def generate_synthetic_vehicles(seed: int = 42, count: int = 4) -> List[Dict[str, Any]]:
+    """
+    Deterministic owned-fleet seeder (Phase A #4, seed=42 default).
+    Same seed + count always returns the same fleet. Extra slots cycle
+    deterministically via a seeded RNG so demos are reproducible.
+    """
+    base = [
+        {"vehicle_type": "bike", "capacity": 20, "cost_per_km": 4.0,
+         "fuel_type": "petrol", "avg_speed_kmph": 30.0, "mileage_kmpl": 45.0},
+        {"vehicle_type": "van", "capacity": 120, "cost_per_km": 12.0,
+         "fuel_type": "diesel", "avg_speed_kmph": 40.0, "mileage_kmpl": 14.0},
+        {"vehicle_type": "truck", "capacity": 400, "cost_per_km": 22.0,
+         "fuel_type": "diesel", "avg_speed_kmph": 35.0, "mileage_kmpl": 6.0},
+        {"vehicle_type": "ev_van", "capacity": 100, "cost_per_km": 8.0,
+         "fuel_type": "electric", "avg_speed_kmph": 38.0, "mileage_kmpl": 6.5},
+    ]
+    if count <= len(base):
+        return [dict(v) for v in base[:max(1, count)]]
+    rng = np.random.default_rng(seed)
+    out = [dict(v) for v in base]
+    fuels = ["petrol", "diesel", "cng", "electric"]
+    for i in range(len(base), count):
+        out.append({
+            "vehicle_type": f"van_{i + 1}",
+            "capacity": int(rng.integers(40, 250)),
+            "cost_per_km": round(float(rng.uniform(6.0, 18.0)), 2),
+            "fuel_type": fuels[int(rng.integers(0, len(fuels)))],
+            "avg_speed_kmph": round(float(rng.uniform(28.0, 45.0)), 1),
+            "mileage_kmpl": round(float(rng.uniform(8.0, 40.0)), 1),
+        })
+    return out
+
+
+def generate_synthetic_warehouses(seed: int = 42, count: int = 2,
+                                  lat_center: float = 17.385044,
+                                  lon_center: float = 78.486671,
+                                  spread_km: float = 20.0) -> List[Dict[str, Any]]:
+    """
+    Deterministic existing-warehouse seeder (Phase A #4/#8, seed=42 default).
+    Sites are spread on a seeded ring around the centre so the same inputs
+    always yield the same baseline set (D-baseline + E keep/abandon set).
+    """
+    rng = np.random.default_rng(seed)
+    lat_deg_per_km, lon_deg_per_km = _km_to_deg(lat_center)
+    spread = max(1.0, float(spread_km))
+    sites: List[Dict[str, Any]] = []
+    for i in range(max(1, count)):
+        bearing = 2 * math.pi * i / max(1, count) + float(rng.uniform(-0.2, 0.2))
+        dist = spread * 0.35 + float(rng.uniform(-0.05, 0.10)) * spread
+        lat = lat_center + dist * math.cos(bearing) * lat_deg_per_km
+        lon = lon_center + dist * math.sin(bearing) * lon_deg_per_km
+        sites.append({
+            "warehouse_id": f"EX-W{i + 1}",
+            "latitude": round(float(np.clip(lat, -89.9, 89.9)), 6),
+            "longitude": round(float(np.clip(lon, -179.9, 179.9)), 6),
+            "capacity": int(800 + (i % 3) * 400),
+            "radius_km": 25.0,
+            "infra_cost": float(1500 + i * 250),
+            "assigned_orders": 0,
+            "utilization_pct": 0.0,
+        })
+    return sites

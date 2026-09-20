@@ -16,17 +16,28 @@ from .schema import (
     OptimizationConfig,
     OptimizationResult,
     Assignment,
-    Warehouse
+    Warehouse,
+    VehicleType
 )
-from .validation import validate_neighborhoods, validate_optimization_config
+from .validation import (validate_neighborhoods, validate_optimization_config,
+                         validate_vehicles, validate_warehouses)
 from .data_ingestion import (
     parse_csv_content,
     parse_json_content,
     export_to_csv,
     export_to_json,
-    compute_dataset_summary
+    compute_dataset_summary,
+    parse_vehicles_csv,
+    parse_vehicles_json,
+    parse_warehouses_csv,
+    parse_warehouses_json,
+    export_vehicles_to_csv,
+    export_warehouses_to_csv,
+    compute_fleet_summary,
+    compute_warehouse_summary
 )
-from .synthetic import generate_synthetic_dataset
+from .synthetic import (generate_synthetic_dataset, generate_synthetic_vehicles,
+                        generate_synthetic_warehouses)
 from .optimization import run_optimization
 from .mapping import prepare_map_layer_data, compute_map_bounds
 from . import auth as auth_module
@@ -156,14 +167,75 @@ def get_synthetic_data(
     return [Neighborhood(**item) for item in data]
 
 
+class VehiclesValidateRequest(BaseModel):
+    vehicles: List[Dict[str, Any]]
+
+
+class WarehousesValidateRequest(BaseModel):
+    warehouses: List[Dict[str, Any]]
+
+
+@app.post("/api/vehicles/validate", response_model=ValidationResult)
+def validate_vehicles_endpoint(payload: VehiclesValidateRequest):
+    """Validate an owned-fleet dataset (Phase A #4)."""
+    result, _ = validate_vehicles(payload.vehicles)
+    return result
+
+
+@app.post("/api/warehouses/validate", response_model=ValidationResult)
+def validate_warehouses_endpoint(payload: WarehousesValidateRequest):
+    """Validate an existing-warehouse dataset (Phase A #4/#8)."""
+    result, _ = validate_warehouses(payload.warehouses)
+    return result
+
+
+@app.get("/api/synthetic/vehicles", response_model=List[VehicleType])
+def get_synthetic_vehicles(
+    seed: int = Query(42, description="RNG seed for reproducibility"),
+    count: int = Query(4, ge=1, le=20, description="Fleet size"),
+):
+    """Deterministic owned-fleet seeder (Phase A #4). Same seed+count → same fleet."""
+    return [VehicleType(**v) for v in generate_synthetic_vehicles(seed=seed, count=count)]
+
+
+@app.get("/api/synthetic/warehouses", response_model=List[Warehouse])
+def get_synthetic_warehouses(
+    seed: int = Query(42, description="RNG seed for reproducibility"),
+    count: int = Query(2, ge=1, le=10, description="Site count"),
+    lat_center: float = Query(17.385044, ge=-90.0, le=90.0),
+    lon_center: float = Query(78.486671, ge=-180.0, le=180.0),
+    spread_km: float = Query(20.0, gt=0.0, le=500.0),
+):
+    """Deterministic existing-warehouse seeder (Phase A #4/#8; D-baseline + E keep set)."""
+    return [Warehouse(**w) for w in generate_synthetic_warehouses(
+        seed=seed, count=count, lat_center=lat_center, lon_center=lon_center, spread_km=spread_km)]
+
+
+@app.post("/api/export/vehicles")
+def export_vehicles(payload: Dict[str, Any]):
+    """Export owned-fleet records to canonical CSV."""
+    vehicles = payload.get("vehicles", [])
+    return PlainTextResponse(content=export_vehicles_to_csv(vehicles), media_type="text/csv")
+
+
+@app.post("/api/export/warehouses")
+def export_warehouses(payload: Dict[str, Any]):
+    """Export existing-warehouse records to canonical CSV."""
+    warehouses = payload.get("warehouses", [])
+    return PlainTextResponse(content=export_warehouses_to_csv(warehouses), media_type="text/csv")
+
+
 @app.post("/api/upload")
-async def upload_file(file: UploadFile = File(...)):
+async def upload_file(file: UploadFile = File(...), dataset: str = Query("neighborhoods")):
     """
     Ingest and validate an uploaded CSV or JSON file.
-    Returns validation result, clean records, and spatial summary.
+    `?dataset=neighborhoods|vehicles|warehouses` selects the onboarding
+    dataset (default neighborhoods for backward compatibility).
+    Returns validation result, clean records, and summary.
     """
     contents = await file.read()
     filename = file.filename or ""
+    kind = (dataset or "neighborhoods").strip().lower()
 
     try:
         content_str = contents.decode("utf-8")
@@ -176,20 +248,53 @@ async def upload_file(file: UploadFile = File(...)):
                 detail=f"Unable to decode file: {str(e)}"
             )
 
-    if filename.lower().endswith(".json"):
-        val_result, clean_records = parse_json_content(content_str)
-    elif filename.lower().endswith(".csv") or filename.lower().endswith(".txt"):
-        val_result, clean_records = parse_csv_content(content_str)
-    else:
-        # Try JSON first, then CSV fallback
+    def _parse_neighborhoods():
+        if filename.lower().endswith(".json"):
+            return parse_json_content(content_str)
+        elif filename.lower().endswith(".csv") or filename.lower().endswith(".txt"):
+            return parse_csv_content(content_str)
         val_result, clean_records = parse_json_content(content_str)
         if not val_result.valid and not clean_records:
             val_result, clean_records = parse_csv_content(content_str)
+        return val_result, clean_records
 
+    def _parse_vehicles():
+        if filename.lower().endswith(".json"):
+            return parse_vehicles_json(content_str)
+        elif filename.lower().endswith(".csv") or filename.lower().endswith(".txt"):
+            return parse_vehicles_csv(content_str)
+        val_result, clean_records = parse_vehicles_json(content_str)
+        if not val_result.valid and not clean_records:
+            val_result, clean_records = parse_vehicles_csv(content_str)
+        return val_result, clean_records
+
+    def _parse_warehouses():
+        if filename.lower().endswith(".json"):
+            return parse_warehouses_json(content_str)
+        elif filename.lower().endswith(".csv") or filename.lower().endswith(".txt"):
+            return parse_warehouses_csv(content_str)
+        val_result, clean_records = parse_warehouses_json(content_str)
+        if not val_result.valid and not clean_records:
+            val_result, clean_records = parse_warehouses_csv(content_str)
+        return val_result, clean_records
+
+    if kind in ("vehicles", "fleet", "vehicle"):
+        val_result, clean_records = _parse_vehicles()
+        return {"filename": filename, "dataset": "vehicles",
+                "validation": val_result.model_dump(), "vehicles": clean_records,
+                "summary": compute_fleet_summary(clean_records)}
+    if kind in ("warehouses", "warehouse", "existing_warehouses"):
+        val_result, clean_records = _parse_warehouses()
+        return {"filename": filename, "dataset": "warehouses",
+                "validation": val_result.model_dump(), "warehouses": clean_records,
+                "summary": compute_warehouse_summary(clean_records)}
+
+    val_result, clean_records = _parse_neighborhoods()
     summary = compute_dataset_summary(clean_records)
 
     return {
         "filename": filename,
+        "dataset": "neighborhoods",
         "validation": val_result.model_dump(),
         "neighborhoods": clean_records,
         "summary": summary
@@ -232,6 +337,19 @@ def export_metrics(payload: MetricsExportRequest):
     lines = ["metric,baseline,optimized,saved,pct_saved"]
     for r in rows:
         lines.append(f"{r['metric']},{r['baseline']},{r['optimized']},{r['saved']},{r['pct_saved']}")
+    # Avg delivery cost per order (Phase D #7): total_cost / Σw_i, orders
+    # derived from assignments so the CSV reconciles without extra inputs.
+    def _orders(asgs: Any) -> float:
+        tot = 0.0
+        for a in asgs:
+            d = float(a.distance_km) if a.distance_km else 0.0
+            tot += (float(a.weighted_distance) / d) if d > 0 else 0.0
+        return tot
+    b_orders = _orders(result.comparison.baseline.assignments)
+    o_orders = _orders(result.assignments)
+    b_avg = round(float(result.comparison.baseline.metrics.total_cost) / max(1.0, b_orders), 2)
+    o_avg = round(float(result.comparison.optimized.metrics.total_cost) / max(1.0, o_orders), 2)
+    lines.append(f"avg_cost_per_order,{b_avg},{o_avg},{round(b_avg - o_avg, 2)},{round((b_avg - o_avg) / max(0.001, b_avg) * 100.0, 2)}")
     lines.append("")
     lines.append("warehouse_id,assigned_orders,utilization_pct,avg_distance_km,neighborhood_count")
     for w in result.metrics.warehouses:
@@ -380,16 +498,25 @@ def route_geometries(payload: RouteGeometryRequest):
 
 @app.post("/api/export/assignments")
 def export_assignments(payload: MetricsExportRequest):
-    """Export full neighborhood→warehouse assignment table as CSV (map lines match table)."""
+    """Export full neighborhood→warehouse assignment table as CSV (map lines match table).
+
+    Every row carries road distance_km + fuel_cost + cost (Phase D #7) plus
+    congestion / travel-time provenance when present, so the CSV reconciles
+    to the ComparisonDashboard per-node table row-for-row.
+    """
     from .schema import OptimizationResult
     try:
         result = OptimizationResult(**payload.result)
     except Exception as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
                             detail=f"Invalid OptimizationResult: {e}")
-    lines = ["neighborhood_id,warehouse_id,distance_km,weighted_distance,cost,within_radius,is_feasible"]
+    lines = ["neighborhood_id,warehouse_id,distance_km,weighted_distance,fuel_cost,cost,avg_cost_per_order,congestion_pct,travel_time_min,within_radius,is_feasible"]
     for a in result.assignments:
-        lines.append(f"{a.neighborhood_id},{a.warehouse_id},{a.distance_km},{a.weighted_distance},{a.cost},{a.within_radius},{a.is_feasible}")
+        w_i = (float(a.weighted_distance) / float(a.distance_km)) if float(a.distance_km) > 0 else 0.0
+        avg = round(float(a.cost) / max(1.0, w_i), 2) if w_i > 0 else float(a.cost)
+        cong = "" if a.congestion_pct is None else a.congestion_pct
+        tmin = "" if a.travel_time_min is None else a.travel_time_min
+        lines.append(f"{a.neighborhood_id},{a.warehouse_id},{a.distance_km},{a.weighted_distance},{a.fuel_cost},{a.cost},{avg},{cong},{tmin},{a.within_radius},{a.is_feasible}")
     return PlainTextResponse(content="\n".join(lines), media_type="text/csv")
 
 
@@ -527,6 +654,14 @@ class ExpandRequest(BaseModel):
     warehouses: List[Warehouse]
     add_count: int = 1
     config: Optional[OptimizationConfig] = None
+    # Phase-E policy toggles (schema.md §2.4 expansion_policy, planned).
+    # Accepted as a plain dict so Phase-A onboarding shapes stay forward-compat:
+    # {allow_abandon_infra, allow_sell_vehicles, horizon_months,
+    #  revenue_per_order, demolition_cost, salvage_value, resale_value,
+    #  infra_cost_new, vehicle_cost_new}. Unknown keys are ignored.
+    policy: Optional[Dict[str, Any]] = None
+    # Owned-fleet rows (Phase-A VehicleType shape) carried as the keep/sell basis.
+    owned_vehicles: Optional[List[Dict[str, Any]]] = None
 
 
 @app.post("/api/expand")
@@ -535,6 +670,8 @@ def expand_warehouses(payload: ExpandRequest):
     Incrementally add warehouses to an existing layout. Current warehouses
     keep their ids/coordinates; new sites relieve the heaviest loads or cover
     poorly served areas, and serving assignments are recomputed.
+    With `policy`, also returns a ranked NPV recommendation (keep vs
+    abandon/change/demolish vs sell) with a costed rationale.
     """
     from .expansion import expand_network
     try:
@@ -543,6 +680,8 @@ def expand_warehouses(payload: ExpandRequest):
             [w.model_dump() for w in payload.warehouses],
             payload.add_count,
             payload.config or OptimizationConfig(),
+            policy=payload.policy,
+            owned_vehicles=payload.owned_vehicles,
         )
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))

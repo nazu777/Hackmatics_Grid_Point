@@ -103,7 +103,7 @@ Output of optimization; also used for baseline/current locations AND for user-en
 | `use_live_traffic_for_routing` | boolean | No | `false` | Planned (#5): optimize matrices + assignment on current corridor traffic. |
 | `traffic_aware_reroute` | boolean | No | `false` | Planned (#9): re-evaluate assignment as corridors change (`α·cost + β·time`). |
 | `simulation_mode` | enum | No | `off` | Planned (#12, #13): `off\|realtime` — live fuel/traffic/demand loop + congestion spillover. |
-| `expansion_policy` | object | No | `None` | Planned (#11): `{allow_abandon_infra, allow_sell_vehicles, demolition_cost, salvage_value, resale_value, horizon_months, revenue_per_order}`. |
+| `expansion_policy` | object | No | `None` | SHIPPED Sept 20 2026 (#11): `{allow_abandon_infra, allow_sell_vehicles, demolition_cost, salvage_value, resale_value, horizon_months, revenue_per_order}`. |
 | `random_seed` | integer | No | `42` | — | Seed for K-Means & synthetic data reproducibility. |
 | `baseline_mode` | enum | No | `centroid` | `centroid\|mean\|single_center\|custom` | How to compute baseline warehouse(s). |
 | `custom_baseline_warehouses` | Warehouse[] | If `custom` | — | Valid lat/lon | User-provided original locations. |
@@ -172,7 +172,7 @@ Output of optimization; also used for baseline/current locations AND for user-en
 
 ### 2.8 Synthetic Generation Config
 
-Covers all three onboarding datasets (backlog #4): neighborhoods (exists) + planned deterministic vehicles + warehouses seeders (fixed seeds for demo reproducibility).
+Covers all three onboarding datasets — SHIPPED Sept 20 2026 (backlog #4): neighborhoods + deterministic vehicles + warehouses seeders (fixed seeds for demo reproducibility).
 
 | Field | Type | Default | Description |
 | :--- | :--- | :--- | :--- |
@@ -202,7 +202,7 @@ Single rollup the Overview tab renders; every figure deep-links to its source ta
 }
 ```
 
-### 2.10 ExpansionRecommendation (planned — backlog #11)
+### 2.10 ExpansionRecommendation (SHIPPED Sept 20 2026 — backlog #11)
 
 ```json
 {
@@ -327,7 +327,7 @@ Real US demand from ACS tract populations (`B01003_001E × orders_per_1000 / 100
 
 ### `POST /api/upload` (multipart `file`)
 
-Response: `{ filename, validation, neighborhoods, summary }` — CSV/JSON auto-detection with alias mapping.
+Response: `{ filename, validation, neighborhoods, summary }` — CSV/JSON auto-detection with alias mapping. SHIPPED Sept 20 2026: `?dataset=neighborhoods|vehicles|warehouses` selects the onboarding dataset; plus `POST /api/vehicles/validate`, `POST /api/warehouses/validate`, `GET /api/synthetic/vehicles`, `GET /api/synthetic/warehouses`, `POST /api/export/vehicles`, `POST /api/export/warehouses`.
 
 ### `POST /api/export/csv` · `POST /api/export/json` · `POST /api/export/metrics` · `POST /api/export/assignments`
 
@@ -356,7 +356,7 @@ Multi-K elbow curve; demand scaling (`w_i' = w_i × (1+Δ%)`); fleet + traffic E
 
 ### `POST /api/expand`
 
-Incrementally add warehouses without moving existing sites (`MAX_WAREHOUSES=10`).
+Incrementally add warehouses without moving existing sites (`MAX_WAREHOUSES=10`). SHIPPED Sept 20 2026: accepts `policy` + `owned_vehicles` and returns ranked NPV `recommendation` (keep vs abandon/demolish vs sell).
 
 ### `POST /api/auth/signup` · `POST /api/auth/login` · `GET /api/auth/me`
 

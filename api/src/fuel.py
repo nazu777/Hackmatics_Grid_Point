@@ -170,3 +170,16 @@ def price_for(fuel_type: str, city: Optional[str] = None,
         if price is not None:
             return price, True, row["city"]
     return FALLBACK_PRICES[key], False, None
+
+
+def fuel_rate_per_km(price_per_litre: float, mileage_kmpl: Optional[float]) -> float:
+    """Fuel ₹ per km·order for one vehicle: live price ÷ mileage (Phase D #7).
+
+    Returns 0.0 when mileage is unset so callers fall back to the manual
+    fuel_cost_per_km surcharge instead of dividing by zero.
+    """
+    if mileage_kmpl is None or mileage_kmpl <= 0:
+        return 0.0
+    if price_per_litre is None or price_per_litre <= 0:
+        return 0.0
+    return float(price_per_litre) / float(mileage_kmpl)

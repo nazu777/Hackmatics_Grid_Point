@@ -1,13 +1,16 @@
 import React, { useState } from 'react';
 import { X, Sparkles } from 'lucide-react';
-import { SyntheticConfig, Neighborhood } from '../types';
-import { fetchSynthetic } from '../services/api';
+import { SyntheticConfig, Neighborhood, VehicleType, Warehouse } from '../types';
+import { fetchSynthetic, fetchSyntheticVehicles, fetchSyntheticWarehouses } from '../services/api';
 
 interface SyntheticModalProps {
   isOpen: boolean;
   onClose: () => void;
   onGenerated: (nodes: Neighborhood[]) => void;
   onOpenCensus?: () => void;
+  /** Phase A trio: optional fleet + site seed callbacks share this modal. */
+  onVehiclesGenerated?: (vehicles: VehicleType[]) => void;
+  onWarehousesGenerated?: (warehouses: Warehouse[]) => void;
 }
 
 const CITY_PRESETS = [
@@ -17,7 +20,11 @@ const CITY_PRESETS = [
   { name: 'Delhi NCR', lat: 28.613939, lon: 77.209023 }
 ];
 
-export const SyntheticModal: React.FC<SyntheticModalProps> = ({ isOpen, onClose, onGenerated, onOpenCensus }) => {
+export const SyntheticModal: React.FC<SyntheticModalProps> = ({ isOpen, onClose, onGenerated, onOpenCensus, onVehiclesGenerated, onWarehousesGenerated }) => {
+  const [tab, setTab] = useState<'orders' | 'vehicles' | 'warehouses'>('orders');
+  const [fleetCount, setFleetCount] = useState(4);
+  const [siteCount, setSiteCount] = useState(2);
+  const [trioSeed, setTrioSeed] = useState(42);
   const [config, setConfig] = useState<SyntheticConfig>({
     N: 35,
     lat_center: 17.385044,
@@ -44,6 +51,34 @@ export const SyntheticModal: React.FC<SyntheticModalProps> = ({ isOpen, onClose,
   };
 
   const handleGenerate = async () => {
+    if (tab === 'vehicles') {
+      setLoading(true);
+      setError(null);
+      try {
+        const fleet = await fetchSyntheticVehicles(trioSeed, fleetCount);
+        onVehiclesGenerated?.(fleet);
+        onClose();
+      } catch (err: any) {
+        setError(err.message || 'Fleet generation failed');
+      } finally {
+        setLoading(false);
+      }
+      return;
+    }
+    if (tab === 'warehouses') {
+      setLoading(true);
+      setError(null);
+      try {
+        const sites = await fetchSyntheticWarehouses(trioSeed, siteCount, config.lat_center, config.lon_center);
+        onWarehousesGenerated?.(sites);
+        onClose();
+      } catch (err: any) {
+        setError(err.message || 'Warehouse generation failed');
+      } finally {
+        setLoading(false);
+      }
+      return;
+    }
     if (config.orders_min > config.orders_max) {
       setError("Minimum orders cannot exceed maximum orders!");
       return;
@@ -70,8 +105,8 @@ export const SyntheticModal: React.FC<SyntheticModalProps> = ({ isOpen, onClose,
               <Sparkles className="w-5 h-5" />
             </div>
             <div>
-              <h3 className="font-bold text-base text-ink">Synthetic Dataset Generator</h3>
-              <p className="text-xs text-ink-faint">Seedable geographic demand model</p>
+              <h3 className="font-bold text-base text-ink">Synthetic Data Seeder (seed=42)</h3>
+              <p className="text-xs text-ink-faint">Deterministic demo data for orders, fleet, and sites</p>
             </div>
           </div>
           <button
@@ -81,6 +116,48 @@ export const SyntheticModal: React.FC<SyntheticModalProps> = ({ isOpen, onClose,
             <X className="w-5 h-5" />
           </button>
         </div>
+
+        <div className="flex items-center gap-1.5 mb-4">
+          {(['orders', 'vehicles', 'warehouses'] as const).map((t) => (
+            <button key={t} onClick={() => setTab(t)}
+              className={`px-3 py-1.5 rounded-full text-xs font-semibold border transition cursor-pointer capitalize ${tab === t ? 'bg-[#14424E] text-white border-[#14424E]' : 'border-[#E4E1D2] text-ink-soft hover:bg-cream-deep'}`}>
+              {t}
+            </button>
+          ))}
+        </div>
+
+        {tab !== 'orders' && (
+          <div className="mb-4 p-3 rounded-2xl bg-cream-deep border border-[#E4E1D2] text-xs space-y-3">
+            {tab === 'vehicles' && (
+              <div>
+                <div className="flex justify-between items-center mb-1">
+                  <span className="font-semibold text-ink-soft">Fleet size</span>
+                  <span className="font-mono font-bold">{fleetCount}</span>
+                </div>
+                <input type="range" min="1" max="12" value={fleetCount}
+                  onChange={(e) => setFleetCount(parseInt(e.target.value))} className="slider" />
+                <p className="text-ink-faint mt-1">Fixed seed=42 fleet: bike → van → truck → ev_van, then deterministic extras.</p>
+              </div>
+            )}
+            {tab === 'warehouses' && (
+              <div>
+                <div className="flex justify-between items-center mb-1">
+                  <span className="font-semibold text-ink-soft">Site count</span>
+                  <span className="font-mono font-bold">{siteCount}</span>
+                </div>
+                <input type="range" min="1" max="6" value={siteCount}
+                  onChange={(e) => setSiteCount(parseInt(e.target.value))} className="slider" />
+                <p className="text-ink-faint mt-1">Seeded ring around the map center; doubles as the D-baseline + E keep set.</p>
+              </div>
+            )}
+            <div>
+              <label className="font-semibold text-ink-soft block mb-1">Seed (reproducibility)</label>
+              <input type="number" value={trioSeed}
+                onChange={(e) => setTrioSeed(parseInt(e.target.value) || 42)}
+                className="w-full bg-white border border-[#E4E1D2] rounded-xl px-2.5 py-1.5 font-mono focus:outline-none focus:border-gold" />
+            </div>
+          </div>
+        )}
 
         {/* Presets */}
         <div className="mb-5">

@@ -1,0 +1,4 @@
+[
+  { "warehouse_id": "EX-W1", "latitude": 17.450817, "longitude": 78.494203, "capacity": 800, "radius_km": 25.0, "infra_cost": 1500.0 },
+  { "warehouse_id": "EX-W2", "latitude": 17.312613, "longitude": 78.475782, "capacity": 1200, "radius_km": 25.0, "infra_cost": 1750.0 }
+]

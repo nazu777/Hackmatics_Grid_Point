@@ -1,6 +1,6 @@
 # GridPoint: Development Phases & Sprint Plan
 
-> Source: user-provided 14-item backlog (Sept 2026), recorded verbatim in §0. No feature code is built in this change — this file only divides the work into concurrently-executable phases.
+> Source: user-provided 14-item backlog (Sept 2026), recorded verbatim in §0. Phases A, D, E are SHIPPED (Sept 20 2026: onboarding trio, per-order cost truth + elbow, expansion policy with abandon/sell). Phases B, C, F remain planned.
 > Pipeline still holds: `Neighborhood Data` → `Location Visualization` → `Warehouse Optimization` → `Neighborhood Assignment` → `Delivery Cost Comparison`, plus new Overview + Realtime Automation layers.
 
 ---
@@ -40,7 +40,7 @@ To keep overlap minimal, every phase builds against these frozen contracts and M
 
 ---
 
-## Phase A — Onboarding Trio & Data Foundation (items #4, #6, #8)
+## Phase A — Onboarding Trio & Data Foundation (items #4, #6, #8) ✅ SHIPPED Sept 20 2026
 
 **Goal**: a brand-new account starts EMPTY and the user enters all three inputs — order neighborhoods, owned vehicles, existing warehouses — each with a synthetic demo seeder.
 **Owns**: `schema.md` §2.1/§2.2/§2.3 + §2.8 seeds, `prd.md` §5.1, onboarding/empty-state UI, `POST /api/upload`, `GET /api/synthetic`, vehicle + warehouse CRUD endpoints (planned), per-user namespaced storage.
@@ -83,7 +83,7 @@ To keep overlap minimal, every phase builds against these frozen contracts and M
 - **Acceptance**: same dataset optimizes differently under congested vs free-flow corridors; reroute improves time and/or cost; no slider required in the engine path.
 - **Trace**: #5, #9, #12 (engine).
 
-## Phase D — Cost Truth & Comparison (items #7, #10)
+## Phase D — Cost Truth & Comparison (items #7, #10) ✅ SHIPPED Sept 20 2026
 
 **Goal**: every order priced on road distance + live fuel; node-level and overall optimized-vs-baseline comparison; the three empty fields populated; infra-vs-delivery tradeoff made unmissable.
 **Owns**: `cost.py`, `fuel.py`, `ComparisonDashboard.tsx`, tradeoff chart, `POST /api/export/metrics|assignments`, `Metrics`/`Comparison` contracts.
@@ -97,7 +97,7 @@ To keep overlap minimal, every phase builds against these frozen contracts and M
 - **Acceptance**: every assignment row shows road km + fuel + cost; baseline-vs-optimized deltas reconcile to the map lines; the three named fields always show a value or an explained `—`.
 - **Trace**: #7, #10.
 
-## Phase E — Expansion & Scale Advisor (item #11 + infra-vs-fuel dynamics)
+## Phase E — Expansion & Scale Advisor (item #11 + infra-vs-fuel dynamics) ✅ SHIPPED Sept 20 2026
 
 **Goal**: cost-effective scaling advice over the user's REAL current state, with keep vs abandon/demolish/change infra and keep vs sell vehicles as first-class choices, plus a revenue-aware recommendation.
 **Owns**: `expansion.py`, `POST /api/expand`, `WarehouseExpansion.tsx`, `ScenariosPanel.tsx` tradeoff/diagnostics sections, expansion policy schema.
@@ -163,18 +163,17 @@ Rule: phases share ONLY the §1 interfaces. Map (B), engine (C), costs (D), expa
 
 ---
 
-## Appendix B: File Structure (target, docs-only plan — NOT yet built)
+## Appendix B: File Structure (A/D/E shipped Sept 20 2026; B/C/F planned)
 
 ```
 Hackmatics_Grid_Point/
-├── backend/src/            # + planned: simulation orchestrator; expansion policy; {frm|from} tolerance
-├── backend/tests/          # + planned: onboarding seeds, heatmap/focus contracts, traffic-aware routing,
-│                           #   per-order fuel costing, expansion policy, simulation spillover tests
-├── frontend/src/           # + planned: vehicle + warehouse onboarding, warehouse focus card, heatmap +
-│                           #   traffic layers, optimize-on-traffic toggle, per-node comparison tables,
-│                           #   tradeoff view, expansion advisor, automated ETA/surge panels, Overview tab
-├── api/                    # unchanged shape (make sync-api still applies)
-├── data/samples/           # + planned: vehicle + warehouse sample/seed files
+├── backend/src/            # SHIPPED A/D/E: validation + ingestion + synthetic for vehicles/warehouses, per-order cost truth, expansion policy; planned: simulation orchestrator; {frm|from} tolerance
+├── backend/tests/          # SHIPPED: onboarding seeds, per-order fuel costing, expansion policy tests (130 tests); + planned: heatmap/focus contracts, traffic-aware routing, simulation spillover tests
+├── frontend/src/           # SHIPPED A/D/E: vehicle + warehouse onboarding, per-node comparison tables,
+│                           #   tradeoff view, expansion advisor; + planned B/C/F: warehouse focus card, heatmap +
+│                           #   traffic layers, optimize-on-traffic toggle, automated ETA/surge panels, Overview tab
+├── api/                    # unchanged shape (make sync-api still applies; 32 routes as of Sept 20 2026)
+├── data/samples/           # SHIPPED: vehicle + warehouse sample/seed files (11 files); + planned: none
 ├── docs/                   # problem_statement (frozen), prd, schema, phases (this plan), demo_script, prompt
 └── README.md / AGENTS.md
 ```

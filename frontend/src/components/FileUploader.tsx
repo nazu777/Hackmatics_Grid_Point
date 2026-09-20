@@ -1,26 +1,39 @@
 import React, { useState, useRef } from 'react';
-import { UploadCloud, AlertCircle, Sparkles, FileSpreadsheet, Flag } from 'lucide-react';
-import { uploadFile } from '../services/api';
-import { Neighborhood, ValidationResult, DatasetSummary } from '../types';
+import { UploadCloud, AlertCircle, Sparkles, FileSpreadsheet, Flag, Truck, Warehouse } from 'lucide-react';
+import { uploadFile, uploadDatasetFile, OnboardingDataset } from '../services/api';
+import { Neighborhood, ValidationResult, DatasetSummary, VehicleType, Warehouse as WarehouseType } from '../types';
 
 interface FileUploaderProps {
   onDataLoaded: (neighborhoods: Neighborhood[], validation: ValidationResult, summary: DatasetSummary) => void;
   onOpenSyntheticModal: () => void;
   onOpenCensusModal?: () => void;
+  /** Phase A onboarding trio: optional fleet + site callbacks reuse the same dropzone. */
+  onVehiclesLoaded?: (vehicles: VehicleType[], validation: ValidationResult, summary: any) => void;
+  onWarehousesLoaded?: (warehouses: WarehouseType[], validation: ValidationResult, summary: any) => void;
 }
 
-export const FileUploader: React.FC<FileUploaderProps> = ({ onDataLoaded, onOpenSyntheticModal, onOpenCensusModal }) => {
+export const FileUploader: React.FC<FileUploaderProps> = ({ onDataLoaded, onOpenSyntheticModal, onOpenCensusModal, onVehiclesLoaded, onWarehousesLoaded }) => {
   const [isDragging, setIsDragging] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
+  const [dataset, setDataset] = useState<OnboardingDataset>('neighborhoods');
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleFiles = async (file: File) => {
     setUploading(true);
     setUploadError(null);
     try {
-      const result = await uploadFile(file);
-      onDataLoaded(result.neighborhoods, result.validation, result.summary);
+      if (dataset === 'neighborhoods') {
+        const result = await uploadFile(file);
+        onDataLoaded(result.neighborhoods, result.validation, result.summary);
+      } else {
+        const result = await uploadDatasetFile(file, dataset);
+        if (dataset === 'vehicles' && onVehiclesLoaded) {
+          onVehiclesLoaded(result.vehicles || [], result.validation, result.summary);
+        } else if (dataset === 'warehouses' && onWarehousesLoaded) {
+          onWarehousesLoaded(result.warehouses || [], result.validation, result.summary);
+        }
+      }
     } catch (err: any) {
       setUploadError(err.message || 'Error processing file');
     } finally {
@@ -42,11 +55,30 @@ export const FileUploader: React.FC<FileUploaderProps> = ({ onDataLoaded, onOpen
         <div>
           <h2 className="text-[15px] font-bold text-ink flex items-center gap-2">
             <UploadCloud className="w-5 h-5 text-ink" />
-            Demand Data
+            Onboarding Data Trio
           </h2>
           <p className="text-xs text-ink-faint">
-            Upload CSV/JSON with auto-detected headers, or generate synthetic clusters
+            Orders → vehicles → warehouses. Pick a dataset, then upload CSV/JSON or seed demo data.
           </p>
+          <div className="flex items-center gap-1.5 mt-2">
+            {(
+              [
+                { id: 'neighborhoods', label: 'Orders', icon: UploadCloud },
+                { id: 'vehicles', label: 'Vehicles', icon: Truck },
+                { id: 'warehouses', label: 'Warehouses', icon: Warehouse }
+              ] as { id: OnboardingDataset; label: string; icon: React.ElementType }[]
+            ).map((t) => {
+              const Icon = t.icon;
+              const active = dataset === t.id;
+              return (
+                <button key={t.id} onClick={() => setDataset(t.id)}
+                  className={`flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-semibold border transition cursor-pointer ${active ? 'bg-[#14424E] text-white border-[#14424E]' : 'bg-white text-ink-soft border-[#E4E1D2] hover:bg-cream-deep'}`}>
+                  <Icon className="w-3.5 h-3.5" />
+                  <span>{t.label}</span>
+                </button>
+              );
+            })}
+          </div>
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
@@ -101,10 +133,25 @@ export const FileUploader: React.FC<FileUploaderProps> = ({ onDataLoaded, onOpen
           {uploading ? "Parsing & validating dataset..." : "Drop CSV or JSON here, or click to browse"}
         </h4>
         <p className="text-xs text-ink-faint max-w-md mx-auto">
-          Automatic header mapping for: <code className="bg-cream-deep px-1 py-0.5 rounded text-ink-soft">neighborhood_id</code>,{' '}
-          <code className="bg-cream-deep px-1 py-0.5 rounded text-ink-soft">latitude</code>,{' '}
-          <code className="bg-cream-deep px-1 py-0.5 rounded text-ink-soft">longitude</code>,{' '}
-          <code className="bg-cream-deep px-1 py-0.5 rounded text-ink-soft">daily_orders</code>
+          {dataset === 'neighborhoods' && (
+            <span>Automatic header mapping for: <code className="bg-cream-deep px-1 py-0.5 rounded text-ink-soft">neighborhood_id</code>,{' '}
+            <code className="bg-cream-deep px-1 py-0.5 rounded text-ink-soft">latitude</code>,{' '}
+            <code className="bg-cream-deep px-1 py-0.5 rounded text-ink-soft">longitude</code>,{' '}
+            <code className="bg-cream-deep px-1 py-0.5 rounded text-ink-soft">daily_orders</code>{' '}
+            (aliases: <code className="bg-cream-deep px-1 py-0.5 rounded text-ink-soft">id/lat/lng/orders</code>)</span>
+          )}
+          {dataset === 'vehicles' && (
+            <span>Fleet headers: <code className="bg-cream-deep px-1 py-0.5 rounded text-ink-soft">vehicle_type</code>,{' '}
+            <code className="bg-cream-deep px-1 py-0.5 rounded text-ink-soft">capacity</code>,{' '}
+            <code className="bg-cream-deep px-1 py-0.5 rounded text-ink-soft">cost_per_km</code>,{' '}
+            <code className="bg-cream-deep px-1 py-0.5 rounded text-ink-soft">fuel_type</code></span>
+          )}
+          {dataset === 'warehouses' && (
+            <span>Site headers: <code className="bg-cream-deep px-1 py-0.5 rounded text-ink-soft">warehouse_id</code>,{' '}
+            <code className="bg-cream-deep px-1 py-0.5 rounded text-ink-soft">latitude</code>,{' '}
+            <code className="bg-cream-deep px-1 py-0.5 rounded text-ink-soft">longitude</code>,{' '}
+            <code className="bg-cream-deep px-1 py-0.5 rounded text-ink-soft">capacity/radius_km/infra_cost</code></span>
+          )}
         </p>
 
         {uploadError && (

@@ -1,4 +1,4 @@
-import type { Neighborhood, OptimizationConfig, OptimizationResult } from '../types';
+import type { Neighborhood, OptimizationConfig, OptimizationResult, VehicleType, Warehouse } from '../types';
 
 /**
  * Suggest a feasible per-warehouse capacity for a dataset: 1.5× fair share,
@@ -94,6 +94,82 @@ export function setStoreUser(userId: string | null) {
 
 function nsKey(key: string): string {
   return storeUserId ? `${key}_${storeUserId}` : key;
+}
+
+// --------------------------------------------------------------------------
+// Phase A — Onboarding Trio per-user persistence (fresh account = 0/0/0).
+// Keys follow the gridpoint_*_<uid> convention; accounts start EMPTY and
+// the checklist (orders → vehicles → warehouses → optimize) drives entry.
+// --------------------------------------------------------------------------
+
+const NEIGHBORHOODS_KEY = 'gridpoint_neighborhoods';
+const VEHICLES_KEY = 'gridpoint_vehicles';
+const WAREHOUSES_KEY = 'gridpoint_warehouses';
+
+export function getStoredNeighborhoods(): Neighborhood[] {
+  return read<Neighborhood>(NEIGHBORHOODS_KEY);
+}
+
+export function setStoredNeighborhoods(rows: Neighborhood[]) {
+  write(NEIGHBORHOODS_KEY, rows);
+}
+
+export function getStoredVehicles(): VehicleType[] {
+  return read<VehicleType>(VEHICLES_KEY);
+}
+
+export function setStoredVehicles(rows: VehicleType[]) {
+  write(VEHICLES_KEY, rows);
+}
+
+export function getStoredWarehouses(): Warehouse[] {
+  return read<Warehouse>(WAREHOUSES_KEY);
+}
+
+export function setStoredWarehouses(rows: Warehouse[]) {
+  write(WAREHOUSES_KEY, rows);
+}
+
+export interface OnboardingStatus {
+  orderCount: number;
+  vehicleCount: number;
+  warehouseCount: number;
+  hasOrders: boolean;
+  hasVehicles: boolean;
+  hasWarehouses: boolean;
+  readyToOptimize: boolean;
+  nextStep: 'orders' | 'vehicles' | 'warehouses' | 'optimize';
+}
+
+/** 0/0/0 checklist state for a fresh account (Phase A acceptance). */
+export function getOnboardingStatus(): OnboardingStatus {
+  const orderCount = getStoredNeighborhoods().length;
+  const vehicleCount = getStoredVehicles().length;
+  const warehouseCount = getStoredWarehouses().length;
+  const hasOrders = orderCount > 0;
+  const hasVehicles = vehicleCount > 0;
+  const hasWarehouses = warehouseCount > 0;
+  const nextStep = !hasOrders ? 'orders' : !hasVehicles ? 'vehicles' : !hasWarehouses ? 'warehouses' : 'optimize';
+  return {
+    orderCount, vehicleCount, warehouseCount,
+    hasOrders, hasVehicles, hasWarehouses,
+    readyToOptimize: hasOrders,
+    nextStep
+  };
+}
+
+/** Existing warehouses double as the D-baseline custom set for P1-B/D. */
+export function storedWarehousesAsBaseline(): { warehouse_id: string; latitude: number; longitude: number; capacity?: number | null; radius_km?: number | null; infra_cost?: number }[] {
+  return getStoredWarehouses()
+    .filter((w) => Number.isFinite(Number(w.latitude)) && Number.isFinite(Number(w.longitude)))
+    .map((w) => ({
+      warehouse_id: w.warehouse_id,
+      latitude: Number(w.latitude),
+      longitude: Number(w.longitude),
+      capacity: w.capacity ?? null,
+      radius_km: w.radius_km ?? null,
+      infra_cost: w.infra_cost ?? 0
+    }));
 }
 
 /** Baseline-vs-optimized metrics table CSV (Phase 4 comparison). */

@@ -20,7 +20,7 @@ Neighborhood Data → Location Visualization → Warehouse Optimization
 Bonus + Polish (shipped) + Overview (PLANNED, docs-only — see below)
 ```
 
-> **Docs-vs-code status (Sept 2026, read first):** `docs/phases.md` was REPLACED by a docs-only concurrent plan — **Phases A–F** covering user backlog #1–#14 (`phases.md` §0). **No feature code was built for A–F.** Shipped reality is still: onboarding = neighborhoods only (vehicles + existing-warehouse CRUD are planned), no warehouse click-to-focus, no coverage heatmap, no Overview tab, Fleet ETA / demand-surge are slider-driven (live-feed automation is planned), expansion has no abandon/sell/revenue policy. `docs/prd.md` §§5.9–5.11, `docs/schema.md` §§2.8–2.10 + new config fields, and `docs/demo_script.md` carry the matching planned spec. `docs/problem_statement.md` requirements are frozen — its addendum is a pointer only.
+> **Docs-vs-code status (Sept 20 2026, read first):** `docs/phases.md` concurrent plan **Phases A–F** covering user backlog #1–#14 (`phases.md` §0). **Phases A, D, E are SHIPPED** (onboarding trio with vehicle/warehouse CRUD + seeders, per-order road+fuel cost truth + populated Fuel/Congestion/Feasibility fields + elbow, expansion policy with abandon/sell/revenue). **Phases B, C, F remain planned:** no warehouse click-to-focus, no coverage heatmap, Fleet ETA / demand-surge still slider-driven, no Overview tab. `docs/prd.md` §§5.10–5.11, `docs/schema.md` §2.9 + traffic/simulation config fields, and `docs/demo_script.md` B/C/F beats carry the remaining planned spec. `docs/problem_statement.md` requirements are frozen — its addendum is a pointer only.
 
 Live prod URL (if deployed): `https://hackmatics-grid-point.vercel.app` (`README.md:7`). Auth store is in-memory (Neon `users` table = documented TODO in `backend/src/auth.py`); `DATABASE_URL`/`NEON_*` are env-plumbed via `.env.example:3`.
 
@@ -30,9 +30,9 @@ Live prod URL (if deployed): `https://hackmatics-grid-point.vercel.app` (`README
 Hackmatics_Grid_Point/
 ├── docs/
 │   ├── problem_statement.md  # 9 core req + 8 bonus (FROZEN) + Sept-2026 backlog pointer addendum
-│   ├── prd.md                # PRD §5.1-5.11 (§§5.9-5.11 = PLANNED: expansion advisor, realtime automation, Overview tab)
-│   ├── schema.md             # SINGLE SOURCE OF TRUTH for entities, validation, API contracts (§§2.9-2.10 = PLANNED: Overview aggregate, ExpansionRecommendation)
-│   ├── phases.md             # ⚠️ REPLACED Sept 2026: docs-only concurrent plan Phases A–F for backlog #1–#14 (NOT built); Appendix A = traceability matrix
+│   ├── prd.md                # PRD §5.1-5.11 (§§5.10-5.11 = PLANNED: realtime automation, Overview tab; §5.9 expansion advisor SHIPPED Sept 20 2026)
+│   ├── schema.md             # SINGLE SOURCE OF TRUTH for entities, validation, API contracts (§2.9 Overview aggregate = PLANNED; §2.10 ExpansionRecommendation SHIPPED)
+│   ├── phases.md             # ⚠️ Sept 2026 concurrent plan Phases A–F for backlog #1–#14 (A/D/E SHIPPED, B/C/F planned); Appendix A = traceability matrix
 │   └── prompt.md             # Phase 1 implementation prompt (archival) + backlog pointer
 ├── backend/                  # Python 3.10+ FastAPI shared core
 │   ├── src/                  # 17 modules (mirror into api/src/ via `make sync-api`)
@@ -99,7 +99,7 @@ Aliases on ingest (`backend/src/data_ingestion.py`): `id→neighborhood_id`, `la
 
 ### OptimizationConfig
 `K: 1-10 (default 2), distance_metric: haversine|euclidean|manhattan|road (default haversine), capacity_enabled, C_max, radius_enabled, R_max_km, cost_per_km (1.0), fuel_cost_per_km, infra_cost_per_warehouse, traffic_factor, use_live_fuel, fuel_state (Karnataka), fuel_city, use_live_traffic, traffic_hour, vehicle_fleet[], random_seed (42), baseline_mode, custom_baseline_warehouses` (`docs/schema.md:82`, `backend/src/schema.py:47`)
-> PLANNED (in `docs/schema.md` + `phases.md` §1, NOT in code): `use_live_traffic_for_routing`, `traffic_aware_reroute`, `simulation_mode: off|realtime`, `expansion_policy {allow_abandon_infra, allow_sell_vehicles, horizon_months, revenue_per_order}`. Do NOT reference these as implemented.
+> PARTIALLY SHIPPED Sept 20 2026: `expansion_policy` is SHIPPED (`POST /api/expand` accepts policy + owned_vehicles). Still PLANNED (NOT in code): `use_live_traffic_for_routing`, `traffic_aware_reroute`, `simulation_mode: off|realtime`. Do NOT reference those as implemented.
 
 ### Assignment / Metrics / Comparison
 See `docs/schema.md:101` — `distance_km (km), weighted_distance=w_i*d, cost, fuel_cost, congestion_pct, travel_time_min (road), within_radius, is_feasible`. Metrics: `total_unweighted_distance_km=Σd_i`, `total_weighted_distance=Σw_i*d_i`, `total_cost=Σw_i*d_i*cost_per_km+Σinfra`, `total_fuel_cost`, `fuel_live`, `avg_congestion_pct`, `avg_distance_per_order`, `feasibility_ratio` (`docs/schema.md:130`, `backend/src/schema.py:130`). `OptimizationResult` also carries `fuel_note/traffic_note/routing_note`.
@@ -120,7 +120,7 @@ Error shape: `{"row":3,"field":"latitude","value":120.5,"error":"...","code":"OU
 
 Client fallback `frontend/src/services/api.ts:88 localValidate()` must stay in sync with `backend/src/validation.py`.
 
-## 5. API Contracts (`docs/schema.md:244`, `backend/src/api.py` — 26 routes)
+## 5. API Contracts (`docs/schema.md:244`, `backend/src/api.py` — 32 routes)
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
@@ -128,11 +128,11 @@ Client fallback `frontend/src/services/api.ts:88 localValidate()` must stay in s
 | `/api/validate` | POST `{neighborhoods:[]}` | `ValidationResult` |
 | `/api/config/validate` | POST `{config, neighborhoods}` | Config-vs-data feasibility check |
 | `/api/optimize` | POST `{neighborhoods: Neighborhood[], config?: OptimizationConfig}` | `OptimizationResult` — Weiszfeld/K-Means or PuLP MILP (+ road mode), returns `{warehouses, assignments, metrics, comparison, is_feasible, fuel_note/traffic_note/routing_note}` |
-| `/api/expand` | POST | Incremental expansion without moving existing sites |
+| `/api/expand` | POST | Incremental expansion + SHIPPED policy recommendation (allow_abandon/sell, horizon, revenue) |
 | `/api/synthetic?N=&lat_center=&lon_center=&spread_km=&distribution=&num_clusters=&orders_min=&orders_max=&seed=` | GET | `Neighborhood[]` |
 | `/api/census/cities` | GET | Supported Census city presets |
 | `/api/census/demand?city=&orders_per_1000=` | GET | Real ACS tract demand → `Neighborhood[]` |
-| `/api/upload` | POST multipart `file` | `{filename, validation, neighborhoods, summary}` — auto CSV/JSON detection |
+| `/api/upload` | POST multipart `file` (`?dataset=neighborhoods\|vehicles\|warehouses`) | SHIPPED trio ingest + `POST /api/vehicles/validate, POST /api/warehouses/validate, GET /api/synthetic/vehicles\|warehouses, POST /api/export/vehicles\|warehouses` |
 | `/api/export/csv` | POST `{neighborhoods}` | CSV text |
 | `/api/export/json` | POST `{neighborhoods}` | JSON text |
 | `/api/export/metrics` | POST | Metrics table export |
@@ -194,18 +194,19 @@ vercel ls / vercel project ls   # verify
 ```
 `frontend/vercel.json` does not exist — only the root `vercel.json` is used. There is no standalone frontend deploy config in the repo.
 
-## 8. Implementation Status vs Planned Phases (SYNCED Sept 2026)
+## 8. Implementation Status vs Planned Phases (SYNCED Sept 20 2026)
 
 **Shipped (do not regress):**
-- **Ingestion ✅** — neighborhoods only (CSV/JSON upload, manual table, synthetic + Census ACS + opt-in Hyderabad sample, per-account EMPTY storage, JWT-gated). Vehicles + existing-warehouse CRUD/seeders are PLANNED (`phases.md` Phase A).
+- **Ingestion ✅ (Phase A SHIPPED)** — neighborhoods + owned vehicles + existing warehouses (CSV/JSON upload with `?dataset=`, manual tables, synthetic + Census ACS + opt-in Hyderabad sample, per-account EMPTY 0/0/0 + checklist, JWT-gated). Seeds: `data/samples/vehicles_seed.*, warehouses_seed.*` + `GET /api/synthetic/vehicles|warehouses` (seed=42).
 - **Map ✅** — Mapbox GL (Standard/Light/Dark), bubbles ∝√orders, displacement/road lines, R_max circles + road isochrones, layer chips, Gmaps rail (`ask/saved/optimize/compare/data/lab/export/settings/help`). Click-to-focus, coverage heatmap, traffic overlay are PLANNED (Phase B).
-- **Optimization ✅** — Haversine/Euclidean/Manhattan + road mode, Weiszfeld K=1, weighted K-Means K>1, PuLP MILP CFLP, road-aware assignment, incremental expansion (`POST /api/expand`). Optimize-on-current-traffic + `traffic_aware_reroute` are PLANNED (Phase C).
-- **Cost/compare ✅** — traffic/fleet/live-fuel cost engine, baseline-vs-optimized dashboard, fuel-reduction graph, CSV exports. Per-order road+fuel truth, populated Fuel-portion/Avg-congestion/Feasibility fields, annotated infra-vs-delivery elbow are PLANNED hardening (Phase D).
-- **Scenarios ✅ (slider-driven)** — elbow trade-off, demand-shift slider, fleet ETA sliders, diagnostics + Fuel/Traffic cards. Live-feed automation + congestion spillover + keep/abandon/sell expansion policy + Overview tab are PLANNED (Phases E–F).
+- **Optimization ✅** — Haversine/Euclidean/Manhattan + road mode, Weiszfeld K=1, weighted K-Means K>1, PuLP MILP CFLP, road-aware assignment, incremental expansion (`POST /api/expand` + policy recommendation). Optimize-on-current-traffic + `traffic_aware_reroute` are PLANNED (Phase C).
+- **Cost/compare ✅ (Phase D SHIPPED)** — per-order road+fuel truth (`per_order_breakdown`, `assignment_table_rows`), baseline-vs-optimized dashboard with per-node avg cost/order, populated Fuel-portion/Avg-congestion/Feasibility fields, annotated infra-vs-delivery elbow (`TradeoffElbow.tsx`), CSV exports with fuel columns.
+- **Expansion ✅ (Phase E SHIPPED)** — keep-vs-abandon/demolish + keep-vs-sell policy (`expansion_policy`, `horizon_months`, `revenue_per_order`), ranked NPV recommendation with costed rationale + before/after map.
+- **Scenarios (slider-driven)** — elbow trade-off, demand-shift slider, fleet ETA sliders, diagnostics + Fuel/Traffic cards. Live-feed automation + congestion spillover + Overview tab are PLANNED (Phase F).
 
-**Planned docs-only Phases A–F (`docs/phases.md`, minimal-overlap concurrency):** A Onboarding Trio (#4, #6, #8) · B Map UX (#1–#3, #5-display) · C Traffic-aware routing (#5-opt, #9, #12-engine) · D Cost truth (#7, #10) · E Expansion advisor (#11) · F Realtime automation + Overview (#12-UI, #13, #14). Shared frozen interfaces in `phases.md` §1; traceability in Appendix A.
+**Remaining planned (B/C/F):** B Map UX (#1–#3, #5-display) · C Traffic-aware routing (#5-opt, #9, #12-engine) · F Realtime automation + Overview (#12-UI, #13, #14). Shared frozen interfaces in `phases.md` §1; traceability in Appendix A.
 
-Next (code): fix the routes `{frm|from}` contract bug → vehicle + existing-warehouse onboarding → traffic-aware routing → per-order cost hardening → expansion policy → realtime loop + Overview tab. Plus standing items: Neon-backed `users` table, production secrets via `vercel env add … production`, demo video refresh (see `docs/demo_script.md`).
+Next (code): fix the routes `{frm|from}` contract bug → traffic-aware routing → realtime loop + Overview tab. Plus standing items: Neon-backed `users` table, production secrets via `vercel env add … production`, demo video refresh (see `docs/demo_script.md`).
 
 Traceability: `docs/phases.md` Appendix A + `docs/prd.md` §4.
 
@@ -218,8 +219,8 @@ Traceability: `docs/phases.md` Appendix A + `docs/prd.md` §4.
 - **File naming**: keep `backend/src/*.py`, `frontend/src/components/*.tsx` pattern; follow `docs/phases.md` Appendix B. Never hand-edit `api/src/*` — run `make sync-api`.
 - **No magic strings**: reuse schema field names; use `backend/src/schema.py` as import source.
 - **Perf**: N=1000 <5s optimize, map <2s. Road mode is provider-bound: batch ≤12-pair chunks with progressive rendering.
-- **Testing**: add pytest for new logic under `backend/tests/`, keep `make test` green (115 tests) before commit.
-- **Docs**: update `README.md` Architecture tree if adding modules; `docs/*.md` may be edited to stay in sync (`problem_statement.md` requirements are frozen — its addendum is a pointer only; `phases.md` A–F is docs-only until built — don't claim A–F items as shipped).
+- **Testing**: add pytest for new logic under `backend/tests/`, keep `make test` green (130 tests) before commit.
+- **Docs**: update `README.md` Architecture tree if adding modules; `docs/*.md` may be edited to stay in sync (`problem_statement.md` requirements are frozen — its addendum is a pointer only; `phases.md` B/C/F remain planned — don't claim them as shipped).
 - **Frontend**: Mapbox token required (`frontend/.env.local` → `VITE_MAPBOX_TOKEN`); accounts start EMPTY — never auto-load sample data; keep per-user `localStorage` namespacing (`gridpoint_*_<uid>`); keep offline fallbacks in `services/api.ts` in sync with backend.
 - **Git**: `git@github.com:nazu777/Hackmatics_Grid_Point.git` — remote uses `https://` locally (SSH publickey denied); `main` branch.
 
@@ -235,7 +236,7 @@ Traceability: `docs/phases.md` Appendix A + `docs/prd.md` §4.
 
 ## 11. Quick Agent Checklist (Before PR)
 
-1. `make test` passes (115 tests: `test_optimization.py` covers Weiszfeld/K-Means/MILP, plus routing/fuel/traffic/census/auth) + `pnpm --prefix frontend build` succeeds ?
+1. `make test` passes (130 tests: `test_optimization.py` covers Weiszfeld/K-Means/MILP, plus routing/fuel/traffic/census/auth + onboarding/cost-truth/expansion-policy) + `pnpm --prefix frontend build` succeeds ?
 2. Schemas still match `docs/schema.md` (field names, ranges, alias mapping)? Check `backend/src/schema.py:121 WarehouseMetric`, `130 Metrics`, `168 OptimizationResult`.
 3. `api/index.py` still a 23-line adapter and `api/src/` matches `backend/src/` (`make sync-api` run)? Check `backend/src/api.py` optimize + expand routes.
 4. `vercel.json` rewrites preserve `/api/*` before SPA catch-all? Test `curl /api/health` + `/api/optimize`.

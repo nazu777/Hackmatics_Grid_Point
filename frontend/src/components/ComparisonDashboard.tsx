@@ -2,6 +2,7 @@ import React, { useMemo } from 'react';
 import { Download, TrendingDown, DollarSign, Route } from 'lucide-react';
 import { Neighborhood, OptimizationResult, ZoneColorMap } from '../types';
 import { WarehouseExpansion } from './WarehouseExpansion';
+import { TradeoffElbow } from './TradeoffElbow';
 
 interface Props {
   result: OptimizationResult;
@@ -10,30 +11,79 @@ interface Props {
   zoneColors?: ZoneColorMap;
   /** Called with the final layout after user confirms — parent applies it to the main map. */
   onApply?: (result: OptimizationResult) => void;
+  /** Called when the elbow view recommends a K — parent re-optimizes. */
+  onSelectK?: (k: number) => void;
 }
 
-export const ComparisonDashboard: React.FC<Props> = ({ result, neighborhoods, zoneColors = {}, onApply }) => {
+/** Render a metric value, or an explained em-dash when genuinely absent (never blank). */
+function metricCell(value: number | null | undefined, format: (v: number) => React.ReactNode, absentTip: string): React.ReactNode {
+  if (value === null || value === undefined || (typeof value === 'number' && isNaN(value))) {
+    return (
+      <span title={absentTip} className="cursor-help text-ink-faint">
+        — <span className="text-[9px] align-super">?</span>
+      </span>
+    );
+  }
+  return format(value);
+}
+
+export const ComparisonDashboard: React.FC<Props> = ({ result, neighborhoods, zoneColors = {}, onApply, onSelectK }) => {
   const comp = result.comparison;
+  const totalOrders = useMemo(
+    () => (neighborhoods ?? []).reduce((s, n) => s + (Number(n.daily_orders) || 0), 0),
+    [neighborhoods]
+  );
+  const avgCostPerOrder = (total: number) => (totalOrders > 0 ? total / totalOrders : 0);
   const rows = useMemo(() => {
     if (!comp) return [];
     const b = comp.baseline.metrics;
     const o = comp.optimized.metrics;
-    const defs: [string, number, number][] = [
+    const defs: [string, number | null | undefined, number | null | undefined, string?][] = [
       ['Total unweighted distance (km)', b.total_unweighted_distance_km, o.total_unweighted_distance_km],
       ['Total weighted distance (km·orders)', b.total_weighted_distance_km_orders, o.total_weighted_distance_km_orders],
       ['Total delivery cost ($)', b.total_cost, o.total_cost],
-      ['Fuel cost portion ($)', b.total_fuel_cost ?? 0, o.total_fuel_cost ?? 0],
-      ['Avg corridor congestion', b.avg_congestion_pct ?? 0, o.avg_congestion_pct ?? 0],
+      ['Fuel cost portion ($)', b.total_fuel_cost, o.total_fuel_cost, 'No fuel data for this layout (rates unreachable and no manual surcharge set)'],
+      ['Avg corridor congestion', b.avg_congestion_pct, o.avg_congestion_pct, 'No corridor congestion observed (traffic off, no history yet)'],
       ['Avg distance / order (km)', b.avg_distance_per_order_km, o.avg_distance_per_order_km],
       ['Avg weighted distance (km)', b.avg_weighted_distance_km, o.avg_weighted_distance_km],
-      ['Feasibility ratio', b.feasibility_ratio, o.feasibility_ratio]
+      ['Avg cost / order ($)', totalOrders > 0 ? b.total_cost / totalOrders : null, totalOrders > 0 ? o.total_cost / totalOrders : null, 'No order volume to average over'],
+      ['Feasibility ratio', b.feasibility_ratio, o.feasibility_ratio, 'Feasibility unknown (no assignments evaluated)']
     ];
-    return defs.map(([label, baseline, optimized]) => ({
-      label, baseline, optimized,
-      saved: +(baseline - optimized).toFixed(2),
-      pct: baseline ? +(((baseline - optimized) / baseline) * 100).toFixed(2) : 0
+    return defs.map(([label, baseline, optimized, absentTip]) => ({
+      label,
+      baseline,
+      optimized,
+      absentTip: absentTip || 'Not reported for this layout',
+      saved: baseline != null && optimized != null ? +(baseline - optimized).toFixed(2) : null,
+      pct: baseline ? +(((baseline - (optimized ?? 0)) / baseline) * 100).toFixed(2) : 0
     }));
-  }, [comp]);
+  }, [comp, totalOrders]);
+
+  /** Per-node optimized-vs-older-way truth table (Phase D #7): every row shows road km + fuel + cost. */
+  const nodeRows = useMemo(() => {
+    if (!comp) return [];
+    const baseById = new Map(comp.baseline.assignments.map((a) => [a.neighborhood_id, a]));
+    const ordersById = new Map((neighborhoods ?? []).map((n) => [n.neighborhood_id, Number(n.daily_orders) || 0]));
+    return comp.optimized.assignments.map((a) => {
+      const b = baseById.get(a.neighborhood_id);
+      const w = ordersById.get(a.neighborhood_id) ?? (a.distance_km > 0 ? Math.round(a.weighted_distance / a.distance_km) : 0);
+      const avg = (c: number) => (w > 0 ? c / w : c);
+      return {
+        id: a.neighborhood_id,
+        warehouse: a.warehouse_id,
+        orders: w,
+        bDist: b?.distance_km ?? null,
+        bFuel: b?.fuel_cost ?? null,
+        bCost: b?.cost ?? null,
+        bAvg: b ? avg(b.cost) : null,
+        oDist: a.distance_km,
+        oFuel: a.fuel_cost ?? 0,
+        oCost: a.cost,
+        oAvg: avg(a.cost),
+        saved: b ? b.cost - a.cost : null,
+      };
+    });
+  }, [comp, neighborhoods]);
 
   const hist = useMemo(() => {
     const vals = result.assignments.map((a) => a.distance_km);
@@ -63,23 +113,57 @@ export const ComparisonDashboard: React.FC<Props> = ({ result, neighborhoods, zo
     URL.revokeObjectURL(url);
   };
 
-  const exportMetrics = () => {
+  const API_BASE = (import.meta.env.VITE_API_URL as string) || '/api';
+
+  const localMetricsCsv = () => {
     const lines = ['metric,baseline,optimized,saved,pct_saved'];
-    rows.forEach((r) => lines.push(`"${r.label}",${r.baseline},${r.optimized},${r.saved},${r.pct}`));
+    rows.forEach((r) => lines.push(`"${r.label}",${r.baseline ?? ''},${r.optimized ?? ''},${r.saved ?? ''},${r.pct}`));
     lines.push('');
     lines.push('warehouse_id,assigned_orders,utilization_pct,avg_distance_km,neighborhood_count');
     result.metrics.warehouses.forEach((w) =>
       lines.push(`${w.warehouse_id},${w.assigned_orders},${w.utilization_pct},${w.avg_distance_km},${w.neighborhood_count}`)
     );
-    download('gridpoint_metrics_comparison.csv', lines.join('\n'));
+    return lines.join('\n');
   };
 
-  const exportAssignments = () => {
-    const lines = ['neighborhood_id,warehouse_id,distance_km,weighted_distance,cost,fuel_cost,within_radius,is_feasible'];
-    result.assignments.forEach((a) =>
-      lines.push(`${a.neighborhood_id},${a.warehouse_id},${a.distance_km},${a.weighted_distance},${a.cost},${a.fuel_cost ?? 0},${a.within_radius},${a.is_feasible}`)
-    );
-    download('gridpoint_assignments.csv', lines.join('\n'));
+  const localAssignmentsCsv = () => {
+    const lines = ['neighborhood_id,warehouse_id,distance_km,weighted_distance,fuel_cost,cost,avg_cost_per_order,within_radius,is_feasible'];
+    result.assignments.forEach((a) => {
+      const w = a.distance_km > 0 ? Math.round(a.weighted_distance / a.distance_km) : 0;
+      const avg = w > 0 ? (a.cost / w).toFixed(2) : a.cost.toFixed(2);
+      lines.push(`${a.neighborhood_id},${a.warehouse_id},${a.distance_km},${a.weighted_distance},${a.fuel_cost ?? 0},${a.cost},${avg},${a.within_radius},${a.is_feasible}`);
+    });
+    return lines.join('\n');
+  };
+
+  const exportMetrics = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/export/metrics`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ result })
+      });
+      if (res.ok) {
+        download('gridpoint_metrics_comparison.csv', await res.text());
+        return;
+      }
+    } catch { /* offline → local CSV below */ }
+    download('gridpoint_metrics_comparison.csv', localMetricsCsv());
+  };
+
+  const exportAssignments = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/export/assignments`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ result })
+      });
+      if (res.ok) {
+        download('gridpoint_assignments.csv', await res.text());
+        return;
+      }
+    } catch { /* offline → local CSV below */ }
+    download('gridpoint_assignments.csv', localAssignmentsCsv());
   };
 
   if (!comp) {
@@ -112,8 +196,10 @@ export const ComparisonDashboard: React.FC<Props> = ({ result, neighborhoods, zo
             {
               icon: TrendingDown,
               label: 'Avg / order',
-              value: `${result.metrics.avg_distance_per_order_km} km`,
-              sub: `Baseline was ${comp.baseline.metrics.avg_distance_per_order_km} km • Feasibility ${(result.metrics.feasibility_ratio * 100).toFixed(1)}%`
+              value: totalOrders > 0 ? `$${avgCostPerOrder(result.metrics.total_cost).toFixed(2)} • ${result.metrics.avg_distance_per_order_km} km` : `${result.metrics.avg_distance_per_order_km} km`,
+              sub: totalOrders > 0
+                ? `Baseline $${avgCostPerOrder(comp.baseline.metrics.total_cost).toFixed(2)} • ${comp.baseline.metrics.avg_distance_per_order_km} km • Feasibility ${result.metrics.feasibility_ratio != null ? `${(result.metrics.feasibility_ratio * 100).toFixed(1)}%` : '—'}`
+                : `Feasibility ${result.metrics.feasibility_ratio != null ? `${(result.metrics.feasibility_ratio * 100).toFixed(1)}%` : '—'}`
             }
           ].map((s) => {
             const Icon = s.icon;
@@ -194,7 +280,9 @@ export const ComparisonDashboard: React.FC<Props> = ({ result, neighborhoods, zo
 
         {/* Fuel provenance line */}
         <p className="text-[11px] text-slate-500 mt-3">
-          ⛽ Fuel portion: ${(result.metrics.total_fuel_cost ?? 0).toLocaleString()} of ${result.metrics.total_cost.toLocaleString()} total
+          ⛽ Fuel portion:{' '}
+          {metricCell(result.metrics.total_fuel_cost, (v) => <span>${v.toLocaleString()}</span>, 'No fuel data for this layout (rates unreachable and no manual surcharge set)')}
+          {' '}of ${result.metrics.total_cost.toLocaleString()} total
           {result.metrics.fuel_live ? ' • live pump prices' : ' • manual rates'}
           {result.fuel_note ? ` — ${result.fuel_note}` : ''}
         </p>
@@ -215,9 +303,9 @@ export const ComparisonDashboard: React.FC<Props> = ({ result, neighborhoods, zo
               {rows.map((r) => (
                 <tr key={r.label} className="hover:bg-cream-deep">
                   <td className="py-2 px-4 font-medium text-ink-soft">{r.label}</td>
-                  <td className="py-2 px-4 text-right font-mono text-ink-faint">{r.baseline.toLocaleString()}</td>
-                  <td className="py-2 px-4 text-right font-mono font-bold text-ink">{r.optimized.toLocaleString()}</td>
-                  <td className="py-2 px-4 text-right font-mono text-ink-soft">{r.saved.toLocaleString()}</td>
+                  <td className="py-2 px-4 text-right font-mono text-ink-faint">{metricCell(r.baseline, (v) => <span>{v.toLocaleString()}</span>, r.absentTip)}</td>
+                  <td className="py-2 px-4 text-right font-mono font-bold text-ink">{metricCell(r.optimized, (v) => <span>{v.toLocaleString()}</span>, r.absentTip)}</td>
+                  <td className="py-2 px-4 text-right font-mono text-ink-soft">{metricCell(r.saved, (v) => <span>{v.toLocaleString()}</span>, r.absentTip)}</td>
                   <td className="py-2 px-4 text-right font-mono text-ink">{r.pct}%</td>
                 </tr>
               ))}
@@ -225,6 +313,55 @@ export const ComparisonDashboard: React.FC<Props> = ({ result, neighborhoods, zo
           </table>
         </div>
       </div>
+
+      {/* Per-node optimized vs older-way truth (Phase D #7): road km + fuel + cost per row */}
+      {nodeRows.length > 0 && (
+        <div className="card p-5">
+          <h3 className="font-bold text-sm text-ink mb-1">Per-node cost truth — older way vs optimized</h3>
+          <p className="text-[11px] text-ink-faint mb-3">
+            Every row prices the same orders on road distance × fuel price/mileage. Baseline = your existing warehouses (centroid fallback).
+          </p>
+          <div className="overflow-x-auto max-h-96 overflow-y-auto">
+            <table className="w-full text-left text-xs border-collapse">
+              <thead className="sticky top-0">
+                <tr className="bg-cream-deep border-b border-[#E4E1D2] text-ink-faint uppercase tracking-wider">
+                  <th className="py-2 px-3">Node</th>
+                  <th className="py-2 px-3 text-right">Orders</th>
+                  <th className="py-2 px-3 text-right">Base km</th>
+                  <th className="py-2 px-3 text-right">Base fuel</th>
+                  <th className="py-2 px-3 text-right">Base cost</th>
+                  <th className="py-2 px-3 text-right">Opt km</th>
+                  <th className="py-2 px-3 text-right">Opt fuel</th>
+                  <th className="py-2 px-3 text-right">Opt cost</th>
+                  <th className="py-2 px-3 text-right">Avg/order</th>
+                  <th className="py-2 px-3 text-right">Saved</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {nodeRows.map((r) => (
+                  <tr key={r.id} className="hover:bg-cream-deep">
+                    <td className="py-1.5 px-3 font-medium text-ink-soft">{r.id} <span className="text-ink-faint">→ {r.warehouse}</span></td>
+                    <td className="py-1.5 px-3 text-right font-mono">{r.orders.toLocaleString()}</td>
+                    <td className="py-1.5 px-3 text-right font-mono text-ink-faint">{r.bDist != null ? r.bDist.toLocaleString() : '—'}</td>
+                    <td className="py-1.5 px-3 text-right font-mono text-ink-faint">{r.bFuel != null ? `$${r.bFuel.toLocaleString()}` : '—'}</td>
+                    <td className="py-1.5 px-3 text-right font-mono text-ink-faint">{r.bCost != null ? `$${r.bCost.toLocaleString()}` : '—'}</td>
+                    <td className="py-1.5 px-3 text-right font-mono font-bold text-ink">{r.oDist.toLocaleString()}</td>
+                    <td className="py-1.5 px-3 text-right font-mono text-ink">${r.oFuel.toLocaleString()}</td>
+                    <td className="py-1.5 px-3 text-right font-mono font-bold text-ink">${r.oCost.toLocaleString()}</td>
+                    <td className="py-1.5 px-3 text-right font-mono text-ink-soft">${r.oAvg.toFixed(2)}</td>
+                    <td className="py-1.5 px-3 text-right font-mono text-[#14424E]">{r.saved != null ? `$${r.saved.toFixed(2)}` : '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* Infra-vs-delivery elbow (Phase D #10) */}
+      {neighborhoods && neighborhoods.length > 0 && (
+        <TradeoffElbow neighborhoods={neighborhoods} config={result.config} maxK={Math.max(3, Math.min(8, neighborhoods.length))} onSelectK={onSelectK} />
+      )}
 
       {/* Incremental expansion: add warehouses + before/after map slider */}
       {neighborhoods && neighborhoods.length > 0 && (

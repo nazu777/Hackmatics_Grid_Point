@@ -1,0 +1,5 @@
+vehicle_type,capacity,cost_per_km,fuel_type,avg_speed_kmph,mileage_kmpl
+bike,20,4.0,petrol,30.0,45.0
+van,120,12.0,diesel,40.0,14.0
+truck,400,22.0,diesel,35.0,6.0
+ev_van,100,8.0,electric,38.0,6.5

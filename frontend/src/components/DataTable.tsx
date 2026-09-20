@@ -191,7 +191,7 @@ export const DataTable: React.FC<DataTableProps> = ({ neighborhoods, errors, onC
                   >
                     <td className="py-2.5 px-4 text-center font-mono text-ink-faint">
                       {hasError ? (
-                        <span title={rowErrors.map((e) => e.error).join('\n')}>
+                        <span title={rowErrors.map((e) => `[${e.code}] ${e.field}: ${e.error}`).join('\n')}>
                           <AlertCircle className="w-4 h-4 text-rose-500 inline" />
                         </span>
                       ) : (

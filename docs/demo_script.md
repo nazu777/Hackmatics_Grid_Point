@@ -3,7 +3,7 @@
 > **Hackathon Submission**: Hack-A-Matics  
 > **Topic**: Where Should the Warehouse Go? (Multi-facility location & assignment optimization)  
 > **Mandatory Pipeline Order**: `Neighborhood Data` → `Location Visualization` → `Warehouse Optimization` → `Neighborhood Assignment` → `Delivery Cost Comparison` → `Bonus Scenarios` → `Overview`
-> **Backlog note (Sept 2026, docs-only plan — NOT built)**: beats below cover user items #1–#14 (see `phases.md` §0). No code changes in this docs pass.  
+> **Backlog note (Sept 20 2026)**: beats below cover user items #1–#14 (see `phases.md` §0). Phases A, D, E are SHIPPED and demoable; B, C, F beats remain planned.  
 > **Live Production URL**: [https://hackmatics-grid-point.vercel.app](https://hackmatics-grid-point.vercel.app)
 
 ---
@@ -20,7 +20,7 @@
 ### [0:20 – 0:45] 2. Neighborhood Data Ingestion & Strict Validation (Phase 1 → Phase A onboarding trio)
 - **Visual**:
   - Open **Demand data**.
-  - Accounts start EMPTY — the onboarding checklist needs all three (#4): (i) order neighborhoods — click **Load sample** for the 10-node Hyderabad seed (`Charminar`, `Banjara Hills`, `Hitec City`, `Gachibowli`, etc.), or upload CSV/JSON, or open **Generate Synthetic Dataset** (clustered, $N=25$) / **Census seeder** (real US tract demand); (ii) owned vehicles — fleet table + planned vehicles seeder; (iii) existing warehouses — warehouse table + planned warehouses seeder. Daily orders live on nodes and each node lands in exactly one warehouse's zone (#6, #8).
+  - Accounts start EMPTY — the onboarding checklist needs all three (#4): (i) order neighborhoods — click **Load sample** for the 10-node Hyderabad seed (`Charminar`, `Banjara Hills`, `Hitec City`, `Gachibowli`, etc.), or upload CSV/JSON, or open **Generate Synthetic Dataset** (clustered, $N=25$) / **Census seeder** (real US tract demand); (ii) owned vehicles — fleet table + vehicles seeder (SHIPPED); (iii) existing warehouses — warehouse table + warehouses seeder (SHIPPED). Daily orders live on nodes and each node lands in exactly one warehouse's zone (#6, #8).
   - Briefly show the inline validation engine flagging coordinates outside WGS84 $[-90, 90]$ or negative orders (see `sample_with_errors.csv`).
 - **Speaker**:
   > *"In Phase 1, users can upload real-world CSV or JSON delivery records, seed real US Census demand, or generate realistic clustered demand patterns — plus their owned vehicles and existing warehouses, each with a one-click synthetic seeder for demos. Our validation engine guarantees WGS84 coordinate bounds and positive order counts, automatically mapping common aliases like 'lat', 'lng', and 'demand' into canonical schema structures. Every daily order lives on a node, and every node is assigned to exactly one warehouse zone."*

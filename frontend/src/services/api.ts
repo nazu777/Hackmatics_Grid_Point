@@ -6,6 +6,7 @@ import {
   OptimizationConfig,
   OptimizationResult,
   Warehouse,
+  VehicleType,
   Assignment,
   Metrics,
   ComparisonResult,
@@ -212,7 +213,7 @@ export async function uploadFile(file: File): Promise<{
   const formData = new FormData();
   formData.append('file', file);
 
-  const res = await fetch(`${API_BASE}/upload`, {
+  const res = await fetch(`${API_BASE}/upload?dataset=neighborhoods`, {
     method: 'POST',
     body: formData
   });
@@ -223,6 +224,165 @@ export async function uploadFile(file: File): Promise<{
   }
 
   return await res.json();
+}
+
+export type OnboardingDataset = 'neighborhoods' | 'vehicles' | 'warehouses';
+
+/** Generic onboarding upload: neighborhoods (default) + vehicles + warehouses (Phase A #4). */
+export async function uploadDatasetFile(file: File, dataset: OnboardingDataset = 'neighborhoods'): Promise<any> {
+  const formData = new FormData();
+  formData.append('file', file);
+  const res = await fetch(`${API_BASE}/upload?dataset=${dataset}`, { method: 'POST', body: formData });
+  if (!res.ok) {
+    const errorData = await res.json().catch(() => ({ detail: 'Upload failed' }));
+    throw new Error(apiErrorMessage(errorData, `Upload failed (HTTP ${res.status})`));
+  }
+  return await res.json();
+}
+
+// --------------------------------------------------------------------------
+// Phase A — Onboarding Trio: owned vehicles + existing warehouses
+// --------------------------------------------------------------------------
+
+const SEED_VEHICLES: VehicleType[] = [
+  { vehicle_type: 'bike', capacity: 20, cost_per_km: 4.0, fuel_type: 'petrol', avg_speed_kmph: 30, mileage_kmpl: 45 },
+  { vehicle_type: 'van', capacity: 120, cost_per_km: 12.0, fuel_type: 'diesel', avg_speed_kmph: 40, mileage_kmpl: 14 },
+  { vehicle_type: 'truck', capacity: 400, cost_per_km: 22.0, fuel_type: 'diesel', avg_speed_kmph: 35, mileage_kmpl: 6 },
+  { vehicle_type: 'ev_van', capacity: 100, cost_per_km: 8.0, fuel_type: 'electric', avg_speed_kmph: 38, mileage_kmpl: 6.5 }
+];
+
+const SEED_WAREHOUSES: Warehouse[] = [
+  { warehouse_id: 'EX-W1', latitude: 17.435, longitude: 78.486, capacity: 800, radius_km: 25, infra_cost: 1500, assigned_orders: 0 },
+  { warehouse_id: 'EX-W2', latitude: 17.335, longitude: 78.536, capacity: 1200, radius_km: 25, infra_cost: 1750, assigned_orders: 0 }
+];
+
+/** Deterministic fleet seeder (seed=42). Falls back to a static fleet offline. */
+export async function fetchSyntheticVehicles(seed = 42, count = 4): Promise<VehicleType[]> {
+  try {
+    const res = await fetch(`${API_BASE}/synthetic/vehicles?seed=${seed}&count=${count}`);
+    if (res.ok) return await res.json();
+  } catch { /* offline -> fallback */ }
+  return SEED_VEHICLES.slice(0, Math.max(1, Math.min(count, SEED_VEHICLES.length)));
+}
+
+/** Deterministic existing-warehouse seeder (seed=42). Falls back to static sites offline. */
+export async function fetchSyntheticWarehouses(seed = 42, count = 2, lat = 17.385044, lon = 78.486671): Promise<Warehouse[]> {
+  try {
+    const res = await fetch(
+      `${API_BASE}/synthetic/warehouses?seed=${seed}&count=${count}&lat_center=${lat}&lon_center=${lon}`
+    );
+    if (res.ok) return await res.json();
+  } catch { /* offline -> fallback */ }
+  return SEED_WAREHOUSES.slice(0, Math.max(1, Math.min(count, SEED_WAREHOUSES.length)));
+}
+
+const ALLOWED_FUELS = ['petrol', 'diesel', 'cng', 'autogas', 'electric'];
+
+export function localValidateVehicles(vehicles: VehicleType[]): ValidationResult {
+  const errors: any[] = [];
+  const seen = new Set<string>();
+  if (!vehicles || vehicles.length === 0) {
+    return { valid: false, errors: [{ field: 'dataset', error: 'Vehicle dataset is empty.', code: 'EMPTY_DATASET' }], warnings: [], total_rows: 0, valid_rows: 0 };
+  }
+  let validCount = 0;
+  vehicles.forEach((v: any, idx) => {
+    const row = idx + 1;
+    let bad = false;
+    if (!v.vehicle_type || String(v.vehicle_type).trim() === '') {
+      errors.push({ row, field: 'vehicle_type', value: v.vehicle_type, error: 'vehicle_type is required', code: 'NULL_OR_EMPTY' });
+      bad = true;
+    } else if (seen.has(String(v.vehicle_type).toLowerCase())) {
+      errors.push({ row, field: 'vehicle_type', value: v.vehicle_type, error: `Duplicate vehicle_type '${v.vehicle_type}'`, code: 'DUPLICATE_ID' });
+      bad = true;
+    } else {
+      seen.add(String(v.vehicle_type).toLowerCase());
+    }
+    if (v.capacity == null || !Number.isInteger(Number(v.capacity)) || Number(v.capacity) <= 0) {
+      errors.push({ row, field: 'capacity', value: v.capacity, error: 'capacity must be a positive integer', code: 'OUT_OF_RANGE' });
+      bad = true;
+    }
+    if (v.cost_per_km == null || isNaN(Number(v.cost_per_km)) || Number(v.cost_per_km) < 0) {
+      errors.push({ row, field: 'cost_per_km', value: v.cost_per_km, error: 'cost_per_km must be >= 0', code: 'OUT_OF_RANGE' });
+      bad = true;
+    }
+    if (v.fuel_type && !ALLOWED_FUELS.includes(String(v.fuel_type).toLowerCase())) {
+      errors.push({ row, field: 'fuel_type', value: v.fuel_type, error: `fuel_type must be one of ${ALLOWED_FUELS.join('/')}`, code: 'INVALID_FUEL_TYPE' });
+      bad = true;
+    }
+    for (const f of ['avg_speed_kmph', 'mileage_kmpl'] as const) {
+      const val = (v as any)[f];
+      if (val != null && val !== '' && !(Number(val) > 0)) {
+        errors.push({ row, field: f, value: val, error: `${f} must be > 0 when set`, code: 'OUT_OF_RANGE' });
+        bad = true;
+      }
+    }
+    if (!bad) validCount++;
+  });
+  return { valid: errors.length === 0, errors, warnings: [], total_rows: vehicles.length, valid_rows: validCount };
+}
+
+export function localValidateWarehouses(warehouses: Warehouse[]): ValidationResult {
+  const errors: any[] = [];
+  const seen = new Set<string>();
+  if (!warehouses || warehouses.length === 0) {
+    return { valid: false, errors: [{ field: 'dataset', error: 'Warehouse dataset is empty.', code: 'EMPTY_DATASET' }], warnings: [], total_rows: 0, valid_rows: 0 };
+  }
+  let validCount = 0;
+  warehouses.forEach((w: any, idx) => {
+    const row = idx + 1;
+    let bad = false;
+    if (!w.warehouse_id || String(w.warehouse_id).trim() === '') {
+      errors.push({ row, field: 'warehouse_id', value: w.warehouse_id, error: 'warehouse_id is required', code: 'NULL_OR_EMPTY' });
+      bad = true;
+    } else if (seen.has(String(w.warehouse_id))) {
+      errors.push({ row, field: 'warehouse_id', value: w.warehouse_id, error: `Duplicate warehouse_id '${w.warehouse_id}'`, code: 'DUPLICATE_ID' });
+      bad = true;
+    } else {
+      seen.add(String(w.warehouse_id));
+    }
+    if (w.latitude == null || isNaN(Number(w.latitude)) || Number(w.latitude) < -90 || Number(w.latitude) > 90) {
+      errors.push({ row, field: 'latitude', value: w.latitude, error: 'latitude must be in [-90, 90]', code: w.latitude == null ? 'NULL_VALUE' : 'OUT_OF_RANGE' });
+      bad = true;
+    }
+    if (w.longitude == null || isNaN(Number(w.longitude)) || Number(w.longitude) < -180 || Number(w.longitude) > 180) {
+      errors.push({ row, field: 'longitude', value: w.longitude, error: 'longitude must be in [-180, 180]', code: w.longitude == null ? 'NULL_VALUE' : 'OUT_OF_RANGE' });
+      bad = true;
+    }
+    if (w.capacity != null && w.capacity !== '' && (!Number.isInteger(Number(w.capacity)) || Number(w.capacity) <= 0)) {
+      errors.push({ row, field: 'capacity', value: w.capacity, error: 'capacity must be a positive integer when set', code: 'OUT_OF_RANGE' });
+      bad = true;
+    }
+    if (w.radius_km != null && w.radius_km !== '' && !(Number(w.radius_km) > 0)) {
+      errors.push({ row, field: 'radius_km', value: w.radius_km, error: 'radius_km must be > 0 when set', code: 'OUT_OF_RANGE' });
+      bad = true;
+    }
+    if (w.infra_cost != null && w.infra_cost !== '' && !(Number(w.infra_cost) >= 0)) {
+      errors.push({ row, field: 'infra_cost', value: w.infra_cost, error: 'infra_cost must be >= 0 when set', code: 'OUT_OF_RANGE' });
+      bad = true;
+    }
+    if (!bad) validCount++;
+  });
+  return { valid: errors.length === 0, errors, warnings: [], total_rows: warehouses.length, valid_rows: validCount };
+}
+
+export async function validateVehicles(vehicles: VehicleType[]): Promise<ValidationResult> {
+  try {
+    const res = await fetch(`${API_BASE}/vehicles/validate`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ vehicles })
+    });
+    if (res.ok) return await res.json();
+  } catch { /* fallback */ }
+  return localValidateVehicles(vehicles);
+}
+
+export async function validateWarehouses(warehouses: Warehouse[]): Promise<ValidationResult> {
+  try {
+    const res = await fetch(`${API_BASE}/warehouses/validate`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ warehouses })
+    });
+    if (res.ok) return await res.json();
+  } catch { /* fallback */ }
+  return localValidateWarehouses(warehouses);
 }
 
 export async function exportCsv(neighborhoods: Neighborhood[]): Promise<string> {

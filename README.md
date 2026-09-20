@@ -6,7 +6,7 @@
 
 **Live Production Deployment**: [https://hackmatics-grid-point.vercel.app](https://hackmatics-grid-point.vercel.app)  
 **Database**: Neon Serverless Postgres (env-plumbed via `DATABASE_URL`; auth store is currently in-memory with a Neon `users` table as the documented next step — see `backend/src/auth.py`)  
-**Automated Tests**: 115 tests across 20 files (100% pass rate, `make test`)
+**Automated Tests**: 130 tests across 22 files (100% pass rate, `make test`)
 
 ---
 
@@ -30,7 +30,7 @@ What-If Scenarios & Bonus Fleet (shipped, slider-driven)
 Overview Tab (PLANNED — docs-only, see docs/phases.md Phases A–F)
 ```
 
-> **Docs-vs-code status (Sept 2026):** `docs/phases.md` was replaced by a docs-only concurrent plan (**Phases A–F**, backlog #1–#14, §0) — **no feature code built**. Shipped reality: neighborhoods-only onboarding, no warehouse click-to-focus / coverage heatmap / Overview tab, slider-driven Fleet ETA + demand surge, expansion without abandon/sell policy. Planned spec lives in `docs/prd.md` §§5.9–5.11, `docs/schema.md` §§2.8–2.10, `docs/demo_script.md`.
+> **Docs-vs-code status (Sept 20 2026):** `docs/phases.md` concurrent plan (**Phases A–F**, backlog #1–#14, §0) — **Phases A, D, E SHIPPED** (onboarding trio, per-order cost truth + elbow, expansion policy). **B, C, F remain planned**: no warehouse click-to-focus / coverage heatmap / Overview tab, slider-driven Fleet ETA + demand surge. Planned spec lives in `docs/prd.md` §§5.10–5.11, `docs/schema.md` §2.9, `docs/demo_script.md` B/C/F beats.
 
 ---
 
@@ -58,7 +58,7 @@ Hackmatics_Grid_Point/
 │   │   ├── expansion.py           # Incremental warehouse expansion (add K without moving existing sites)
 │   │   ├── auth.py                # JWT auth (PBKDF2 passwords, HS256 tokens, in-memory store)
 │   │   └── api.py                 # FastAPI application & REST endpoints (26 routes, § API Reference)
-│   ├── tests/                     # 115 automated unit, integration & acceptance tests (20 files)
+│   ├── tests/                     # 130 automated unit, integration & acceptance tests (22 files)
 │   ├── requirements.txt           # Python dependencies (FastAPI, PuLP, scikit-learn, etc.)
 │   ├── pyproject.toml             # pytest config (pythonpath=".", testpaths=["tests"])
 │   └── pytest.ini
@@ -77,16 +77,19 @@ Hackmatics_Grid_Point/
 │   │   │   ├── Header.tsx           # Sticky navigation
 │   │   │   ├── Topbar.tsx / Sidebar.tsx / SideCards.tsx / Dashboard.tsx / SectionOverview.tsx
 │   │   │   ├── SummaryCards.tsx   # Top-level demand and data health metrics
-│   │   │   ├── FileUploader.tsx   # Drag-and-drop CSV/JSON ingestion with alias mapper
+│   │   ├── FileUploader.tsx   # Drag-and-drop CSV/JSON ingestion with alias mapper (`?dataset=` trio)
 │   │   │   ├── DataTable.tsx      # Editable neighborhood grid (add/delete/edit rows)
+│   │   │   ├── VehicleTable.tsx / WarehouseTable.tsx # SHIPPED Phase A: fleet + existing-site CRUD + seeders
+│   │   │   ├── OnboardingChecklist.tsx # SHIPPED Phase A: 0/0/0 first-run checklist
 │   │   │   ├── SyntheticModal.tsx # Seedable synthetic demand pattern generator (+ Census entry point)
 │   │   │   ├── CensusModal.tsx    # Real US demand via ACS tract populations (city presets)
 │   │   │   ├── MapView.tsx        # Phase 2/4 Mapbox GL map: bubbles ∝ √orders, spider lines, R_max circles/isochrones
 │   │   │   ├── MapChrome.tsx      # Map chips, result rows, layer flags
 │   │   │   ├── OptimizationPanel.tsx # Phase 3 solver controls & assignment tables (+ road-mode re-optimize)
 │   │   │   ├── OptimizationControls.tsx
-│   │   │   ├── WarehouseExpansion.tsx # Add/remove warehouses + before-after slider
-│   │   │   ├── ComparisonDashboard.tsx # Phase 4 side-by-side cost deltas, histogram, fuel graph
+│   │   │   ├── WarehouseExpansion.tsx # Add/remove warehouses + before-after slider + SHIPPED policy advisor
+│   │   │   ├── ComparisonDashboard.tsx # Phase 4 side-by-side cost deltas, histogram, fuel graph + SHIPPED per-node truth
+│   │   │   ├── TradeoffElbow.tsx # SHIPPED Phase D: annotated infra-vs-delivery elbow
 │   │   │   ├── ScenariosPanel.tsx # Phase 5 What-If trade-offs, demand surge & fleet ETA
 │   │   │   ├── FuelCard.tsx / TrafficCard.tsx # Live fuel & traffic surfaces
 │   │   │   ├── SavedPanel.tsx / ExportView.tsx / SettingsView.tsx
@@ -101,11 +104,11 @@ Hackmatics_Grid_Point/
 │   ├── index.py                   # 23-line ASGI adapter (re-exports api/src api.app; Mangum compat)
 │   ├── requirements.txt           # Pinned serverless deps (fastapi, pydantic, pandas, sklearn, pulp, geopy)
 │   └── src/                       # Mirror of backend/src/* (synced via `make sync-api`: cp backend/src/*.py api/src/)
-├── data/samples/                  # 7 sample files: Hyderabad 20-row CSV, Bengaluru JSON, aliased/canonical,
-│                                  # synthetic-3-cluster, error CSV, 1,000-node benchmark (+ data/census_cache/)
-├── docs/                          # problem_statement (frozen req + backlog pointer), prd (§§5.9–5.11 PLANNED),
-│                                  # schema (§§2.9–2.10 PLANNED: Overview + ExpansionRecommendation),
-│                                  # phases (⚠️ REPLACED Sept 2026: docs-only Phases A–F plan, NOT built),
+├── data/samples/                  # 11 sample files: Hyderabad 20-row CSV, Bengaluru JSON, aliased/canonical,
+│                                  # synthetic-3-cluster, error CSV, 1,000-node benchmark + vehicles_seed.*/warehouses_seed.* (+ data/census_cache/)
+├── docs/                          # problem_statement (frozen req + backlog pointer), prd (§§5.10–5.11 PLANNED, §5.9 SHIPPED),
+│                                  # schema (§2.9 PLANNED Overview, §2.10 SHIPPED ExpansionRecommendation),
+│                                  # phases (A/D/E SHIPPED, B/C/F planned),
 │                                  # demo_script (planned beats), Phase-1 prompt (archival)
 ├── Makefile                       # setup, test, run-backend/frontend, build-frontend, sync-api
 └── README.md
@@ -118,13 +121,13 @@ Hackmatics_Grid_Point/
 | Layer | Technology | Key Role |
 | :--- | :--- | :--- |
 | **Optimization Solvers** | Python 3.10+, SciPy, PuLP, scikit-learn | Weiszfeld geometric median, Weighted K-Means, MILP CFLP (+ road-aware assignment) |
-| **Backend REST API** | FastAPI, Uvicorn, Pydantic v2 | Schema validation & 26 async endpoints (optimize, scenarios, fuel, traffic, census, routes, auth, expand) |
+| **Backend REST API** | FastAPI, Uvicorn, Pydantic v2 | Schema validation & 32 async endpoints (optimize, scenarios, fuel, traffic, census, routes, auth, expand + vehicles/warehouses validate/synthetic/export) |
 | **Frontend Framework** | React 18, Vite, TypeScript, React Router 7 | Type-safe SPA with `/`, `/login`, `/signup`, `/app/:tab` routing + JWT guards |
 | **Styling & UI** | Tailwind CSS, Lucide Icons | Responsive layout with clear visual hierarchy |
 | **Geospatial & Maps** | Mapbox GL JS, Geopy | Interactive Mapbox map (Standard/Light/Dark), demand bubbles, spider lines, R_max circles + road isochrones |
 | **Live Data Providers** | TomTom Traffic/Matrix, RapidAPI India fuel, US Census ACS | Live congestion, road distances (OSRM fallback), fuel prices (static fallback), real tract demand |
 | **Auth & Storage** | JWT (PBKDF2 + HS256, 24h TTL), per-user localStorage | Login/signup, per-account namespaced datasets/configs; Neon Postgres env-plumbed (users table = next step) |
-| **Automated Testing** | Pytest, Pytest-Asyncio, HTTPX | 115 tests across 20 files: unit, cost hand-calcs, routing/fuel/traffic/census/auth, acceptance + benchmarks |
+| **Automated Testing** | Pytest, Pytest-Asyncio, HTTPX | 130 tests across 22 files: unit, cost hand-calcs, routing/fuel/traffic/census/auth, onboarding, cost-truth, expansion-policy, acceptance + benchmarks |
 
 ---
 
@@ -171,14 +174,14 @@ make sync-api
 
 ## 📐 Shipped Pipeline Features (plus PLANNED items, clearly marked)
 
-### Phase 1: Data Ingestion & Validation (shipped: neighborhoods; PLANNED: vehicles + existing warehouses — `docs/phases.md` Phase A)
+### Phase 1: Data Ingestion & Validation (SHIPPED Sept 20 2026: neighborhoods + vehicles + existing warehouses — `docs/phases.md` Phase A)
 - **Multi-Format Ingestion**: Delimiter auto-sniffing (`,`, `;`, `\t`) and header alias mapping (`id` $\to$ `neighborhood_id`, `lat` $\to$ `latitude`, `lng$|`lon` $\to$ `longitude`, `orders`/`demand` $\to$ `daily_orders`).
 - **Strict Validation Engine**: WGS84 coordinates check ($[-90, 90], [-180, 180]$), non-negative integer orders, unique ID validation, and interactive error drawer.
 - **Editable Data Table**: Real-time inline editing, search/filter, and canonical CSV/JSON exports.
 - **Seedable Synthetic Generator**: Generates `clustered`, `uniform`, or `gaussian` demand distributions with fixed seeds for benchmark reproducibility.
 - **Real Demand Seeders**: US Census ACS tract populations via `CensusModal` (`GET /api/census/cities`, `GET /api/census/demand`), plus an opt-in 10-node Hyderabad sample (`frontend/src/data/sample.ts`). Every account starts EMPTY — data, configs, and zone colors are per-user namespaced in localStorage.
 - **Auth-Gated Workspace**: Landing page (`/`), login/signup (`/login`, `/signup`), and `ProtectedRoute` guards for `/app/:tab` (JWT in `localStorage`, 24h TTL).
-- **PLANNED (docs-only)**: owned-vehicle fleet table + existing-warehouse table (CRUD + validation + persistence, doubling as the "older way" baseline), deterministic synthetic seeders for both, first-run checklist (orders → vehicles → warehouses → optimize). Daily orders live ONLY on nodes; warehouses derive `assigned_orders = Σ daily_orders` via assignment.
+- **SHIPPED**: owned-vehicle fleet table + existing-warehouse table (`VehicleTable.tsx`, `WarehouseTable.tsx`, CRUD + validation + persistence, doubling as the "older way" baseline), deterministic synthetic seeders for both (`GET /api/synthetic/vehicles|warehouses`, `data/samples/vehicles_seed.*, warehouses_seed.*`), first-run checklist (`OnboardingChecklist.tsx`: orders → vehicles → warehouses → optimize). Daily orders live ONLY on nodes; warehouses derive `assigned_orders = Σ daily_orders` via assignment.
 
 ### Phase 2: Location Visualization & Spatial Mapping (shipped; click-to-focus / heatmap / traffic overlay PLANNED — Phase B)
 - **Interactive Geospatial Map**: Mapbox GL JS view (Standard/Light/Dark styles via `mapThemes.ts`; requires `VITE_MAPBOX_TOKEN`).
@@ -196,7 +199,7 @@ make sync-api
 - **PLANNED (docs-only)**: `use_live_traffic_for_routing` toggle + `traffic_aware_reroute` (`α·cost + β·time`) with `traffic_note`/`routing_note` provenance.
 - **Performance Benchmark**: Optimizes 1,000 nodes with $K=5$ in **$\sim 0.81\text{s}$** (well below the $<5.0\text{s}$ requirement).
 
-### Phase 4: Delivery Cost Calculation & Comparative Evaluation (shipped; per-order truth + elbow clarity PLANNED — Phase D)
+### Phase 4: Delivery Cost Calculation & Comparative Evaluation (SHIPPED Sept 20 2026: per-order truth + elbow clarity — Phase D)
 - **Comprehensive Cost Engine**:
   - Unweighted distance $\sum d_i$
   - Demand-weighted distance $\sum w_i d_i$
@@ -206,9 +209,9 @@ make sync-api
 - **Side-by-Side Comparison Dashboard**: Baseline (single centroid; user-owned warehouses once Phase A lands) vs. Optimized layout with percentage cost/distance saved, distance histogram, and a fuel-reduction graph.
 - **Visual Assignment Overlays**: Colored cluster bubbles, spider vector polylines (or traced road paths) connecting customers to assigned hubs, and distance distribution histogram.
 - **Verified Accuracy**: Hand-calculated cost formulas validated by automated tests in `test_cost.py`.
-- **PLANNED (docs-only)**: per-order road km + fuel-API costing with per-node `avg cost per order` (optimized vs older-way, node + overall), guaranteed-populated `Fuel cost portion ($)` / `Avg corridor congestion` / `Feasibility ratio`, annotated infra-vs-delivery elbow with plain-language caption.
+- **SHIPPED**: per-order road km + fuel-API costing with per-node `avg cost per order` (optimized vs older-way, node + overall via `per_order_breakdown()` + `TradeoffElbow.tsx`), guaranteed-populated `Fuel cost portion ($)` / `Avg corridor congestion` / `Feasibility ratio`, annotated infra-vs-delivery elbow with plain-language caption.
 
-### Phase 5: Advanced Scenarios & Bonus Features (shipped slider-driven; automation + advisor + Overview PLANNED — Phases E–F)
+### Phase 5: Advanced Scenarios & Bonus Features (shipped slider-driven; automation + Overview PLANNED — Phase F; expansion advisor SHIPPED — Phase E)
 - **Multi-K Infrastructure vs. Delivery Cost Trade-off (Elbow Analysis)**:
   - Interactive slider for fixed facility infrastructure cost ($\$0 - \$3,000/\text{hub}$).
   - Evaluates $K = 1 \dots 8$ simultaneously to plot Delivery Cost vs. Infrastructure Cost vs. Combined Total Cost.
@@ -223,10 +226,11 @@ make sync-api
 - **Constraint Compliance & Diagnostics Center**:
   - Real-time warehouse utilization gauges with progressive color thresholds (Normal, High, Overflow).
   - Violation audit listing exact distance overages for any nodes outside the $R_{\max}$ radius limit.
-- **PLANNED (docs-only)**: `simulation_mode=realtime` loop (live fuel/traffic/demand drive Fleet ETA + demand surge; sliders become collapsed overrides), congestion spillover reassignment with event log, keep-vs-abandon/demolish + keep-vs-sell expansion policy with revenue-aware `ExpansionRecommendation`, and the **Overview tab** (vehicles, fuel + provenance, infra, warehouses, orders, costs, alerts — each figure linked to source).
+- **SHIPPED (Phase E)**: keep-vs-abandon/demolish + keep-vs-sell expansion policy with revenue-aware `ExpansionRecommendation` (`POST /api/expand {policy, owned_vehicles}`, `WarehouseExpansion.tsx`).
+- **PLANNED (docs-only, Phase F)**: `simulation_mode=realtime` loop (live fuel/traffic/demand drive Fleet ETA + demand surge; sliders become collapsed overrides), congestion spillover reassignment with event log, and the **Overview tab** (vehicles, fuel + provenance, infra, warehouses, orders, costs, alerts — each figure linked to source).
 
-### Planned Phases A–F (docs-only, NOT built — `docs/phases.md`)
-A Onboarding Trio (#4, #6, #8) · B Map UX (#1–#3, #5-display) · C Traffic-aware routing (#5-opt, #9, #12-engine) · D Cost truth (#7, #10) · E Expansion advisor (#11) · F Realtime automation + Overview (#12-UI, #13, #14). Minimal-overlap concurrency map + frozen §1 interfaces + traceability in `docs/phases.md`.
+### Shipped Phases A, D, E + Planned B, C, F (`docs/phases.md`)
+A Onboarding Trio ✅ · D Cost truth ✅ · E Expansion advisor ✅ · B Map UX (planned) · C Traffic-aware routing (planned) · F Realtime automation + Overview (planned). Minimal-overlap concurrency map + frozen §1 interfaces + traceability in `docs/phases.md`.
 
 ---
 
@@ -255,11 +259,11 @@ Beyond the 8 bonuses, the repo also ships: real road-network optimization (`dist
 | POST | `/api/validate` | Validate `Neighborhood[]` → `ValidationResult` |
 | POST | `/api/config/validate` | Validate `OptimizationConfig` against active dataset |
 | POST | `/api/optimize` | Weiszfeld / Weighted K-Means / PuLP MILP (+ road mode) → `OptimizationResult` |
-| POST | `/api/expand` | Incrementally add warehouses without moving existing sites |
+| POST | `/api/expand` | Incrementally add warehouses without moving existing sites + policy recommendation (`policy`, `owned_vehicles` → NPV-ranked plans) |
 | GET | `/api/synthetic` | Seedable `clustered`/`uniform`/`gaussian` generator (`N, lat_center, lon_center, spread_km, …`) |
 | GET | `/api/census/cities` | List supported Census city presets |
 | GET | `/api/census/demand` | Real tract demand (`city`, `orders_per_1000`) → `Neighborhood[]` |
-| POST | `/api/upload` | Multipart CSV/JSON upload with alias auto-detection |
+| POST | `/api/upload` | Multipart CSV/JSON upload with alias auto-detection (`?dataset=neighborhoods\|vehicles\|warehouses`) + `POST /api/vehicles/validate`, `POST /api/warehouses/validate`, `GET /api/synthetic/vehicles\|warehouses` |
 | POST | `/api/export/csv` / `/api/export/json` | Canonical dataset exports |
 | POST | `/api/export/metrics` / `/api/export/assignments` | Metrics table / assignment table exports |
 | POST | `/api/map/summary` | Map bounds, center, zoom + bubble styling |
@@ -282,7 +286,7 @@ The frontend (`frontend/src/services/api.ts`) uses `VITE_API_URL || '/api'` and 
 In accordance with Hack-A-Matics transparency guidelines:
 - **Code Assistants**: Antigravity agentic coding assistant was utilized for scaffolding boilerplate, structuring test suites, and accelerating mathematical vectorization.
 - **Core Algorithms**: Vectorized Haversine distance matrices, Weiszfeld iteration formulas, and PuLP MILP constraints were engineered to strictly conform to `docs/schema.md` and `docs/prd.md`.
-- **Validation**: All optimization logic and cost formulas were rigorously verified using 115 automated test cases (including hand-calculated ground truth, routing/fuel/traffic/census/auth, and acceptance benchmarks).
+- **Validation**: All optimization logic and cost formulas were rigorously verified using 130 automated test cases (including hand-calculated ground truth, routing/fuel/traffic/census/auth, onboarding trio, cost-truth, expansion-policy, and acceptance benchmarks).
 
 ---
 
