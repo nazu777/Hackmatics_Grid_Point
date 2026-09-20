@@ -968,6 +968,12 @@ const AppShell: React.FC = () => {
     navigate(`/app/${t}`);
   }, [navigate]);
 
+  /** Open the Data tab on a specific sub-tab (orders/vehicles/warehouses). */
+  const openDataSubtab = useCallback((t: 'orders' | 'vehicles' | 'warehouses') => {
+    try { localStorage.setItem('gridpoint_data_subtab', t); } catch { /* ignore */ }
+    goTab('data');
+  }, [goTab]);
+
   // Clicking the already-open tab toggles the panel; switching tabs reveals it.
   const handleRailTab = useCallback((t: RailTab) => {
     if (t === railTab) {
@@ -1040,8 +1046,13 @@ const AppShell: React.FC = () => {
         {panel === 'ask' && (
           <AskPanel
             neighborhoods={neighborhoods}
+            vehicles={vehicles}
+            warehouses={warehouses}
             config={optimizationConfig}
             result={optimizationResult}
+            validation={validation}
+            vehiclesValidation={vehiclesValidation}
+            warehousesValidation={warehousesValidation}
             onOptimize={runOptimize}
             onOpenCompare={() => goTab('compare')}
             onApplyZones={handleApplyZones}
@@ -1054,6 +1065,8 @@ const AppShell: React.FC = () => {
               setPanel('results');
             }}
             onOpenCensus={() => setIsCensusModalOpen(true)}
+            onOpenDataTab={openDataSubtab}
+            onOpenOverview={() => goTab('overview')}
           />
         )}
 
