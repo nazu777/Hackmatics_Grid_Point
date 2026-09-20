@@ -68,6 +68,7 @@ Output of optimization; also used for baseline/current locations AND for user-en
 | `infra_cost` | float | No | `≥0` | One-time/fixed infrastructure cost for this warehouse. |
 | `assigned_orders` | integer | Derived | `≥0` | Sum of `daily_orders` assigned; computed post-assignment. |
 | `utilization_pct` | float | Derived | `0–100` | `assigned_orders / capacity *100` if capacity set. |
+| `is_owned` | boolean | Derived | — | `true` when the site is within 1 km of a user-owned warehouse (`respect_owned`). |
 
 ### 2.3 VehicleType (owned fleet — onboarding input, backlog #4)
 
@@ -105,8 +106,10 @@ Output of optimization; also used for baseline/current locations AND for user-en
 | `simulation_mode` | enum | No | `off` | SHIPPED Phase F Sept 20 2026 (#12, #13): `off\|realtime` — live fuel/traffic/demand loop + congestion spillover. |
 | `expansion_policy` | object | No | `None` | SHIPPED Phase E Sept 20 2026 (#11): `{allow_abandon_infra, allow_sell_vehicles, demolition_cost, salvage_value, resale_value, horizon_months, revenue_per_order}`. |
 | `random_seed` | integer | No | `42` | — | Seed for K-Means & synthetic data reproducibility. |
-| `baseline_mode` | enum | No | `centroid` | `centroid\|mean\|single_center\|custom` | How to compute baseline warehouse(s). |
+| `baseline_mode` | enum | No | `centroid` | `centroid\|mean\|single_center\|custom` | How to compute baseline warehouse(s). Auto-switches to owned sites (as custom) when `respect_owned` + owned present and mode is the default `centroid`. |
 | `custom_baseline_warehouses` | Warehouse[] | If `custom` | — | Valid lat/lon | User-provided original locations. |
+| `owned_warehouses` | Warehouse[] | No | `[]` | Valid lat/lon | User-owned existing sites. With `respect_owned`, K-Means seeds from them (best-of vs k-means++), MILP adds them to the candidate pool, result sites within 1 km are flagged `is_owned`, and the fleet is allocated across warehouses by load share (`fleet_assignment` + `assigned_vehicles`). |
+| `respect_owned` | boolean | No | `true` | — | Master switch for owned-site anchoring + owned baseline. |
 
 ### 2.5 Assignment (Output Mapping)
 
@@ -153,6 +156,9 @@ Output of optimization; also used for baseline/current locations AND for user-en
 | `avg_congestion_pct` | Mean corridor congestion applied |
 | `avg_distance_per_order_km` | `total_weighted_distance / Σ w_i` |
 | `feasibility_ratio` | `feasible_assignments / N` |
+| `warehouses[].is_owned` | `true` when the site is within 1 km of an owned warehouse |
+| `warehouses[].assigned_vehicles` | Fleet vehicle ids based here (`V{i}` = `vehicle_fleet` order), load-share allocation |
+| `fleet_assignment[]` | `{vehicle_id, vehicle_type, warehouse_id, distance_km}` — every fleet vehicle assigned to exactly one warehouse |
 
 ### 2.7 Comparison (Original vs Optimized)
 

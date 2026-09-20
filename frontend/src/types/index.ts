@@ -20,6 +20,7 @@ export interface Warehouse {
   infra_cost?: number;
   assigned_orders?: number;
   utilization_pct?: number | null;
+  is_owned?: boolean;
 }
 
 export interface Assignment {
@@ -56,6 +57,8 @@ export interface WarehouseMetric {
   utilization_pct?: number | null;
   avg_distance_km: number;
   neighborhood_count: number;
+  is_owned?: boolean;
+  assigned_vehicles?: string[];
 }
 
 export interface Metrics {
@@ -92,6 +95,13 @@ export interface ComparisonResult {
   delta: ComparisonDelta;
 }
 
+export interface FleetAssignment {
+  vehicle_id: string;
+  vehicle_type: string;
+  warehouse_id: string;
+  distance_km: number;
+}
+
 export interface OptimizationResult {
   config: OptimizationConfig;
   warehouses: Warehouse[];
@@ -103,6 +113,7 @@ export interface OptimizationResult {
   fuel_note?: string | null;
   traffic_note?: string | null;
   routing_note?: string | null;
+  fleet_assignment?: FleetAssignment[];
 }
 
 export interface ValidationErrorItem {
@@ -195,6 +206,8 @@ export interface OptimizationConfig {
   vehicle_fleet: VehicleType[];
   random_seed: number;
   baseline_mode: 'centroid' | 'mean' | 'single_center' | 'custom';
+  owned_warehouses?: Warehouse[];
+  respect_owned?: boolean;
 }
 
 export type BasemapStyle = 'osm' | 'positron' | 'dark';

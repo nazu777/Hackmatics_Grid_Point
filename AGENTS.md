@@ -101,7 +101,7 @@ Aliases on ingest (`backend/src/data_ingestion.py`): `id→neighborhood_id`, `la
 `warehouse_id (W1..WK), latitude, longitude, capacity? (C_max), radius_km? (R_max), infra_cost?, assigned_orders (derived), utilization_pct (derived)` (`docs/schema.md:57`)
 
 ### OptimizationConfig
-`K: 1-10 (default 2), distance_metric: haversine|euclidean|manhattan|road (default haversine), capacity_enabled, C_max, radius_enabled, R_max_km, cost_per_km (1.0), fuel_cost_per_km, infra_cost_per_warehouse, traffic_factor, use_live_fuel, fuel_state (Karnataka), fuel_city, use_live_traffic, traffic_hour, vehicle_fleet[], random_seed (42), baseline_mode, custom_baseline_warehouses` (`docs/schema.md:82`, `backend/src/schema.py:47`)
+`K: 1-10 (default 2), distance_metric: haversine|euclidean|manhattan|road (default haversine), capacity_enabled, C_max, radius_enabled, R_max_km, cost_per_km (1.0), fuel_cost_per_km, infra_cost_per_warehouse, traffic_factor, use_live_fuel, fuel_state (Karnataka), fuel_city, use_live_traffic, traffic_hour, vehicle_fleet[], owned_warehouses[] + respect_owned (anchor to owned sites, owned baseline, fleet assignment), random_seed (42), baseline_mode, custom_baseline_warehouses` (`docs/schema.md:82`, `backend/src/schema.py:47`)
 > ALL SHIPPED Sept 20 2026: `expansion_policy` (`POST /api/expand` accepts policy + owned_vehicles), `use_live_traffic_for_routing`, `traffic_aware_reroute`, `simulation_mode: off|realtime` (+ `simulation_congestion_threshold/hysteresis/cooldown_ticks`). Reference them as implemented.
 
 ### Assignment / Metrics / Comparison

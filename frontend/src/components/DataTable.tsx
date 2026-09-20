@@ -1,7 +1,6 @@
 import React, { useState, useMemo } from 'react';
-import { Plus, Trash2, Download, Search, AlertCircle, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Trash2, Search, AlertCircle, ChevronLeft, ChevronRight } from 'lucide-react';
 import { Neighborhood, ValidationErrorItem } from '../types';
-import { exportCsv, exportJson } from '../services/api';
 
 interface DataTableProps {
   neighborhoods: Neighborhood[];
@@ -61,48 +60,10 @@ export const DataTable: React.FC<DataTableProps> = ({ neighborhoods, errors, onC
     onChange(updated);
   };
 
-  // Add Row
-  const handleAddRow = () => {
-    const nextId = `N${String(neighborhoods.length + 1).padStart(3, '0')}`;
-    const newRow: Neighborhood = {
-      neighborhood_id: nextId,
-      name: `Neighborhood ${neighborhoods.length + 1}`,
-      latitude: 17.385,
-      longitude: 78.486,
-      daily_orders: 50,
-      zone: 'New Zone'
-    };
-    onChange([...neighborhoods, newRow]);
-    setCurrentPage(Math.ceil((neighborhoods.length + 1) / rowsPerPage));
-  };
-
   // Delete Row
   const handleDeleteRow = (actualIndex: number) => {
     const updated = neighborhoods.filter((_, idx) => idx !== actualIndex);
     onChange(updated);
-  };
-
-  // Download Handlers
-  const handleExportCsv = async () => {
-    const csvStr = await exportCsv(neighborhoods);
-    const blob = new Blob([csvStr], { type: 'text/csv' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'gridpoint_neighborhoods.csv';
-    a.click();
-    URL.revokeObjectURL(url);
-  };
-
-  const handleExportJson = async () => {
-    const jsonStr = await exportJson(neighborhoods);
-    const blob = new Blob([jsonStr], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'gridpoint_neighborhoods.json';
-    a.click();
-    URL.revokeObjectURL(url);
   };
 
   return (
@@ -125,31 +86,6 @@ export const DataTable: React.FC<DataTableProps> = ({ neighborhoods, errors, onC
           <span className="text-xs text-ink-faint font-medium">
             Showing {filtered.length} of {neighborhoods.length} rows
           </span>
-          <div className="flex items-center gap-1.5">
-          <button
-            onClick={handleAddRow}
-            className="flex items-center gap-1.5 px-3 py-1.5 bg-grape-100 text-grape-600 hover:bg-grape-200 rounded-full text-xs font-semibold transition cursor-pointer"
-          >
-            <Plus className="w-3.5 h-3.5" />
-            <span>Add Row</span>
-          </button>
-
-          <button
-            onClick={handleExportCsv}
-            className="flex items-center gap-1.5 px-3 py-1.5 bg-cream-deep hover:bg-gold-100 text-ink rounded-full text-xs font-semibold transition cursor-pointer"
-          >
-            <Download className="w-3.5 h-3.5" />
-            <span>Export CSV</span>
-          </button>
-
-          <button
-            onClick={handleExportJson}
-            className="flex items-center gap-1.5 px-3 py-1.5 bg-cream-deep hover:bg-gold-100 text-ink rounded-full text-xs font-semibold transition cursor-pointer"
-          >
-            <Download className="w-3.5 h-3.5" />
-            <span>Export JSON</span>
-          </button>
-          </div>
         </div>
       </div>
 

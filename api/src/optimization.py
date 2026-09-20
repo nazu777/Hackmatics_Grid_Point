@@ -16,11 +16,12 @@ from .schema import (
     OptimizationResult,
     Metrics,
     WarehouseMetric,
+    FleetAssignment,
     LayoutEvaluation,
     ComparisonResult,
     ComparisonDelta
 )
-from .distance import compute_distance_matrix
+from .distance import compute_distance_matrix, haversine_distance_matrix
 from .cost import assignment_cost, assignment_fuel_cost, compute_comparison, resolve_fuel_prices
 
 
@@ -252,16 +253,41 @@ def weiszfeld_geometric_median(
     return y
 
 
+def owned_site_coords(config: OptimizationConfig) -> Optional[np.ndarray]:
+    """Valid (lat, lon) rows from config.owned_warehouses, or None when empty."""
+    owned = getattr(config, "owned_warehouses", None) or []
+    pts = []
+    for w in owned:
+        try:
+            lat = float(w.latitude if hasattr(w, "latitude") else w["latitude"])
+            lon = float(w.longitude if hasattr(w, "longitude") else w["longitude"])
+        except (TypeError, ValueError, KeyError, AttributeError):
+            continue
+        if -90.0 <= lat <= 90.0 and -180.0 <= lon <= 180.0:
+            pts.append([lat, lon])
+    if not pts:
+        return None
+    return np.unique(np.array(pts, dtype=float), axis=0)
+
+
+#: A result site within this range of an owned site counts as "kept".
+OWNED_SNAP_KM = 1.0
+
+
 def weighted_kmeans_optimization(
     coords: np.ndarray,
     weights: np.ndarray,
     K: int,
     random_seed: int = 42,
-    refine_with_weiszfeld: bool = True
+    refine_with_weiszfeld: bool = True,
+    initial_centers: Optional[np.ndarray] = None,
 ) -> Tuple[np.ndarray, np.ndarray]:
     """
     Solves unconstrained warehouse location using Weighted K-Means with k-means++ initialization.
     Optionally refines each cluster centroid using Weiszfeld geometric median (Continuous Weber Problem).
+    When initial_centers (owned sites) is given, an owned-seeded run competes
+    against k-means++ and the lower-inertia layout wins — optimization stays
+    anchored to user-owned warehouses whenever they explain demand well.
     Returns: (centers: (K, 2), labels: (N,))
     """
     K = min(K, len(coords))
@@ -280,8 +306,33 @@ def weighted_kmeans_optimization(
         random_state=random_seed
     )
     kmeans.fit(coords, sample_weight=weights)
-    labels = kmeans.labels_
-    centers = kmeans.cluster_centers_.copy()
+    best = kmeans
+
+    if initial_centers is not None and len(initial_centers) > 0:
+        init = np.unique(np.asarray(initial_centers, dtype=float), axis=0)
+        if len(init) > K:
+            init = init[:K]
+        elif len(init) < K:
+            rng = np.random.default_rng(random_seed)
+            need = K - len(init)
+            extra = coords[rng.choice(len(coords), size=need, replace=False)]
+            init = np.vstack([init, extra])
+        try:
+            seeded = KMeans(
+                n_clusters=K,
+                init=init,
+                n_init=1,
+                max_iter=100,
+                random_state=random_seed
+            )
+            seeded.fit(coords, sample_weight=weights)
+            if float(seeded.inertia_) < float(best.inertia_):
+                best = seeded
+        except Exception:
+            pass
+
+    labels = best.labels_
+    centers = best.cluster_centers_.copy()
 
     # Refine each cluster center to the exact weighted geometric median
     if refine_with_weiszfeld:
@@ -640,6 +691,74 @@ def compute_baseline_layout(
     )
 
 
+def allocate_fleet(
+    vehicle_fleet: Any,
+    warehouse_orders: List[int],
+    warehouse_ids: List[str],
+) -> Tuple[List["FleetAssignment"], Dict[str, List[str]]]:
+    """Assign each fleet vehicle to a warehouse by load share (largest remainder).
+
+    Vehicles carry no coordinates, so they follow demand: each warehouse gets
+    round(fleet * orders_k / total) vehicles. Vehicle ids are V{i} (1-based
+    position in vehicle_fleet). Returns (fleet_assignment, by_warehouse_id).
+    """
+    fleet = list(vehicle_fleet or [])
+    by_wh: Dict[str, List[str]] = {wid: [] for wid in warehouse_ids}
+    out: List["FleetAssignment"] = []
+    if not fleet or not warehouse_ids:
+        return out, by_wh
+    total = sum(max(0, int(o or 0)) for o in warehouse_orders)
+    if total <= 0:
+        shares = [len(fleet) / len(warehouse_ids)] * len(warehouse_ids)
+    else:
+        shares = [len(fleet) * max(0, int(o or 0)) / total for o in warehouse_orders]
+    counts = [int(s) for s in shares]
+    remainder = len(fleet) - sum(counts)
+    order = sorted(range(len(warehouse_ids)),
+                   key=lambda k: (shares[k] - counts[k], shares[k]), reverse=True)
+    for k in order[:max(0, remainder)]:
+        counts[k] += 1
+    idx = 0
+    for k, wid in enumerate(warehouse_ids):
+        for _ in range(counts[k]):
+            v = fleet[idx]
+            idx += 1
+            if isinstance(v, dict):
+                vtype = str(v.get("vehicle_type", ""))
+                vid = str(v.get("vehicle_id") or f"V{idx}")
+            else:
+                vtype = str(getattr(v, "vehicle_type", ""))
+                vid = str(getattr(v, "vehicle_id", None) or f"V{idx}")
+            out.append(FleetAssignment(vehicle_id=vid, vehicle_type=vtype,
+                                       warehouse_id=wid, distance_km=0.0))
+            by_wh[wid].append(vid)
+    return out, by_wh
+
+
+def mark_owned_sites(
+    warehouses: List[Warehouse],
+    metrics: Metrics,
+    owned: Optional[np.ndarray],
+) -> None:
+    """Flag result sites within OWNED_SNAP_KM of a user-owned site (in place)."""
+    if owned is None or len(owned) == 0:
+        return
+    try:
+        dmat = haversine_distance_matrix(
+            np.array([[float(w.latitude), float(w.longitude)] for w in warehouses]),
+            np.asarray(owned, dtype=float),
+        )
+        near = (dmat.min(axis=1) <= OWNED_SNAP_KM) if dmat.size else [False] * len(warehouses)
+    except Exception:
+        near = [False] * len(warehouses)
+    for w, is_owned in zip(warehouses, near):
+        if bool(is_owned):
+            w.is_owned = True
+    for m, is_owned in zip(metrics.warehouses, near):
+        if bool(is_owned):
+            m.is_owned = True
+
+
 def run_optimization(
     neighborhoods: List[Dict[str, Any]],
     config: OptimizationConfig
@@ -657,6 +776,12 @@ def run_optimization(
 
     coords = np.array([[float(n["latitude"]), float(n["longitude"])] for n in neighborhoods])
     weights = np.array([float(n["daily_orders"]) for n in neighborhoods])
+
+    # User-owned sites anchor placement (and the baseline comparison) when
+    # respect_owned is on — the plan is built WITH owned warehouses, not
+    # as if they didn't exist.
+    respect_owned = bool(getattr(config, "respect_owned", True))
+    owned = owned_site_coords(config) if respect_owned else None
 
     is_feasible = True
     infeasibility_reason = None
@@ -676,16 +801,18 @@ def run_optimization(
 
     if use_milp:
         # Generate candidate facility locations:
-        # Combine weighted k-means centers + cluster medoids + top demand locations
+        # Combine weighted k-means centers + cluster medoids + top demand locations.
+        # Owned sites join the pool — the solver may keep them when optimal.
         initial_centers, _ = weighted_kmeans_optimization(
-            coords, weights, K=K, random_seed=config.random_seed
+            coords, weights, K=K, random_seed=config.random_seed,
+            initial_centers=owned,
         )
         # Select top demand nodes as additional candidate sites
         top_k_indices = np.argsort(weights)[-min(K * 2, N):]
-        candidate_pool = np.unique(
-            np.vstack([initial_centers, coords[top_k_indices]]),
-            axis=0
-        )
+        pool_parts = [initial_centers, coords[top_k_indices]]
+        if owned is not None and len(owned) > 0:
+            pool_parts.append(owned)
+        candidate_pool = np.unique(np.vstack(pool_parts), axis=0)
 
         # Steer MILP placement with past corridor congestion (history only,
         # no network in the solver path): congested candidate sites cost more.
@@ -718,7 +845,8 @@ def run_optimization(
             is_feasible = False
             infeasibility_reason = reason or "MILP constraints infeasible. Falling back to nearest unconstrained layout."
             opt_centers, opt_labels = weighted_kmeans_optimization(
-                coords, weights, K=K, random_seed=config.random_seed
+                coords, weights, K=K, random_seed=config.random_seed,
+                initial_centers=owned,
             )
             if config.distance_metric == "road" and len(opt_centers) > 1:
                 opt_labels = nearest_labels_for_metric(
@@ -732,7 +860,8 @@ def run_optimization(
         # metric every node is reassigned to its road-nearest center before
         # evaluation (distances, radius feasibility, costs all stay consistent).
         opt_centers, opt_labels = weighted_kmeans_optimization(
-            coords, weights, K=K, random_seed=config.random_seed
+            coords, weights, K=K, random_seed=config.random_seed,
+            initial_centers=owned,
         )
         if config.distance_metric == "road" and len(opt_centers) > 1:
             opt_labels = nearest_labels_for_metric(
@@ -832,13 +961,35 @@ def run_optimization(
         except Exception:
             pass
 
-    # Compute baseline comparison (Phase 4 cost engine, history-steered too)
-    baseline_eval = compute_baseline_layout(neighborhoods, config,
+    # Compute baseline comparison (Phase 4 cost engine, history-steered too).
+    # With owned sites and the default centroid baseline, compare against the
+    # user's CURRENT network instead — savings read as "vs what you own".
+    baseline_config = config
+    if (respect_owned and owned is not None and len(owned) > 0
+            and config.baseline_mode == "centroid"):
+        try:
+            baseline_config = config.model_copy(update={
+                "baseline_mode": "custom",
+                "custom_baseline_warehouses": list(config.owned_warehouses or []),
+            })
+        except Exception:
+            baseline_config = config
+    baseline_eval = compute_baseline_layout(neighborhoods, baseline_config,
                                             fuel_prices=fuel_prices, fuel_live=fuel_live,
                                             apply_history=True, notes=routing_notes)
     opt_eval = LayoutEvaluation(metrics=metrics, warehouses=warehouses, assignments=assignments)
     comparison = compute_comparison(baseline_eval, opt_eval)
     routing_note = "; ".join(routing_notes) if routing_notes else None
+
+    # Flag kept owned sites + allocate the fleet across warehouses by load.
+    mark_owned_sites(warehouses, metrics, owned)
+    fleet_assignment, fleet_by_wh = allocate_fleet(
+        getattr(config, "vehicle_fleet", None) or [],
+        [w.assigned_orders or 0 for w in warehouses],
+        [w.warehouse_id for w in warehouses],
+    )
+    for m in metrics.warehouses:
+        m.assigned_vehicles = fleet_by_wh.get(m.warehouse_id, [])
 
     if effective_live and live_corridors > 0:
         src = ("road-corridor segments" if config.use_live_traffic_for_routing
@@ -873,4 +1024,5 @@ def run_optimization(
         fuel_note=fuel_note,
         traffic_note=traffic_note,
         routing_note=routing_note,
+        fleet_assignment=fleet_assignment,
     )
