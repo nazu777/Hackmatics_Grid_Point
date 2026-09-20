@@ -619,6 +619,7 @@ const AppShell: React.FC = () => {
           </SidePanel>
         )}
 
+        {panel === 'data' && (
           <SidePanel
             title="Demand Data"
             meta={`${neighborhoods.length} nodes • ${summary.total_orders.toLocaleString()} daily orders`}

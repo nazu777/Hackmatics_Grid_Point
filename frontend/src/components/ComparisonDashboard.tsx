@@ -1,5 +1,5 @@
 import React, { useMemo } from 'react';
-import { Scale, Download, TrendingDown, DollarSign, Route } from 'lucide-react';
+import { Download, TrendingDown, DollarSign, Route } from 'lucide-react';
 import { Neighborhood, OptimizationResult, ZoneColorMap } from '../types';
 import { WarehouseExpansion } from './WarehouseExpansion';
 
