@@ -21,7 +21,11 @@ from .schema import (
 )
 from .distance import compute_distance_matrix
 from .cost import compute_comparison, resolve_fuel_prices
-from .optimization import evaluate_network_layout, weiszfeld_geometric_median
+from .optimization import (
+    evaluate_network_layout,
+    weiszfeld_geometric_median,
+    nearest_labels_for_metric,
+)
 
 MAX_WAREHOUSES = 10
 
@@ -140,14 +144,27 @@ def expand_network(
     # One shared fuel resolution so before/after economics match exactly.
     fuel_prices, fuel_live, fuel_note = resolve_fuel_prices(config)
 
-    dist_before = compute_distance_matrix(coords, sites[:K0], metric=metric)
-    labels_before = _nearest_labels(dist_before)
+    # Reported assignments must use the same metric as evaluation: under the
+    # road metric, labels come from road distances (not the haversine siting
+    # heuristic above) so distances, radius flags and costs stay consistent.
+    true_metric = (config.distance_metric or "haversine").lower().strip()
+    live_traffic = bool(getattr(config, "use_live_traffic", False))
+    if true_metric == "road":
+        labels_before = nearest_labels_for_metric(
+            coords, sites[:K0], "road", live_traffic=live_traffic)
+    else:
+        dist_before = compute_distance_matrix(coords, sites[:K0], metric=metric)
+        labels_before = _nearest_labels(dist_before)
     before_wh, before_asg, before_metrics = evaluate_network_layout(
         neighborhoods, sites[:K0], labels_before, config,
         fuel_prices=fuel_prices, fuel_live=fuel_live,
     )
-    dist_after = compute_distance_matrix(coords, sites, metric=metric)
-    labels_after = _nearest_labels(dist_after)
+    if true_metric == "road":
+        labels_after = nearest_labels_for_metric(
+            coords, sites, "road", live_traffic=live_traffic)
+    else:
+        dist_after = compute_distance_matrix(coords, sites, metric=metric)
+        labels_after = _nearest_labels(dist_after)
     after_wh, after_asg, after_metrics = evaluate_network_layout(
         neighborhoods, sites, labels_after, config,
         fuel_prices=fuel_prices, fuel_live=fuel_live,

@@ -3,6 +3,7 @@ import mapboxgl from 'mapbox-gl';
 import 'mapbox-gl/dist/mapbox-gl.css';
 import { Neighborhood, Warehouse, Assignment, BasemapStyle, ColorByMode, ZoneColorMap } from '../types';
 import { BASEMAPS, getMapboxToken, colorForZone, zoneCounts } from './mapThemes';
+import type { IsoFeature } from '../services/api';
 
 const PALETTE = ['#0ea5e9', '#3b82f6', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4', '#f97316', '#84cc16', '#ec4899', '#6366f1'];
 
@@ -83,6 +84,10 @@ interface MapViewProps {
   linesMode?: 'displacement' | 'roads';
   /** Traced road paths by neighborhood_id ([[lon, lat], ...]). Missing entries fall back to straight lines. */
   roadGeometries?: Record<string, number[][]>;
+  /** Road-network service-area polygons by warehouse_id (Mapbox isochrones).
+   * Rendered as the radius heatmap in roads mode; missing entries fall back
+   * to straight-line circles. */
+  isochrones?: Record<string, IsoFeature[]>;
   /** Click a route line to trace its road path (roads mode, large datasets). */
   onRouteClick?: (neighborhoodId: string) => void;
   /** 'light' | 'dark' website theme — adjusts pin chrome. */
@@ -171,6 +176,7 @@ export const MapView: React.FC<MapViewProps> = ({
   colorRoutesByTraffic = false,
   linesMode = 'displacement',
   roadGeometries = {},
+  isochrones = {},
   onRouteClick,
   theme = 'light',
   minimal = false,
@@ -415,20 +421,44 @@ export const MapView: React.FC<MapViewProps> = ({
       });
     }
 
-    // Service-radius circles as filled GeoJSON polygons
+    // Service-radius overlay. Roads mode draws the road-network service area
+    // (Mapbox isochrone polygons per warehouse, nested contours forming a
+    // heat gradient); anywhere else — or when isochrones are unavailable —
+    // straight-line geodesic circles.
     if (showRadius && showWarehouses && radiusKm && radiusKm > 0 && warehouses.length > 0) {
-      const features = warehouses.map((w) => ({
-        type: 'Feature' as const,
-        properties: { color: whColor(w.warehouse_id) },
-        geometry: { type: 'Polygon' as const, coordinates: circlePolygon(w.latitude, w.longitude, radiusKm) }
-      }));
+      const isoEntries = linesMode === 'roads'
+        ? warehouses.flatMap((w) => {
+            const feats = isochrones[w.warehouse_id] || [];
+            if (feats.length === 0) return [];
+            const contours = feats
+              .map((f) => Number(f?.properties?.contour))
+              .filter((c) => Number.isFinite(c));
+            const maxC = contours.length ? Math.max(...contours) : 1;
+            return feats.map((f) => {
+              const c = Number(f?.properties?.contour);
+              const inner = Number.isFinite(c) && contours.length > 1 && c < maxC;
+              return {
+                type: 'Feature' as const,
+                properties: { color: whColor(w.warehouse_id), opacity: inner ? 0.22 : 0.09 },
+                geometry: f.geometry as { type: 'Polygon'; coordinates: number[][][] }
+              };
+            });
+          })
+        : [];
+      const features = isoEntries.length > 0
+        ? isoEntries
+        : warehouses.map((w) => ({
+          type: 'Feature' as const,
+          properties: { color: whColor(w.warehouse_id), opacity: 0.06 },
+          geometry: { type: 'Polygon' as const, coordinates: circlePolygon(w.latitude, w.longitude, radiusKm) }
+        }));
       try {
         map.addSource(RADIUS_SRC, { type: 'geojson', data: { type: 'FeatureCollection', features } });
         map.addLayer({
           id: `${RADIUS_SRC}-fill`,
           type: 'fill',
           source: RADIUS_SRC,
-          paint: { 'fill-color': ['get', 'color'], 'fill-opacity': 0.06 }
+          paint: { 'fill-color': ['get', 'color'], 'fill-opacity': ['get', 'opacity'] }
         });
         map.addLayer({
           id: `${RADIUS_SRC}-line`,
@@ -508,7 +538,7 @@ export const MapView: React.FC<MapViewProps> = ({
     try {
       map.resize();
     } catch { /* ignore */ }
-  }, [neighborhoods, warehouses, assignments, radiusKm, basemap, styleReady, token, colorBy, zoneColors, showWarehouses, showRoutes, showDemand, showRadius, routeColor, colorRoutesByTraffic, linesMode, roadGeometries, theme, highlightId, focus]);
+  }, [neighborhoods, warehouses, assignments, radiusKm, basemap, styleReady, token, colorBy, zoneColors, showWarehouses, showRoutes, showDemand, showRadius, routeColor, colorRoutesByTraffic, linesMode, roadGeometries, isochrones, theme, highlightId, focus]);
 
   // Fly-to on focus requests (gmaps "Center" action)
   useEffect(() => {
@@ -598,7 +628,7 @@ export const MapView: React.FC<MapViewProps> = ({
       </div>
       <div className="px-5 pt-2 text-[11px] text-slate-500">
         {neighborhoods.length} nodes • {warehouses.length} warehouses • {assignments.length} lines
-        {radiusKm ? ` • R_max ${radiusKm} km` : ''}
+        {radiusKm ? (linesMode === 'roads' && warehouses.some((w) => (isochrones[w.warehouse_id] || []).length > 0) ? ` • R_max ${radiusKm} km by road` : ` • R_max ${radiusKm} km`) : ''}
       </div>
       <div ref={divRef} style={fill ? { height: '100%' } : { height }} className="z-0" />
       <div className="px-5 py-2 border-t border-slate-100 flex flex-wrap gap-3 text-[11px] text-slate-600">

@@ -22,7 +22,7 @@ import { ScenariosPanel } from './components/ScenariosPanel';
 import { ZoneLegendEditor } from './components/ZoneLegendEditor';
 import { ExportView } from './components/ExportView';
 import { SettingsView } from './components/SettingsView';
-import { useZoneColors } from './components/mapThemes';
+import { useZoneColors, getMapboxToken } from './components/mapThemes';
 import type { ThemeMode } from './components/Topbar';
 import {
   buildAssignmentsCsv,
@@ -35,7 +35,7 @@ import {
 } from './components/panelStore';
 import { HYDERABAD_SAMPLE } from './data/sample';
 import { Neighborhood, ValidationResult, DatasetSummary, OptimizationConfig, OptimizationResult, MapLayerOptions, BasemapStyle } from './types';
-import { validateData, localValidate, optimizeNetwork, exportCsv, fetchRouteGeometries } from './services/api';
+import { validateData, localValidate, optimizeNetwork, exportCsv, fetchRouteGeometries, fetchIsochrones, type IsoFeature } from './services/api';
 
 const DEFAULT_CONFIG: OptimizationConfig = {
   K: 2,
@@ -130,14 +130,22 @@ const AppShell: React.FC = () => {
   const [roadGeometries, setRoadGeometries] = useState<Record<string, number[][]>>({});
   const [tracing, setTracing] = useState(false);
   const [routeNotice, setRouteNotice] = useState<string | null>(null);
+  // Full re-optimization in flight (roads toggle switches distance metric).
+  const [reopting, setReopting] = useState(false);
+  // Last non-road metric, restored when leaving roads mode.
+  const prevMetricRef = useRef<'haversine' | 'euclidean' | 'manhattan'>('haversine');
+  // Road-network service-area polygons by warehouse_id (roads mode radius
+  // heatmap). Missing/failed entries fall back to straight-line circles.
+  const [isoGeometries, setIsoGeometries] = useState<Record<string, IsoFeature[]>>({});
 
-  const traceRoutes = useCallback(async (ids: string[]) => {
-    if (!optimizationResult || ids.length === 0) return;
-    const whById = new Map(optimizationResult.warehouses.map((w) => [w.warehouse_id, w]));
+  const traceRoutes = useCallback(async (ids: string[], resOverride?: OptimizationResult | null) => {
+    const res = resOverride ?? optimizationResult;
+    if (!res || ids.length === 0) return;
+    const whById = new Map(res.warehouses.map((w) => [w.warehouse_id, w]));
     const nbById = new Map(neighborhoods.map((n) => [n.neighborhood_id, n]));
     const pairs: { id: string; from: { lat: number; lon: number }; to: { lat: number; lon: number } }[] = [];
     ids.forEach((id) => {
-      const a = optimizationResult.assignments.find((x) => x.neighborhood_id === id);
+      const a = res.assignments.find((x) => x.neighborhood_id === id);
       const nb = nbById.get(id);
       const wh = a ? whById.get(a.warehouse_id) : undefined;
       if (a && nb && wh) pairs.push({ id, from: { lat: nb.latitude, lon: nb.longitude }, to: { lat: wh.latitude, lon: wh.longitude } });
@@ -155,7 +163,7 @@ const AppShell: React.FC = () => {
         setRouteNotice(`Tracing road paths… ${Math.min(s + slice.length, pairs.length)}/${pairs.length}`);
         const routes = await fetchRouteGeometries(
           slice.map((p) => ({ from: p.from, to: p.to })),
-          !!optimizationResult.config.use_live_traffic
+          !!res.config.use_live_traffic
         );
         if (!Array.isArray(routes)) throw new Error('Route service returned an unexpected shape.');
         setRoadGeometries((prev) => {
@@ -174,7 +182,7 @@ const AppShell: React.FC = () => {
       const total = Object.keys(roadGeometries).length + stored;
       setRouteNotice(
         stored > 0
-          ? `Road paths via ${[...seenProviders].join(' + ')} (${total}/${optimizationResult.assignments.length} traced)`
+          ? `Road paths via ${[...seenProviders].join(' + ')} (${total}/${res.assignments.length} traced)`
           : 'No road paths returned — showing displacement lines.'
       );
     } catch (e: any) {
@@ -184,21 +192,105 @@ const AppShell: React.FC = () => {
     }
   }, [optimizationResult, neighborhoods, roadGeometries]);
 
-  const handleLinesMode = useCallback((mode: 'displacement' | 'roads') => {
-    setLinesMode(mode);
-    setRouteNotice(null);
-    if (mode === 'roads' && optimizationResult) {
+  /**
+   * Road-network service-area polygons for each warehouse (roads-mode radius
+   * heatmap). Travel-time contours from Mapbox Isochrone (driving profile):
+   * R_max km at ~30 km/h urban speed → minutes, capped at the API's 60-min
+   * limit. Two nested contours (half + full) give the heat gradient. Any
+   * failure clears the layer so the map falls back to straight-line circles.
+   */
+  const fetchCoverage = useCallback(async (res: OptimizationResult, radiusKm: number | null) => {
+    const token = getMapboxToken();
+    if (!token || !radiusKm || radiusKm <= 0 || res.warehouses.length === 0) {
+      setIsoGeometries({});
+      return;
+    }
+    const full = Math.min(60, Math.max(5, Math.round(radiusKm * 2)));
+    const contours = full >= 10 ? [Math.round(full / 2), full] : [full];
+    try {
+      const entries = await Promise.all(
+        res.warehouses.map(async (w) => {
+          const feats = await fetchIsochrones(w.longitude, w.latitude, contours, token);
+          return [w.warehouse_id, feats] as const;
+        })
+      );
+      setIsoGeometries(Object.fromEntries(entries));
+    } catch {
+      setIsoGeometries({});
+    }
+  }, []);
+
+  const handleLinesMode = async (mode: 'displacement' | 'roads') => {
+    if (mode === linesMode || !optimizationResult || neighborhoods.length === 0) {
+      setLinesMode(mode);
+      return;
+    }
+    if (reopting || tracing) return;
+    if (mode === 'roads') {
+      // Full re-optimization on the road network: assignments, distances,
+      // radius feasibility and costs are all computed along real road routes
+      // (backend: TomTom live / OSRM, straight-line fallback when offline).
+      const cur = optimizationResult.config.distance_metric;
+      if (cur !== 'road') {
+        prevMetricRef.current = cur;
+        const roadCfg = { ...optimizationResult.config, distance_metric: 'road' as const };
+        setLinesMode(mode);
+        setReopting(true);
+        setRouteNotice('Re-optimizing on the road network…');
+        try {
+          const res = await optimizeNetwork(neighborhoods, roadCfg);
+          setOptimizationResult(res);
+          handleConfigChange({ ...optimizationConfig, distance_metric: 'road' });
+          const rKm = res.config.radius_enabled ? (res.config.R_max_km ?? null) : previewRadiusKm;
+          await traceRoutes(res.assignments.map((a) => a.neighborhood_id), res);
+          await fetchCoverage(res, rKm);
+          setRouteNotice((prev) => prev ?? `Road-network optimization complete (${res.assignments.length} routes).`);
+        } catch (e: any) {
+          setLinesMode('displacement');
+          setRouteNotice(e instanceof Error ? e.message : 'Road re-optimization failed.');
+        } finally {
+          setReopting(false);
+        }
+        return;
+      }
+      // Already road-based: just trace any missing driving paths.
+      setLinesMode(mode);
+      setRouteNotice(null);
       const missing = optimizationResult.assignments
         .map((a) => a.neighborhood_id)
         .filter((id) => !roadGeometries[id]);
       if (missing.length === 0) {
+        const rKm = optimizationResult.config.radius_enabled ? (optimizationResult.config.R_max_km ?? null) : previewRadiusKm;
+        await fetchCoverage(optimizationResult, rKm);
         setRouteNotice(`All ${optimizationResult.assignments.length} road paths traced.`);
         return;
       }
-      // Chunked + progressive: any dataset size traces incrementally.
       traceRoutes(missing);
+      return;
     }
-  }, [optimizationResult, roadGeometries, traceRoutes]);
+    // Back to displacement: restore the previous straight-line metric and
+    // re-optimize so distances/radius match the displayed straight lines.
+    setLinesMode(mode);
+    setIsoGeometries({});
+    if (optimizationResult.config.distance_metric === 'road') {
+      const back = prevMetricRef.current;
+      const dispCfg = { ...optimizationResult.config, distance_metric: back };
+      setReopting(true);
+      setRouteNotice(`Re-optimizing with ${back} distances…`);
+      try {
+        const res = await optimizeNetwork(neighborhoods, dispCfg);
+        setOptimizationResult(res);
+        handleConfigChange({ ...optimizationConfig, distance_metric: back });
+        setRouteNotice(null);
+      } catch (e: any) {
+        setRouteNotice(e instanceof Error ? e.message : 'Re-optimization failed.');
+      } finally {
+        setReopting(false);
+      }
+    } else {
+      setRouteNotice(null);
+    }
+  };
 
   // Resizable sidebar (drag the right edge; width persisted)
   const SIDEBAR_MIN = 280;
@@ -435,10 +527,15 @@ const AppShell: React.FC = () => {
 
   const toggleLayer = (key: keyof LayerFlags) => setLayers((prev) => ({ ...prev, [key]: !prev[key] }));
 
-  // Traced road paths belong to a specific result/dataset — drop them on change
+  // Traced road paths + coverage polygons belong to a specific result/dataset — drop them on change.
+  // A fresh non-road result also drops the roads toggle back to displacement.
   useEffect(() => {
     setRoadGeometries({});
+    setIsoGeometries({});
     setRouteNotice(null);
+    if (optimizationResult && optimizationResult.config.distance_metric !== 'road') {
+      setLinesMode('displacement');
+    }
   }, [optimizationResult, neighborhoods]);
 
   // Service-radius overlay: enforced R_max from the result when present,
@@ -753,6 +850,7 @@ const AppShell: React.FC = () => {
             colorRoutesByTraffic={layers.traffic}
             linesMode={linesMode}
             roadGeometries={roadGeometries}
+            isochrones={isoGeometries}
             onRouteClick={(id) => traceRoutes([id])}
             theme={theme}
             highlightId={highlightId}
@@ -826,12 +924,13 @@ const AppShell: React.FC = () => {
                 <button
                   key={m}
                   onClick={() => handleLinesMode(m)}
-                  title={m === 'roads' ? 'Draw actual driving paths (fetched per route)' : 'Straight hub-spoke lines'}
-                  className={`px-3 py-1.5 rounded-full font-semibold capitalize transition cursor-pointer ${
+                  disabled={reopting || tracing}
+                  title={m === 'roads' ? 'Re-optimize on the road network: distances, assignments and radius all computed along real driving routes' : 'Straight hub-spoke lines with straight-line distances'}
+                  className={`px-3 py-1.5 rounded-full font-semibold capitalize transition cursor-pointer disabled:opacity-60 ${
                     linesMode === m ? 'bg-[#14424E] text-white' : 'text-ink-faint hover:text-ink'
                   }`}
                 >
-                  {tracing && m === 'roads' ? 'Tracing…' : m}
+                  {reopting && m === linesMode ? 'Optimizing…' : tracing && m === 'roads' ? 'Tracing…' : m}
                 </button>
               ))}
             </div>

@@ -339,6 +339,36 @@ export async function fetchRouteGeometries(
   return body.routes as RouteGeometry[];
 }
 
+export interface IsoFeature {
+  type: 'Feature';
+  properties: { contour?: number; [k: string]: unknown };
+  geometry: { type: 'Polygon' | 'MultiPolygon'; coordinates: unknown };
+}
+
+/**
+ * Road-network service-area polygon(s) around a point via the Mapbox
+ * Isochrone API (driving profile, travel-time contours along real roads).
+ * `minutes` may hold 1-2 contours (e.g. [half, full]); response features
+ * carry properties.contour (minutes, ascending). Throws on failure so
+ * callers can fall back to straight-line radius circles.
+ */
+export async function fetchIsochrones(
+  lon: number,
+  lat: number,
+  minutes: number[],
+  token: string
+): Promise<IsoFeature[]> {
+  const mins = [...new Set(minutes.map((m) => Math.max(1, Math.min(60, Math.round(m)))))].sort((a, b) => a - b);
+  const url =
+    `https://api.mapbox.com/isochrone/v1/mapbox/driving/${lon},${lat}` +
+    `?contours_minutes=${mins.join(',')}&polygons=true&denoise=1&access_token=${encodeURIComponent(token)}`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`Isochrone fetch failed (HTTP ${res.status})`);
+  const body = (await res.json()) as { features?: unknown };
+  if (!body || !Array.isArray(body.features)) throw new Error('Isochrone service returned an unexpected shape.');
+  return body.features as IsoFeature[];
+}
+
 export async function exportAssignmentsCsv(result: OptimizationResult): Promise<string> {
   try {
     const res = await fetch(`${API_BASE}/export/assignments`, {

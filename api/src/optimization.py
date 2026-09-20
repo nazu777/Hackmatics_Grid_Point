@@ -24,6 +24,31 @@ from .distance import compute_distance_matrix
 from .cost import assignment_cost, assignment_fuel_cost, compute_comparison, resolve_fuel_prices
 
 
+def nearest_labels_for_metric(
+    coords: np.ndarray,
+    centers: np.ndarray,
+    metric: str,
+    live_traffic: bool = False,
+    notes: Optional[List[str]] = None,
+) -> np.ndarray:
+    """
+    Nearest-center assignment honoring the configured distance metric.
+    When metric == "road", labels come from the road routing provider
+    (TomTom live / OSRM / straight-line fallback) so the assignment matches
+    the road distances reported by evaluate_network_layout. The plain
+    compute_distance_matrix dispatcher has no "road" branch and would
+    silently assign by straight-line distance instead.
+    """
+    if (metric or "haversine").lower().strip() == "road":
+        from .routing import road_matrices
+        dist, _, note = road_matrices(coords, centers, live_traffic=live_traffic)
+        if notes is not None and note not in notes:
+            notes.append(note)
+        return np.argmin(dist, axis=1)
+    return np.argmin(
+        compute_distance_matrix(coords, centers, metric=metric), axis=1)
+
+
 def weiszfeld_geometric_median(
     coords: np.ndarray,
     weights: np.ndarray,
@@ -434,9 +459,11 @@ def compute_baseline_layout(
         base_center = np.array([(min_lat + max_lat) / 2.0, (min_lon + max_lon) / 2.0])
         base_centers = np.atleast_2d(base_center)
 
-    # Assign all nodes to nearest baseline warehouse
-    dist_matrix = compute_distance_matrix(coords, base_centers, metric=config.distance_metric)
-    labels = np.argmin(dist_matrix, axis=1)
+    # Assign all nodes to nearest baseline warehouse (road-aware when
+    # metric == "road" so labels match the evaluated road distances).
+    labels = nearest_labels_for_metric(
+        coords, base_centers, config.distance_metric,
+        live_traffic=config.use_live_traffic, notes=notes)
 
     base_corridor: Optional[Dict[int, float]] = None
     if apply_history:
@@ -542,12 +569,25 @@ def run_optimization(
             opt_centers, opt_labels = weighted_kmeans_optimization(
                 coords, weights, K=K, random_seed=config.random_seed
             )
+            if config.distance_metric == "road" and len(opt_centers) > 1:
+                opt_labels = nearest_labels_for_metric(
+                    coords, opt_centers, "road",
+                    live_traffic=config.use_live_traffic, notes=milp_notes,
+                )
 
     else:
-        # Unconstrained optimization (Weiszfeld for K=1, Weighted K-Means for K>1)
+        # Unconstrained optimization (Weiszfeld for K=1, Weighted K-Means for K>1).
+        # K-Means labels are euclidean in degree space, so under the road
+        # metric every node is reassigned to its road-nearest center before
+        # evaluation (distances, radius feasibility, costs all stay consistent).
         opt_centers, opt_labels = weighted_kmeans_optimization(
             coords, weights, K=K, random_seed=config.random_seed
         )
+        if config.distance_metric == "road" and len(opt_centers) > 1:
+            opt_labels = nearest_labels_for_metric(
+                coords, opt_centers, "road",
+                live_traffic=config.use_live_traffic, notes=milp_notes,
+            )
 
     # Resolve live corridor congestion at the final warehouse sites (K cached
     # TomTom calls at most; each reading is recorded into rolling history).

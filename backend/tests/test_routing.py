@@ -123,6 +123,80 @@ def test_optimize_road_metric_uses_provider(monkeypatch):
     assert res.comparison is not None
 
 
+def test_road_metric_reassigns_to_road_nearest(monkeypatch):
+    """Unconstrained road optimization must assign by road distance.
+
+    K-Means labels are euclidean in degree space; under metric="road" every
+    node must end up at its road-nearest center with matching distances.
+    """
+    from src.optimization import run_optimization
+    from src.schema import Warehouse
+
+    # Road matrix (3 nodes x 2 centers): node0->W1, node1->W2, node2->W2.
+    # Deliberately independent of straight-line geometry.
+    road_2 = np.array([[1.0, 9.0], [9.0, 1.0], [8.0, 2.0]])
+
+    def fake_road(c1, c2, live_traffic=False):
+        n, m = len(np.atleast_2d(c1)), len(np.atleast_2d(c2))
+        if m == 2:
+            assert n == 3
+            return road_2.copy(), np.full((n, m), 5.0), "mock roads"
+        return np.full((n, m), 4.0), np.full((n, m), 5.0), "mock roads"
+
+    import src.routing as rmod
+    monkeypatch.setattr(rmod, "road_matrices", fake_road)
+    nodes = [
+        {"neighborhood_id": "N1", "latitude": 17.38, "longitude": 78.48, "daily_orders": 10},
+        {"neighborhood_id": "N2", "latitude": 17.40, "longitude": 78.50, "daily_orders": 20},
+        {"neighborhood_id": "N3", "latitude": 17.42, "longitude": 78.52, "daily_orders": 30},
+    ]
+    cfg = OptimizationConfig(K=2, distance_metric="road")
+    res = run_optimization(nodes, cfg)
+    got = {a.neighborhood_id: a.warehouse_id for a in res.assignments}
+    assert got == {"N1": "W1", "N2": "W2", "N3": "W2"}
+    dist = {a.neighborhood_id: a.distance_km for a in res.assignments}
+    assert dist == pytest.approx({"N1": 1.0, "N2": 1.0, "N3": 2.0})
+    # Baseline (single center) also evaluates on road distances.
+    assert res.comparison is not None
+    assert all(a.distance_km == pytest.approx(4.0)
+               for a in res.comparison.baseline.assignments)
+
+
+def test_baseline_custom_uses_road_labels(monkeypatch):
+    """Baseline with custom warehouses assigns by road, not straight-line."""
+    from src.optimization import compute_baseline_layout
+
+    road_2 = np.array([[1.0, 9.0], [9.0, 1.0]])
+
+    def fake_road(c1, c2, live_traffic=False):
+        n, m = len(np.atleast_2d(c1)), len(np.atleast_2d(c2))
+        if m == 2:
+            return road_2.copy(), None, "mock roads"
+        return np.full((n, m), 4.0), None, "mock roads"
+
+    import src.routing as rmod
+    monkeypatch.setattr(rmod, "road_matrices", fake_road)
+    nodes = [
+        {"neighborhood_id": "N1", "latitude": 17.38, "longitude": 78.48, "daily_orders": 10},
+        {"neighborhood_id": "N2", "latitude": 17.40, "longitude": 78.50, "daily_orders": 20},
+    ]
+    cfg = OptimizationConfig(
+        K=2,
+        distance_metric="road",
+        baseline_mode="custom",
+        custom_baseline_warehouses=[
+            {"warehouse_id": "B1", "latitude": 0.0, "longitude": 0.0},
+            {"warehouse_id": "B2", "latitude": 50.0, "longitude": 50.0},
+        ],
+    )
+    ev = compute_baseline_layout(nodes, cfg)
+    got = {a.neighborhood_id: a.warehouse_id for a in ev.assignments}
+    # Road matrix says N1->first center, N2->second (straight-line would agree
+    # here by construction, so assert exact road distances as the real check).
+    assert got == {"N1": "W1", "N2": "W2"}
+    assert [a.distance_km for a in ev.assignments] == pytest.approx([1.0, 1.0])
+
+
 def test_route_geometry_tomtom(monkeypatch):
     import urllib.request
 

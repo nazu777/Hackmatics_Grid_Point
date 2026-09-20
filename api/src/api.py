@@ -3,7 +3,7 @@ GridPoint FastAPI Backend
 Provides REST endpoints for data ingestion, validation, and synthetic generation (schema.md §6).
 """
 from typing import List, Dict, Any, Optional, Tuple
-from fastapi import FastAPI, UploadFile, File, Query, HTTPException, status
+from fastapi import FastAPI, UploadFile, File, Query, HTTPException, status, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import PlainTextResponse, JSONResponse
 from pydantic import BaseModel
@@ -29,6 +29,7 @@ from .data_ingestion import (
 from .synthetic import generate_synthetic_dataset
 from .optimization import run_optimization
 from .mapping import prepare_map_layer_data, compute_map_bounds
+from . import auth as auth_module
 
 app = FastAPI(
     title="GridPoint API",
@@ -413,6 +414,63 @@ class DiagnosticsRequest(BaseModel):
     warehouses: List[Warehouse]
     assignments: List[Assignment]
     config: OptimizationConfig
+
+
+# ---------------------------------------------------------------------------
+# Auth (JWT, backend-only per schema — see backend/src/auth.py)
+# ---------------------------------------------------------------------------
+
+class SignupRequest(BaseModel):
+    name: str
+    email: str
+    password: str
+
+
+class LoginRequest(BaseModel):
+    email: str
+    password: str
+
+
+def _bearer_token(auth_header: Optional[str]) -> Optional[str]:
+    if not auth_header:
+        return None
+    parts = auth_header.split()
+    if len(parts) == 2 and parts[0].lower() == "bearer":
+        return parts[1]
+    return None
+
+
+@app.post("/api/auth/signup")
+def auth_signup(payload: SignupRequest):
+    user, err = auth_module.signup_user(payload.name, payload.email, payload.password)
+    if err:
+        code = status.HTTP_409_CONFLICT if "already exists" in err else status.HTTP_400_BAD_REQUEST
+        raise HTTPException(status_code=code, detail=err)
+    token = auth_module.create_access_token(user["id"], user["email"])
+    return {"token": token, "user": auth_module.public_user(user)}
+
+
+@app.post("/api/auth/login")
+def auth_login(payload: LoginRequest):
+    user, err = auth_module.authenticate_user(payload.email, payload.password)
+    if err:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=err)
+    token = auth_module.create_access_token(user["id"], user["email"])
+    return {"token": token, "user": auth_module.public_user(user)}
+
+
+@app.get("/api/auth/me")
+def auth_me(request: Request):
+    token = _bearer_token(request.headers.get("authorization"))
+    if not token:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing bearer token")
+    payload = auth_module.decode_token(token)
+    if not payload:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired token")
+    user = auth_module._USERS.get((payload.get("email") or "").lower())
+    if not user:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User no longer exists")
+    return auth_module.public_user(user)
 
 
 @app.post("/api/scenarios/tradeoff")
