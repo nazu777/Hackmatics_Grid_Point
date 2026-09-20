@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Siren, Wifi, WifiOff } from 'lucide-react';
-import type { OptimizationConfig } from '../types';
+import type { Neighborhood, OptimizationConfig, TrafficZone } from '../types';
+import { fetchTrafficZones } from '../services/api';
 
 interface TrafficCardProps {
   config: OptimizationConfig;
@@ -8,6 +9,8 @@ interface TrafficCardProps {
   /** Corridor readout from the last run (avg congestion + note). */
   lastAvgCongestion?: number | null;
   lastNote?: string | null;
+  /** Phase L (#9): demand nodes to build the zone legend from (optional). */
+  neighborhoods?: Neighborhood[];
 }
 
 const HOURS = Array.from({ length: 24 }, (_, h) => h);
@@ -23,14 +26,36 @@ const HOURS = Array.from({ length: 24 }, (_, h) => h);
  * assignment react to current conditions; "Dynamic reroute"
  * (traffic_aware_reroute) refines assignment for α·cost + β·time.
  */
-export const TrafficCard: React.FC<TrafficCardProps> = ({ config, onChange, lastAvgCongestion, lastNote }) => {
+export const TrafficCard: React.FC<TrafficCardProps> = ({ config, onChange, lastAvgCongestion, lastNote, neighborhoods }) => {
   const [nowHour, setNowHour] = useState<number>(new Date().getHours());
+  // Phase L (#9): zone legend — centre-high → edge-low, red/yellow/green.
+  const [zones, setZones] = useState<TrafficZone[]>([]);
   useEffect(() => {
     const t = setInterval(() => setNowHour(new Date().getHours()), 60000);
     return () => clearInterval(t);
   }, []);
+  useEffect(() => {
+    if (!neighborhoods || neighborhoods.length === 0) {
+      setZones([]);
+      return;
+    }
+    let cancelled = false;
+    fetchTrafficZones(neighborhoods, 0).then((r) => {
+      if (!cancelled) setZones(r.zones || []);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [neighborhoods]);
 
   const effectiveHour = config.traffic_hour ?? nowHour;
+  const zoneCounts = zones.reduce(
+    (acc, z) => {
+      acc[z.level] = (acc[z.level] || 0) + 1;
+      return acc;
+    },
+    {} as Record<string, number>
+  );
 
   return (
     <div className="bg-violet-50/60 p-4 rounded-2xl border border-violet-100 space-y-3">
@@ -121,6 +146,29 @@ export const TrafficCard: React.FC<TrafficCardProps> = ({ config, onChange, last
             real-time speeds to start recording.
           </span>
         </p>
+      )}
+
+      {/* Phase L (#9): dynamic zone-traffic legend (centre-high → edge-low). */}
+      {zones.length > 0 && (
+        <div className="bg-white/70 border border-violet-100 rounded-xl px-2.5 py-2">
+          <span className="text-[10px] font-bold text-slate-600 uppercase tracking-wider block mb-1">
+            Zone traffic (centre → edge)
+          </span>
+          <div className="flex items-center gap-3 text-[11px] font-semibold text-slate-600">
+            <span className="flex items-center gap-1">
+              <span className="w-2.5 h-2.5 rounded-full bg-[#ef4444]" /> Jammed{zoneCounts.high ? ` ${zoneCounts.high}` : ''}
+            </span>
+            <span className="flex items-center gap-1">
+              <span className="w-2.5 h-2.5 rounded-full bg-[#f59e0b]" /> Busy{zoneCounts.medium ? ` ${zoneCounts.medium}` : ''}
+            </span>
+            <span className="flex items-center gap-1">
+              <span className="w-2.5 h-2.5 rounded-full bg-[#22c55e]" /> Fluid{zoneCounts.low ? ` ${zoneCounts.low}` : ''}
+            </span>
+          </div>
+          <p className="text-[10px] text-slate-500 mt-1">
+            Centre zones congest first; reroute, ETA and fuel read these factors.
+          </p>
+        </div>
       )}
     </div>
   );

@@ -108,13 +108,24 @@ Directly derived from `problem_statement.md`:
 - Policy inputs: `allow_abandon_infra` (keep vs abandon/change/demolish + demolition cost + salvage), `allow_sell_vehicles` (keep vs sell + resale), `horizon_months`, `revenue_per_order`.
 - Candidates (new sites + added vehicles) scored on dynamic infra-vs-fuel-vs-delivery economics over the horizon; ONE recommended plan ranked by net benefit (delivery savings + future revenue − capex − abandon/sell frictions) with costed rationale + before/after map + apply-to-main-map.
 
-### 5.10 Realtime Automation (shipped — #12, #13)
+### 5.10 Realtime Automation (shipped — #12, #13; extended follow-up Phase I #6)
+
 - `simulation_mode: off|realtime` master switch (`OptimizationConfig`; default `off`). When ON: "Traffic Congestion & Fleet ETA" and "Demand Surge & Contraction Simulator" read live fuel + traffic + population feeds on a 15s poll tick — NO manual sliders in the default path (sliders survive only as collapsed offline overrides).
 - Congestion spillover: sustained congestion near a warehouse (threshold + hysteresis + cooldown, all configurable on `OptimizationConfig`) reassigns nodes to the next-best warehouse until the surge clears; event log records spill start/end, moved nodes, recovered savings.
 - Engine: `backend/src/simulation.py` (orchestrates `cost`/`traffic`/`fuel` only); routes `POST /api/simulation/tick`, `POST /api/simulation/live`; offline degrades to seeded demand wave + static fallbacks with `live=false` notes.
+- Phase I extension: ticks visibly move orders (`SimulationLive` live order-move feed + capacity meters in the tick region), capacity bars breathe via `capacity_updates` without re-optimize, and `fuel_snapshot` + `zone_intensities` (L's `zone_factor` with corridor fallback) show per tick; moves animate on the map via `liveMoves`/`showLive` props.
 
 ### 5.11 Overview Tab (shipped — #14)
+
 - Single screen (`/app/overview`, rail tab `overview`) aggregating: vehicle count + mix, current fuel price(s) + `fuel_live` provenance, infra price(s), warehouse count + utilization, order totals, distance/cost/fuel/congestion/feasibility summaries, pending simulation/expansion alerts — every figure deep-links to its source tab. Served by `POST /api/overview` (`OverviewAggregate`, `schema.md` §2.9); offline fallback computes the same shape client-side.
+
+### 5.12 Follow-up Backlog #4–#9 (shipped — Phases G–L, see `docs/followup_phases.md`)
+
+- **G seed-viz (#4)**: seeding shows what it created — `SeedResultsPanel` (counts + per-entity tables + "load into workspace" + "view on map"); seeded warehouses/vehicles/nodes/orders each listed and clickable to map/detail; backend `synthetic.seed_summary` / `census.seed_summary` return exact counts.
+- **H bookmarks (#5)**: star any warehouse/vehicle (self-contained table toggle via `panelStore` `getBookmarks`/`toggleBookmark`/`isBookmarked`, per-account `gridpoint_bookmarks_<uid>`); Saved gains a Starred tab grouped by kind; tapping reopens detail/map focus.
+- **J search (#7)**: working search bar + category dropdown (All / Nodes / Warehouses / Trucks & cars / Orders) via `searchIndex.ts` token index; empty query shows a hint; selecting a hit opens detail or map focus (`SearchHit` contract §1.1).
+- **K auto-radius (#8)**: selecting a warehouse auto-enables + isolates its radius (MapView radius-focus); deselect (click again / Esc) restores the previous layer flag; manual radius toggle untouched.
+- **L zone-traffic (#9)**: city split into ring zones (centre-high → edge-low), red/yellow/green (`GET`+`POST /api/traffic/zones`, `traffic.zone_factor`), refreshing per tick and feeding routes/ETA/fuel; map zone overlay + `TrafficCard` legend.
 
 ### 5.8 Constraints & Bonus Feature Modeling
 | Bonus Feature (problem_statement) | Implementation Approach |
@@ -124,7 +135,7 @@ Directly derived from `problem_statement.md`:
 | Maximum delivery radius | `R_max` circle overlay; infeasible assignments flagged |
 | Different vehicle types | Fleet table: `vehicle_type, capacity, cost_per_km, fuel_type, avg_speed_kmph, mileage_kmpl`; assignment respects vehicle capacity |
 | Fuel costs | Live India fuel prices (`fuel.py`, `GET /api/fuel/rates`) + `fuel_cost_per_km` parameter; per-node fuel costs + fuel-reduction graph in comparison |
-| Traffic-dependent delivery times | Live TomTom flow + corridor history (`traffic.py`) with `traffic_factor` floor; `congestion_pct` + fleet ETA display |
+| Traffic-dependent delivery times | Live TomTom flow + corridor history (`traffic.py`) with `traffic_factor` floor; `congestion_pct` + fleet ETA display; dynamic zone traffic rings centre→edge (`GET/POST /api/traffic/zones`, Phase L) feeding reroute/ETA/fuel |
 | Changes in customer demand | Demand slider / scenario simulation: scale `w_i` by ±% and re-optimize (`POST /api/scenarios/demand-shift`) |
 | Infrastructure vs delivery trade-off | Slider for `infra_cost_per_warehouse`; curve showing total cost = infra + delivery vs K (`POST /api/scenarios/tradeoff`) |
 

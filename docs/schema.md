@@ -350,6 +350,10 @@ Live India fuel prices (RapidAPI, 12h TTL) with static fallback (`{petrol:105, d
 
 Live TomTom segment speeds (5-min TTL) + rolling corridor history (`data/traffic_history.json`).
 
+### `GET /api/traffic/zones` · `POST /api/traffic/zones`
+
+SHIPPED follow-up Phase L Sept 20 2026 (#9): dynamic zone traffic — concentric ring zones around the demand centroid (centre-high → edge-low), red (`high` #ef4444) / yellow (`medium` #f59e0b) / green (`low` #22c55e), refreshing per `tick` via time wave + deterministic jitter. Response: `{ zones: [{ zone_id, name, intensity 0..1, level, color, polygon [[lon,lat]...] }], live, tick, center }`. Helper `traffic.zone_factor(lat, lon)` feeds Phase I with corridor/manual fallback when zones are unavailable.
+
 ### `POST /api/traffic/corridors` · `POST /api/routes/reroute`
 
 SHIPPED Phase C Sept 20 2026 (#5, #9): corridor congestion aggregated from traced road geometries into rolling history; `traffic_aware_reroute` re-evaluates assignment as corridors change (`α·cost + β·time`), returning changed assignments + saved minutes/₹ with `traffic_note`/`routing_note` provenance.
@@ -370,6 +374,7 @@ Incrementally add warehouses without moving existing sites (`MAX_WAREHOUSES=10`)
 ### `POST /api/simulation/tick` · `POST /api/simulation/live` · `POST /api/overview`
 
 Phase F realtime loop (shipped — #12–#14): one poll tick scales `w_i` from the demand signal, reads corridor congestion per warehouse, and spills nodes off congested warehouses (threshold + hysteresis + cooldown, stateless via `active_spills`); live snapshot returns fuel + traffic + demand feeds; overview returns the `OverviewAggregate` (§2.9). All three degrade to seeded/offline fallbacks with `live=false` notes when providers are unreachable.
+EXTENDED follow-up Phase I Sept 20 2026 (#6, §1.4 additive-only): tick responses add `order_moves: [{ order_id, from_warehouse, to_warehouse }]`, `capacity_updates: { W1: { assigned_orders, utilization_pct } }`, `fuel_snapshot`, and `zone_intensities` (via L's `zone_factor` with corridor fallback) — ticks visibly move orders, capacity bars breathe without re-optimize, and fuel/traffic feed in per tick.
 
 ### `POST /api/auth/signup` · `POST /api/auth/login` · `GET /api/auth/me`
 
@@ -383,7 +388,7 @@ Server-side per-user workspace: `{updated_at, neighborhoods[], vehicles[], wareh
 
 ## 7. Storage (Session / Persistence)
 
-- **React**: per-user namespaced `localStorage` (`gridpoint_neighborhoods_<uid>`, `gridpoint_opt_config_<uid>`, zone colors, recents). Every account starts EMPTY — the Hyderabad sample is opt-in only and never auto-loaded.
+- **React**: per-user namespaced `localStorage` (`gridpoint_neighborhoods_<uid>`, `gridpoint_opt_config_<uid>`, zone colors, recents). Every account starts EMPTY — the Hyderabad sample is opt-in only and never auto-loaded. Follow-up Phase H (#5): entity bookmarks in `gridpoint_bookmarks_<uid>` (`{ kind: 'warehouse'|'vehicle', id, savedAt }`, see `docs/followup_phases.md` §1.2).
 - **Auth**: JWT in `localStorage` (`gridpoint_auth_token`, 24h TTL); `AuthContext` resolves the user via `GET /api/auth/me`. Backend store is file-backed JSON (`GRIDPOINT_USERS_FILE`); Neon Postgres `users` table is the documented production path.
 - **Workspace**: per-user warehouses/vehicles/demand/config persist server-side (`GET`+`PUT /api/user/data`, `GRIDPOINT_DATA_FILE`) across sessions/devices/restarts; the app pulls on login and pushes debounced, with namespaced localStorage as offline cache.
 - **Optional DB (Postgres/SQLite)** — demand tables (auth `users` table still TODO in `backend/src/auth.py`):

@@ -390,6 +390,56 @@ export function deleteResult(id: string) {
   write(RESULTS_KEY, getSavedResults().filter((r) => r.id !== id));
 }
 
+// --------------------------------------------------------------------------
+// Phase H — Entity bookmarks (#5): star any warehouse/vehicle, revisit fast.
+// Append-only: NEW key + NEW functions, no edits to existing fns above.
+// Contract: docs/followup_phases.md §1.2.
+// --------------------------------------------------------------------------
+
+export interface Bookmark {
+  kind: 'warehouse' | 'vehicle';
+  id: string;
+  savedAt: number;
+}
+
+const BOOKMARKS_KEY = 'gridpoint_bookmarks';
+
+export function getBookmarks(): Bookmark[] {
+  try {
+    const raw = localStorage.getItem(nsKey(BOOKMARKS_KEY));
+    const arr = raw ? (JSON.parse(raw) as Bookmark[]) : [];
+    if (!Array.isArray(arr)) return [];
+    return arr.filter(
+      (b) => b && (b.kind === 'warehouse' || b.kind === 'vehicle') && typeof b.id === 'string'
+    );
+  } catch {
+    return [];
+  }
+}
+
+function writeBookmarks(marks: Bookmark[]) {
+  try {
+    localStorage.setItem(nsKey(BOOKMARKS_KEY), JSON.stringify(marks));
+  } catch {
+    /* ignore */
+  }
+}
+
+export function isBookmarked(kind: Bookmark['kind'], id: string): boolean {
+  return getBookmarks().some((b) => b.kind === kind && b.id === id);
+}
+
+export function toggleBookmark(kind: Bookmark['kind'], id: string): Bookmark[] {
+  const marks = getBookmarks();
+  const i = marks.findIndex((b) => b.kind === kind && b.id === id);
+  const next =
+    i >= 0
+      ? marks.filter((_, j) => j !== i)
+      : [...marks, { kind, id, savedAt: Date.now() }];
+  writeBookmarks(next);
+  return next;
+}
+
 /** Great-circle distance in km (for Nearby ranking). */
 export function haversineKm(lat1: number, lon1: number, lat2: number, lon2: number): number {
   const R = 6371.0088;

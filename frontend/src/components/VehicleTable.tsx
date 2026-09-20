@@ -1,7 +1,8 @@
 import React, { useState, useMemo } from 'react';
-import { Plus, Trash2, Download, Search, AlertCircle, ChevronLeft, ChevronRight, Sparkles } from 'lucide-react';
+import { Plus, Trash2, Download, Search, AlertCircle, ChevronLeft, ChevronRight, Sparkles, Star } from 'lucide-react';
 import { VehicleType, ValidationErrorItem } from '../types';
 import { fetchSyntheticVehicles } from '../services/api';
+import { isBookmarked, toggleBookmark } from './panelStore';
 
 interface VehicleTableProps {
   vehicles: VehicleType[];
@@ -16,6 +17,8 @@ export const VehicleTable: React.FC<VehicleTableProps> = ({ vehicles, errors, on
   const [searchTerm, setSearchTerm] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
   const [seeding, setSeeding] = useState(false);
+  // Phase H: star toggles are self-contained — a version bump re-renders.
+  const [bookmarkTick, setBookmarkTick] = useState(0);
   const rowsPerPage = 15;
 
   const errorMap = useMemo(() => {
@@ -138,6 +141,7 @@ export const VehicleTable: React.FC<VehicleTableProps> = ({ vehicles, errors, on
           <thead>
             <tr className="bg-cream-deep border-b border-[#E4E1D2] text-ink-faint font-semibold uppercase tracking-wider">
               <th className="py-3 px-4 w-12 text-center">#</th>
+              <th className="py-3 px-2 w-10 text-center" title="Bookmark vehicle for quick access (Saved)">★</th>
               <th className="py-3 px-4">Vehicle Type (unique)</th>
               <th className="py-3 px-4 w-28">Capacity</th>
               <th className="py-3 px-4 w-28">Cost/km</th>
@@ -150,7 +154,7 @@ export const VehicleTable: React.FC<VehicleTableProps> = ({ vehicles, errors, on
           <tbody className="divide-y divide-slate-100">
             {paginatedRows.length === 0 ? (
               <tr>
-                <td colSpan={8} className="py-8 text-center text-ink-faint">
+                <td colSpan={9} className="py-8 text-center text-ink-faint">
                   No vehicles yet — add rows manually, upload a CSV/JSON, or seed the demo fleet.
                 </td>
               </tr>
@@ -160,6 +164,8 @@ export const VehicleTable: React.FC<VehicleTableProps> = ({ vehicles, errors, on
                 const rowNum = actualIndex + 1;
                 const rowErrors = errorMap.get(rowNum) || [];
                 const hasError = rowErrors.length > 0;
+                void bookmarkTick;
+                const starred = isBookmarked('vehicle', row.vehicle_type);
                 return (
                   <tr key={row.vehicle_type || actualIndex} className={`hover:bg-cream-deep transition-colors ${hasError ? 'bg-rose-50/40' : ''}`}>
                     <td className="py-2.5 px-4 text-center font-mono text-ink-faint">
@@ -168,6 +174,18 @@ export const VehicleTable: React.FC<VehicleTableProps> = ({ vehicles, errors, on
                           <AlertCircle className="w-4 h-4 text-rose-500 inline" />
                         </span>
                       ) : rowNum}
+                    </td>
+                    <td className="py-2.5 px-2 text-center">
+                      <button
+                        onClick={() => {
+                          toggleBookmark('vehicle', row.vehicle_type);
+                          setBookmarkTick((t) => t + 1);
+                        }}
+                        title={starred ? 'Remove bookmark' : 'Bookmark this vehicle'}
+                        className={`transition cursor-pointer ${starred ? 'text-amber-500' : 'text-ink-faint hover:text-amber-500'}`}
+                      >
+                        <Star className="w-4 h-4" fill={starred ? 'currentColor' : 'none'} />
+                      </button>
                     </td>
                     <td className="py-2.5 px-4">
                       <input type="text" value={row.vehicle_type}

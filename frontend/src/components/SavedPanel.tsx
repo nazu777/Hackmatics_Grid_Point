@@ -1,14 +1,17 @@
 import React, { useState } from 'react';
-import { Plus, Trash2, Flag, Star, Heart, Bookmark, FolderOpen, FlaskConical } from 'lucide-react';
+import { Plus, Trash2, Flag, Star, Heart, Bookmark, FolderOpen, FlaskConical, Warehouse as WarehouseIcon, Truck } from 'lucide-react';
 import type { Neighborhood, OptimizationResult, ZoneColorMap } from '../types';
 import { colorForZone, distinctZones, zoneCounts } from './mapThemes';
 import {
   deleteList,
   deleteResult,
+  getBookmarks,
   getSavedLists,
   getSavedResults,
   saveList,
-  saveResult
+  saveResult,
+  toggleBookmark,
+  type Bookmark as BookmarkRecord
 } from './panelStore';
 
 interface SavedPanelProps {
@@ -17,9 +20,13 @@ interface SavedPanelProps {
   zoneColors: ZoneColorMap;
   onLoadList: (nodes: Neighborhood[]) => void;
   onLoadResult: (result: OptimizationResult) => void;
+  /** Phase H: one-tap revisit — warehouse pin focus / vehicle row / node detail. */
+  onOpenWarehouse?: (warehouseId: string) => void;
+  onOpenVehicle?: (vehicleType: string) => void;
+  onOpenNode?: (node: Neighborhood) => void;
 }
 
-type Tab = 'lists' | 'zones' | 'results';
+type Tab = 'lists' | 'zones' | 'results' | 'bookmarks';
 
 const ZONE_ICONS = [Flag, Star, Heart, Bookmark, FolderOpen, FlaskConical];
 
@@ -28,16 +35,22 @@ export const SavedPanel: React.FC<SavedPanelProps> = ({
   result,
   zoneColors,
   onLoadList,
-  onLoadResult
+  onLoadResult,
+  onOpenWarehouse,
+  onOpenVehicle,
+  onOpenNode
 }) => {
   const [tab, setTab] = useState<Tab>('lists');
   const [lists, setLists] = useState(() => getSavedLists());
   const [results, setResults] = useState(() => getSavedResults());
+  const [marks, setMarks] = useState<BookmarkRecord[]>(() => getBookmarks());
   const [naming, setNaming] = useState<'list' | 'result' | null>(null);
   const [name, setName] = useState('');
 
   const zones = distinctZones(neighborhoods);
   const counts = zoneCounts(neighborhoods);
+  const warehouseMarks = marks.filter((b) => b.kind === 'warehouse');
+  const vehicleMarks = marks.filter((b) => b.kind === 'vehicle');
 
   const commitName = () => {
     if (naming === 'list') {
@@ -59,15 +72,18 @@ export const SavedPanel: React.FC<SavedPanelProps> = ({
 
       {/* Tabs */}
       <div className="flex gap-6 px-5 mt-1 border-b border-[#E4E1D2] text-[13px] font-semibold">
-        {(['lists', 'zones', 'results'] as Tab[]).map((t) => (
+        {(['lists', 'zones', 'results', 'bookmarks'] as Tab[]).map((t) => (
           <button
             key={t}
-            onClick={() => setTab(t)}
+            onClick={() => {
+              if (t === 'bookmarks') setMarks(getBookmarks());
+              setTab(t);
+            }}
             className={`pb-2 capitalize transition cursor-pointer ${
               tab === t ? 'text-ink border-b-2 border-ink -mb-px' : 'text-ink-faint hover:text-ink'
             }`}
           >
-            {t === 'lists' ? 'Lists' : t === 'zones' ? 'Labeled' : 'Runs'}
+            {t === 'lists' ? 'Lists' : t === 'zones' ? 'Labeled' : t === 'results' ? 'Runs' : `Starred${marks.length ? ` (${marks.length})` : ''}`}
           </button>
         ))}
       </div>
@@ -209,6 +225,85 @@ export const SavedPanel: React.FC<SavedPanelProps> = ({
                 </button>
               </div>
             ))}
+          </>
+        )}
+
+        {tab === 'bookmarks' && (
+          <>
+            {marks.length === 0 && (
+              <div className="text-center py-6">
+                <Star className="w-6 h-6 text-ink-faint mx-auto mb-2" />
+                <p className="text-xs font-bold text-ink">No starred entities yet</p>
+                <p className="text-[11px] text-ink-faint mt-1">
+                  Tap the ★ in any warehouse or vehicle row to bookmark it — find it here in one tap.
+                </p>
+              </div>
+            )}
+            {warehouseMarks.length > 0 && (
+              <>
+                <p className="text-[11px] font-bold text-ink-faint uppercase tracking-wider px-1 pt-1">
+                  Warehouses ({warehouseMarks.length})
+                </p>
+                {warehouseMarks.map((b) => (
+                  <div key={`wh-${b.id}`} className="flex items-center gap-3 px-3 py-2.5 rounded-2xl hover:bg-cream-deep transition">
+                    <button
+                      onClick={() => onOpenWarehouse?.(b.id)}
+                      className="flex items-center gap-3 flex-1 text-left cursor-pointer"
+                    >
+                      <WarehouseIcon className="w-5 h-5 text-ink-soft shrink-0" />
+                      <span className="flex-1 min-w-0">
+                        <span className="block text-[13px] font-bold text-ink truncate font-mono">{b.id}</span>
+                        <span className="block text-[11px] text-ink-faint">
+                          Site • saved {new Date(b.savedAt).toLocaleDateString()}
+                        </span>
+                      </span>
+                    </button>
+                    <button
+                      onClick={() => setMarks(toggleBookmark('warehouse', b.id))}
+                      title="Remove bookmark"
+                      className="text-amber-500 hover:text-ink-faint transition cursor-pointer"
+                    >
+                      <Star className="w-4 h-4" fill="currentColor" />
+                    </button>
+                  </div>
+                ))}
+              </>
+            )}
+            {vehicleMarks.length > 0 && (
+              <>
+                <p className="text-[11px] font-bold text-ink-faint uppercase tracking-wider px-1 pt-2">
+                  Vehicles ({vehicleMarks.length})
+                </p>
+                {vehicleMarks.map((b) => (
+                  <div key={`vh-${b.id}`} className="flex items-center gap-3 px-3 py-2.5 rounded-2xl hover:bg-cream-deep transition">
+                    <button
+                      onClick={() => onOpenVehicle?.(b.id)}
+                      className="flex items-center gap-3 flex-1 text-left cursor-pointer"
+                    >
+                      <Truck className="w-5 h-5 text-ink-soft shrink-0" />
+                      <span className="flex-1 min-w-0">
+                        <span className="block text-[13px] font-bold text-ink truncate font-mono">{b.id}</span>
+                        <span className="block text-[11px] text-ink-faint">
+                          Fleet • saved {new Date(b.savedAt).toLocaleDateString()}
+                        </span>
+                      </span>
+                    </button>
+                    <button
+                      onClick={() => setMarks(toggleBookmark('vehicle', b.id))}
+                      title="Remove bookmark"
+                      className="text-amber-500 hover:text-ink-faint transition cursor-pointer"
+                    >
+                      <Star className="w-4 h-4" fill="currentColor" />
+                    </button>
+                  </div>
+                ))}
+              </>
+            )}
+            {onOpenNode && neighborhoods.length > 0 && marks.length > 0 && (
+              <p className="text-[10px] text-ink-faint text-center pt-2">
+                Warehouses focus their map zone; vehicles open their fleet row.
+              </p>
+            )}
           </>
         )}
       </div>

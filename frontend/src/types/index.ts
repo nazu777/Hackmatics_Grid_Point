@@ -311,6 +311,12 @@ export interface ActiveSpill {
   original_warehouse: Record<string, string>;
 }
 
+export interface OrderMove {
+  order_id: string;
+  from_warehouse: string;
+  to_warehouse: string;
+}
+
 export interface SimulationTickResult {
   tick: number;
   simulation_mode: 'off' | 'realtime';
@@ -324,6 +330,27 @@ export interface SimulationTickResult {
   demand_note: string;
   traffic_note?: string | null;
   fuel_note?: string | null;
+  /** Phase I (#6) additions — followup §1.4, all optional/additive. */
+  order_moves?: OrderMove[];
+  capacity_updates?: Record<string, { assigned_orders: number; utilization_pct: number | null }>;
+  fuel_snapshot?: { prices: Record<string, number>; live: boolean; note: string };
+  zone_intensities?: Record<string, number>;
+}
+
+export interface TrafficZone {
+  zone_id: string;
+  name: string;
+  intensity: number;
+  level: 'low' | 'medium' | 'high';
+  color?: string;
+  polygon: number[][];
+}
+
+export interface TrafficZonesResult {
+  zones: TrafficZone[];
+  live: boolean;
+  tick?: number;
+  center?: { lat: number; lon: number };
 }
 
 export interface LiveSnapshot {

@@ -471,6 +471,41 @@ def traffic_history(lat: float = Query(..., ge=-90.0, le=90.0),
     return {"cell": cell_of(lat, lon), "hour": hour, "factor": factor, "samples": samples}
 
 
+class TrafficZonesRequest(BaseModel):
+    neighborhoods: List[Dict[str, Any]] = []
+    rings: Optional[int] = 3
+    segments: Optional[int] = 12
+    tick: Optional[int] = 0
+    max_radius_km: Optional[float] = 20.0
+
+
+@app.get("/api/traffic/zones")
+def traffic_zones_get(tick: int = Query(0)):
+    """Phase L (#9): dynamic zone traffic with no payload (empty-data fallback)."""
+    from .traffic import build_traffic_zones
+    return build_traffic_zones([], tick=tick)
+
+
+@app.post("/api/traffic/zones")
+def traffic_zones(payload: TrafficZonesRequest):
+    """
+    Phase L (#9): city split into zones (centre high → outer low),
+    red/yellow/green, refreshing in realtime. Feeds routes/ETA/fuel via
+    the zone_factor helper (simulation imports it with corridor fallback).
+    Contract: docs/followup_phases.md §1.3.
+    """
+    from .traffic import build_traffic_zones
+    try:
+        return build_traffic_zones(
+            payload.neighborhoods or [],
+            rings=max(1, min(5, int(payload.rings or 3))),
+            segments=max(3, min(24, int(payload.segments or 12))),
+            tick=int(payload.tick or 0),
+            max_radius_km=max(1.0, min(200.0, float(payload.max_radius_km or 20.0))))
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+
+
 class CorridorTrafficRequest(BaseModel):
     neighborhoods: List[Dict[str, Any]] = []
     warehouses: List[Warehouse] = []
@@ -1115,6 +1150,10 @@ def simulation_tick(payload: SimulationTickRequest):
     if fuel_note is None:
         _, _, fuel_note = resolve_fuel_prices(cfg)
 
+    from .simulation import tick_extras
+    extras = tick_extras(scaled, payload.warehouses, base_assignments,
+                         new_assignments, congestion, cfg, tick=payload.tick)
+
     return SimulationTickResult(
         tick=payload.tick, simulation_mode=cfg.simulation_mode,
         neighborhoods=[NBModel(**n) for n in scaled],
@@ -1122,7 +1161,9 @@ def simulation_tick(payload: SimulationTickRequest):
         congestion_by_warehouse={k: round(v, 4) for k, v in congestion.items()},
         congestion_live={k: bool(v) for k, v in live_flags.items()},
         events=events, active_spills=new_spills,
-        demand_note=demand_note, traffic_note=traffic_note, fuel_note=fuel_note)
+        demand_note=demand_note, traffic_note=traffic_note, fuel_note=fuel_note,
+        order_moves=extras["order_moves"], capacity_updates=extras["capacity_updates"],
+        fuel_snapshot=extras["fuel_snapshot"], zone_intensities=extras["zone_intensities"])
 
 
 @app.post("/api/simulation/live")

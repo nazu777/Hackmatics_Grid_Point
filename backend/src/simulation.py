@@ -227,6 +227,79 @@ def spillover_reassign(
     return out, new_spills, events
 
 
+def tick_extras(
+    neighborhoods: List[Dict[str, Any]],
+    warehouses: List[Warehouse],
+    assignments_before: List[Assignment],
+    assignments_after: List[Assignment],
+    congestion: Dict[str, float],
+    config: OptimizationConfig,
+    tick: int = 0,
+) -> Dict[str, Any]:
+    """
+    Phase I (#6) tick payload additions (followup §1.4, additive-only):
+    order_moves, capacity_updates, fuel_snapshot, zone_intensities.
+    Zone intensities come from L's zone_factor with graceful fallback to the
+    corridor/manual floor so I works standalone when L is late.
+    """
+    before = {str(a.neighborhood_id): str(a.warehouse_id) for a in (assignments_before or [])}
+    moves: List[Dict[str, Any]] = []
+    for a in assignments_after or []:
+        nid = str(a.neighborhood_id)
+        frm = before.get(nid)
+        to = str(a.warehouse_id)
+        if frm is not None and frm != to:
+            moves.append({"order_id": nid, "from_warehouse": frm, "to_warehouse": to})
+    # Capacity breathing without re-optimize: assigned orders per warehouse
+    # from the scaled demand + new assignment.
+    demand_by_id = {str(n.get("neighborhood_id")): int(n.get("daily_orders", 0) or 0)
+                    for n in (neighborhoods or [])}
+    load: Dict[str, int] = {}
+    for a in assignments_after or []:
+        wid = str(a.warehouse_id)
+        load[wid] = load.get(wid, 0) + demand_by_id.get(str(a.neighborhood_id), 0)
+    capacity_updates: Dict[str, Dict[str, Any]] = {}
+    for w in warehouses or []:
+        wid = str(w.warehouse_id)
+        assigned = load.get(wid, 0)
+        cap = getattr(w, "capacity", None)
+        try:
+            util = round(assigned / float(cap) * 100.0, 1) if cap and float(cap) > 0 else None
+        except (TypeError, ValueError):
+            util = None
+        capacity_updates[wid] = {"assigned_orders": assigned, "utilization_pct": util}
+    # Fuel snapshot per tick (static fallback offline — never throws).
+    try:
+        from .cost import resolve_fuel_prices
+        center = None
+        if neighborhoods:
+            center = (
+                sum(float(n.get("latitude", 0)) for n in neighborhoods) / len(neighborhoods),
+                sum(float(n.get("longitude", 0)) for n in neighborhoods) / len(neighborhoods),
+            )
+        prices, fuel_live, fuel_note = resolve_fuel_prices(config, center=center)
+        fuel_snapshot: Dict[str, Any] = {"prices": prices, "live": fuel_live, "note": fuel_note}
+    except Exception:
+        fuel_snapshot = {"prices": {}, "live": False, "note": "fuel snapshot unavailable"}
+    # Zone intensities per warehouse (L's zone_factor, corridor fallback).
+    zone_intensities: Dict[str, float] = {}
+    try:
+        from .traffic import zone_factor
+        nb_dicts = [dict(n) for n in (neighborhoods or [])]
+        for w in warehouses or []:
+            try:
+                zone_intensities[str(w.warehouse_id)] = round(float(zone_factor(
+                    float(w.latitude), float(w.longitude), nb_dicts, tick=tick)), 4)
+            except (TypeError, ValueError):
+                zone_intensities[str(w.warehouse_id)] = round(
+                    float(congestion.get(str(w.warehouse_id), 0.0) or 0.0), 4)
+    except Exception:
+        zone_intensities = {str(w.warehouse_id): round(float(congestion.get(str(w.warehouse_id), 0.0) or 0.0), 4)
+                            for w in warehouses or []}
+    return {"order_moves": moves, "capacity_updates": capacity_updates,
+            "fuel_snapshot": fuel_snapshot, "zone_intensities": zone_intensities}
+
+
 def live_snapshot(
     neighborhoods: List[Dict[str, Any]],
     warehouses: List[Warehouse],

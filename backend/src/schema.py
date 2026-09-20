@@ -205,7 +205,7 @@ class ActiveSpill(BaseModel):
 
 
 class SimulationTickResult(BaseModel):
-    """Response of POST /api/simulation/tick (Phase F #13)."""
+    """Response of POST /api/simulation/tick (Phase F #13, Phase I #6 extends §1.4)."""
     tick: int = 0
     simulation_mode: Literal["off", "realtime"] = "realtime"
     neighborhoods: List[Neighborhood] = Field(default_factory=list)
@@ -218,6 +218,12 @@ class SimulationTickResult(BaseModel):
     demand_note: str = ""
     traffic_note: Optional[str] = None
     fuel_note: Optional[str] = None
+    # Phase I additive-only (§1.4): visible order moves, capacity breathing,
+    # fuel/traffic snapshot per tick. All optional so old clients keep working.
+    order_moves: List[Dict[str, Any]] = Field(default_factory=list)
+    capacity_updates: Dict[str, Dict[str, Any]] = Field(default_factory=dict)
+    fuel_snapshot: Dict[str, Any] = Field(default_factory=dict)
+    zone_intensities: Dict[str, float] = Field(default_factory=dict)
 
 
 class OverviewAggregate(BaseModel):

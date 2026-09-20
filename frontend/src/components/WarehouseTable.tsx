@@ -1,7 +1,8 @@
 import React, { useState, useMemo } from 'react';
-import { Plus, Trash2, Download, Search, AlertCircle, ChevronLeft, ChevronRight, Sparkles } from 'lucide-react';
+import { Plus, Trash2, Download, Search, AlertCircle, ChevronLeft, ChevronRight, Sparkles, Star } from 'lucide-react';
 import { Warehouse, ValidationErrorItem } from '../types';
 import { fetchSyntheticWarehouses } from '../services/api';
+import { isBookmarked, toggleBookmark } from './panelStore';
 
 interface WarehouseTableProps {
   warehouses: Warehouse[];
@@ -15,6 +16,8 @@ export const WarehouseTable: React.FC<WarehouseTableProps> = ({ warehouses, erro
   const [searchTerm, setSearchTerm] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
   const [seeding, setSeeding] = useState(false);
+  // Phase H: star toggles are self-contained — a version bump re-renders.
+  const [bookmarkTick, setBookmarkTick] = useState(0);
   const rowsPerPage = 15;
 
   const errorMap = useMemo(() => {
@@ -136,6 +139,7 @@ export const WarehouseTable: React.FC<WarehouseTableProps> = ({ warehouses, erro
           <thead>
             <tr className="bg-cream-deep border-b border-[#E4E1D2] text-ink-faint font-semibold uppercase tracking-wider">
               <th className="py-3 px-4 w-12 text-center">#</th>
+              <th className="py-3 px-2 w-10 text-center" title="Bookmark site for quick access (Saved)">★</th>
               <th className="py-3 px-4">Warehouse ID (unique)</th>
               <th className="py-3 px-4 w-32">Latitude</th>
               <th className="py-3 px-4 w-32">Longitude</th>
@@ -148,7 +152,7 @@ export const WarehouseTable: React.FC<WarehouseTableProps> = ({ warehouses, erro
           <tbody className="divide-y divide-slate-100">
             {paginatedRows.length === 0 ? (
               <tr>
-                <td colSpan={8} className="py-8 text-center text-ink-faint">
+                <td colSpan={9} className="py-8 text-center text-ink-faint">
                   No existing warehouses yet — add sites manually, upload a CSV/JSON, or seed demo sites.
                 </td>
               </tr>
@@ -158,6 +162,8 @@ export const WarehouseTable: React.FC<WarehouseTableProps> = ({ warehouses, erro
                 const rowNum = actualIndex + 1;
                 const rowErrors = errorMap.get(rowNum) || [];
                 const hasError = rowErrors.length > 0;
+                void bookmarkTick;
+                const starred = isBookmarked('warehouse', row.warehouse_id);
                 return (
                   <tr key={row.warehouse_id || actualIndex} className={`hover:bg-cream-deep transition-colors ${hasError ? 'bg-rose-50/40' : ''}`}>
                     <td className="py-2.5 px-4 text-center font-mono text-ink-faint">
@@ -166,6 +172,18 @@ export const WarehouseTable: React.FC<WarehouseTableProps> = ({ warehouses, erro
                           <AlertCircle className="w-4 h-4 text-rose-500 inline" />
                         </span>
                       ) : rowNum}
+                    </td>
+                    <td className="py-2.5 px-2 text-center">
+                      <button
+                        onClick={() => {
+                          toggleBookmark('warehouse', row.warehouse_id);
+                          setBookmarkTick((t) => t + 1);
+                        }}
+                        title={starred ? 'Remove bookmark' : 'Bookmark this site'}
+                        className={`transition cursor-pointer ${starred ? 'text-amber-500' : 'text-ink-faint hover:text-amber-500'}`}
+                      >
+                        <Star className="w-4 h-4" fill={starred ? 'currentColor' : 'none'} />
+                      </button>
                     </td>
                     <td className="py-2.5 px-4">
                       <input type="text" value={row.warehouse_id}

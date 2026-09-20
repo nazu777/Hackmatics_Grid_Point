@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import mapboxgl from 'mapbox-gl';
 import 'mapbox-gl/dist/mapbox-gl.css';
-import { Neighborhood, Warehouse, Assignment, BasemapStyle, ColorByMode, ZoneColorMap } from '../types';
+import { Neighborhood, Warehouse, Assignment, BasemapStyle, ColorByMode, ZoneColorMap, OrderMove, TrafficZone } from '../types';
 import { BASEMAPS, getMapboxToken, colorForZone, zoneCounts } from './mapThemes';
 import type { CoverageBounds, CoverageCell, IsoFeature } from '../services/api';
 
@@ -108,6 +108,14 @@ interface MapViewProps {
   minimal?: boolean;
   /** Selected neighborhood id to emphasize. */
   highlightId?: string | null;
+  /** Phase I (#6): live order moves from the last sim tick (additive). */
+  liveMoves?: OrderMove[];
+  /** Phase I (#6): render the live-move layer. */
+  showLive?: boolean;
+  /** Phase L (#9): dynamic zone-traffic polygons (centre-high → edge-low). */
+  trafficZones?: TrafficZone[];
+  /** Phase L (#9): zone overlay visibility. */
+  showZones?: boolean;
 }
 
 const COLOR_MODES: { id: ColorByMode; label: string }[] = [
@@ -120,6 +128,8 @@ const ROUTES_OK = 'gp-routes-ok';
 const ROUTES_BAD = 'gp-routes-bad';
 const RADIUS_SRC = 'gp-radius';
 const HEATMAP_SRC = 'gp-coverage-heat';
+const ZONES_SRC = 'gp-traffic-zones';
+const LIVE_SRC = 'gp-live-moves';
 const BUILDINGS_LAYER = 'gp-3d-buildings';
 
 /** Default camera: India-wide view for empty accounts (no city assumed). */
@@ -199,7 +209,11 @@ export const MapView: React.FC<MapViewProps> = ({
   coverageRange = null,
   theme = 'light',
   minimal = false,
-  highlightId = null
+  highlightId = null,
+  liveMoves = [],
+  showLive = false,
+  trafficZones = [],
+  showZones = false
 }) => {
   const divRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<mapboxgl.Map | null>(null);
@@ -356,6 +370,13 @@ export const MapView: React.FC<MapViewProps> = ({
     removeLayerAndSource(map, ROUTES_BAD, ROUTES_BAD);
     removeLayerAndSource(map, `${HEATMAP_SRC}-zones`, HEATMAP_SRC);
     removeLayerAndSource(map, `${HEATMAP_SRC}-circles`, HEATMAP_SRC);
+    removeLayerAndSource(map, `${ZONES_SRC}-fill`, ZONES_SRC);
+    try {
+      if (map.getLayer(`${LIVE_SRC}-line`)) map.removeLayer(`${LIVE_SRC}-line`);
+    } catch { /* ignore */ }
+    try {
+      if (map.getSource(LIVE_SRC)) map.removeSource(LIVE_SRC);
+    } catch { /* ignore */ }
     removeLayerAndSource(map, `${RADIUS_SRC}-fill`, RADIUS_SRC);
     // (fill + line share one source; remove both layers first)
     try {
@@ -441,6 +462,33 @@ export const MapView: React.FC<MapViewProps> = ({
             'fill-color': ['get', 'color'],
             'fill-opacity': 0.32
           }
+        });
+      } catch { /* style race — next render retries */ }
+    }
+
+    // Phase L (#9): dynamic zone-traffic polygons UNDER heatmap/bubbles —
+    // centre-high (red) → edge-low (green), refreshing per tick.
+    if (showZones && trafficZones.length > 0) {
+      const feats = trafficZones
+        .filter((z) => Array.isArray(z.polygon) && z.polygon.length >= 3)
+        .map((z) => ({
+          type: 'Feature' as const,
+          properties: {
+            color: z.color || (z.level === 'high' ? '#ef4444' : z.level === 'medium' ? '#f59e0b' : '#22c55e'),
+            zone_id: z.zone_id
+          },
+          geometry: {
+            type: 'Polygon' as const,
+            coordinates: [[...z.polygon, z.polygon[0]]]
+          }
+        }));
+      try {
+        map.addSource(ZONES_SRC, { type: 'geojson', data: { type: 'FeatureCollection', features: feats } });
+        map.addLayer({
+          id: `${ZONES_SRC}-fill`,
+          type: 'fill',
+          source: ZONES_SRC,
+          paint: { 'fill-color': ['get', 'color'], 'fill-opacity': 0.22 }
         });
       } catch { /* style race — next render retries */ }
     }
@@ -629,6 +677,53 @@ export const MapView: React.FC<MapViewProps> = ({
       } catch { /* style race — next render retries */ }
     }
 
+    // Phase I (#6): live order moves from the last tick — amber dashed
+    // from→to warehouse vectors so ticks visibly move orders on the map.
+    if (showLive && liveMoves.length > 0) {
+      const whByIdLive = new Map(warehouses.map((w) => [w.warehouse_id, w]));
+      const feats = liveMoves
+        .map((m) => {
+          const a = whByIdLive.get(m.from_warehouse);
+          const b = whByIdLive.get(m.to_warehouse);
+          if (!a || !b) return null;
+          return {
+            type: 'Feature' as const,
+            properties: { order_id: m.order_id },
+            geometry: {
+              type: 'LineString' as const,
+              coordinates: [[a.longitude, a.latitude], [b.longitude, b.latitude]]
+            }
+          };
+        })
+        .filter(Boolean);
+      try {
+        if (feats.length > 0) {
+          map.addSource(LIVE_SRC, { type: 'geojson', data: { type: 'FeatureCollection', features: feats as never[] } });
+          map.addLayer({
+            id: `${LIVE_SRC}-line`,
+            type: 'line',
+            source: LIVE_SRC,
+            paint: { 'line-color': '#f59e0b', 'line-width': 2, 'line-dasharray': [1.5, 1.5], 'line-opacity': 0.9 }
+          });
+        }
+      } catch { /* style race — next render retries */ }
+      // Pulse the moved nodes themselves.
+      const nbByIdLive = new Map(neighborhoods.map((n) => [n.neighborhood_id, n]));
+      liveMoves.forEach((m) => {
+        const n = nbByIdLive.get(m.order_id);
+        if (!n) return;
+        const el = document.createElement('div');
+        el.style.width = '14px';
+        el.style.height = '14px';
+        el.style.borderRadius = '50%';
+        el.style.backgroundColor = '#f59e0b';
+        el.style.border = '2px solid #fff';
+        el.style.boxShadow = '0 0 0 3px rgba(245,158,11,.45)';
+        el.title = `${m.order_id}: ${m.from_warehouse} → ${m.to_warehouse}`;
+        markersRef.current.push(new mapboxgl.Marker({ element: el }).setLngLat([n.longitude, n.latitude]).addTo(map));
+      });
+    }
+
     if (hasBounds && !focus) {
       const prev = fittedRef.current;
       if (prev.n !== neighborhoods || prev.w !== warehouses || prev.a !== assignments) {
@@ -645,7 +740,7 @@ export const MapView: React.FC<MapViewProps> = ({
     try {
       map.resize();
     } catch { /* ignore */ }
-  }, [neighborhoods, warehouses, assignments, radiusKm, basemap, styleReady, token, colorBy, zoneColors, showWarehouses, showRoutes, showDemand, showRadius, routeColor, colorRoutesByTraffic, linesMode, roadGeometries, isochrones, theme, highlightId, focus, focusedWarehouseId, coverageCells, coverageMeta, showHeatmap, onWarehouseClick]);
+  }, [neighborhoods, warehouses, assignments, radiusKm, basemap, styleReady, token, colorBy, zoneColors, showWarehouses, showRoutes, showDemand, showRadius, routeColor, colorRoutesByTraffic, linesMode, roadGeometries, isochrones, theme, highlightId, focus, focusedWarehouseId, coverageCells, coverageMeta, showHeatmap, liveMoves, showLive, trafficZones, showZones, onWarehouseClick]);
 
   // Fly-to on focus requests (gmaps "Center" action)
   useEffect(() => {
@@ -717,6 +812,19 @@ export const MapView: React.FC<MapViewProps> = ({
             <div className="bg-slate-900/95 backdrop-blur-sm border border-slate-800 rounded-2xl px-3 py-2 shadow-lg flex items-center gap-2 text-[11px] font-bold text-white">
               <span className="w-2.5 h-2.5 rounded-full bg-white/80" />
               Zone {focusedWarehouseId} isolated — other zones dimmed
+            </div>
+          )}
+          {showZones && trafficZones.length > 0 && (
+            <div className="bg-white/95 backdrop-blur-sm border border-slate-200/80 rounded-2xl px-3 py-2 shadow-lg flex items-center gap-3 text-[10px] font-semibold text-slate-600">
+              <span className="uppercase tracking-wide text-slate-400">Zones</span>
+              <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full bg-[#22c55e]" /> Fluid</span>
+              <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full bg-[#f59e0b]" /> Busy</span>
+              <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full bg-[#ef4444]" /> Jammed</span>
+            </div>
+          )}
+          {showLive && liveMoves.length > 0 && (
+            <div className="bg-amber-50/95 backdrop-blur-sm border border-amber-200/80 rounded-2xl px-3 py-2 shadow-lg text-[10px] font-semibold text-amber-800">
+              ● {liveMoves.length} live order move{liveMoves.length === 1 ? '' : 's'} this tick
             </div>
           )}
         </div>

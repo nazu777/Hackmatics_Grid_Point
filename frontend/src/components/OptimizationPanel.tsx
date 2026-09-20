@@ -256,6 +256,7 @@ export const OptimizationPanel: React.FC<OptimizationPanelProps> = ({
               onChange={(patch) => setConfig({ ...config, ...patch })}
               lastAvgCongestion={lastResult?.metrics.avg_congestion_pct ?? null}
               lastNote={lastResult?.traffic_note ?? null}
+              neighborhoods={neighborhoods}
             />
           </div>
         </div>

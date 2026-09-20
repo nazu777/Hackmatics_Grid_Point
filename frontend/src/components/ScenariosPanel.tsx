@@ -23,8 +23,10 @@ import {
   ConstraintDiagnostics,
   LiveSnapshot,
   SpilloverEvent,
-  ActiveSpill
+  ActiveSpill,
+  OrderMove
 } from '../types';
+import { SimulationLive } from './SimulationLive';
 import {
   getTradeoffCurve,
   applyDemandShift,
@@ -43,6 +45,10 @@ interface ScenariosPanelProps {
   onUpdateConfig: (config: OptimizationConfig) => void;
   onOptimizationComplete: (result: OptimizationResult) => void;
   onGoToMap: () => void;
+  /** Phase I: tap a warehouse in the live feed to focus its map zone. */
+  onOpenWarehouse?: (warehouseId: string) => void;
+  /** Phase I: report live moves up so the map can animate them. */
+  onLiveMoves?: (moves: OrderMove[]) => void;
 }
 
 export const ScenariosPanel: React.FC<ScenariosPanelProps> = ({
@@ -52,7 +58,9 @@ export const ScenariosPanel: React.FC<ScenariosPanelProps> = ({
   onUpdateNeighborhoods,
   onUpdateConfig,
   onOptimizationComplete,
-  onGoToMap
+  onGoToMap,
+  onOpenWarehouse,
+  onLiveMoves
 }) => {
   // Scenario 1: Tradeoff State
   const [infraCost, setInfraCost] = useState<number>(config.infra_cost_per_warehouse || 500);
@@ -84,6 +92,11 @@ export const ScenariosPanel: React.FC<ScenariosPanelProps> = ({
   const [eventLog, setEventLog] = useState<SpilloverEvent[]>([]);
   const [live, setLive] = useState<LiveSnapshot | null>(null);
   const [liveLoading, setLiveLoading] = useState<boolean>(false);
+  // Phase I (#6): last tick dynamics — order moves, capacity breathing, snapshots.
+  const [lastMoves, setLastMoves] = useState<OrderMove[]>([]);
+  const [lastCapacity, setLastCapacity] = useState<Record<string, { assigned_orders: number; utilization_pct: number | null }>>({});
+  const [lastFuelSnap, setLastFuelSnap] = useState<{ prices: Record<string, number>; live: boolean; note: string } | null>(null);
+  const [lastZones, setLastZones] = useState<Record<string, number>>({});
   const tickRef = useRef(0);
 
   const refreshLive = useCallback(async () => {
@@ -120,6 +133,12 @@ export const ScenariosPanel: React.FC<ScenariosPanelProps> = ({
       if (res.events && res.events.length > 0) {
         setEventLog((prev) => [...res.events, ...prev].slice(0, 50));
       }
+      // Phase I: visible dynamics per tick (moves + capacity + snapshots).
+      setLastMoves(res.order_moves || []);
+      setLastCapacity(res.capacity_updates || {});
+      setLastFuelSnap(res.fuel_snapshot || null);
+      setLastZones(res.zone_intensities || {});
+      onLiveMoves?.(res.order_moves || []);
       // Apply the tick to the live network: scaled demand + spilled assignments.
       onUpdateNeighborhoods(res.neighborhoods);
       if (res.assignments && res.assignments.length > 0) {
@@ -137,7 +156,7 @@ export const ScenariosPanel: React.FC<ScenariosPanelProps> = ({
     } finally {
       setTicking(false);
     }
-  }, [lastResult, ticking, neighborhoods, config, simMode, spills, onUpdateNeighborhoods, onOptimizationComplete, refreshLive]);
+  }, [lastResult, ticking, neighborhoods, config, simMode, spills, onUpdateNeighborhoods, onOptimizationComplete, refreshLive, onLiveMoves]);
 
   const handleSimMode = (m: 'off' | 'realtime') => {
     setSimMode(m);
@@ -343,6 +362,17 @@ export const ScenariosPanel: React.FC<ScenariosPanelProps> = ({
           )}
           {!lastResult && (
             <p className="text-[11px] text-ink-faint">Run Optimize first — ticks need warehouses + assignments.</p>
+          )}
+          {/* Phase I (#6): ticks visibly move orders + breathe capacity + feed fuel/traffic. */}
+          {tick > 0 && (
+            <SimulationLive
+              tick={tick}
+              moves={lastMoves}
+              capacityUpdates={lastCapacity}
+              fuelSnapshot={lastFuelSnap}
+              zoneIntensities={lastZones}
+              onOpenWarehouse={onOpenWarehouse}
+            />
           )}
         </div>
 

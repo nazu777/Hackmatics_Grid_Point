@@ -240,5 +240,19 @@ def get_city_demand(city_id: str, orders_per_1000: float = 5.0) -> Dict[str, Any
 def list_cities() -> List[Dict[str, Any]]:
     """Preset metadata for the city picker (no network)."""
     return [{"city_id": cid, "label": p["label"], "center": p["center"],
-             "counties": [c[2] for c in p["counties"]]}
-            for cid, p in CITY_PRESETS.items()]
+              "counties": [c[2] for c in p["counties"]]}
+             for cid, p in CITY_PRESETS.items()]
+
+
+def seed_summary(neighborhoods: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """
+    Phase G (#4): exact counts for a Census seeding result (nodes/orders +
+    per-county zone breakdown). Additive — no provider changes.
+    """
+    neighborhoods = neighborhoods or []
+    total_orders = sum(int(n.get("daily_orders", 0) or 0) for n in neighborhoods)
+    zones: Dict[str, int] = {}
+    for n in neighborhoods:
+        z = str(n.get("zone") or "Unzoned")
+        zones[z] = zones.get(z, 0) + 1
+    return {"nodes": len(neighborhoods), "total_orders": total_orders, "zones": zones}

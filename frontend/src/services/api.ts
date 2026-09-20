@@ -21,7 +21,8 @@ import {
   SimulationTickResult,
   ActiveSpill,
   LiveSnapshot,
-  OverviewAggregate
+  OverviewAggregate,
+  TrafficZonesResult
 } from '../types';
 
 // In production (single Vercel deployment) API is same-origin at /api
@@ -1850,5 +1851,31 @@ export async function rerouteOnTraffic(args: RerouteArgs): Promise<RerouteResult
     throw new Error(apiErrorMessage(err, `Reroute failed (HTTP ${res.status})`));
   }
   return await res.json();
+}
+
+// --------------------------------------------------------------------------
+// Phase L: dynamic zone traffic (centre-high → edge-low, red/yellow/green)
+// Contract: docs/followup_phases.md §1.3.
+// --------------------------------------------------------------------------
+
+/** Zone polygons for the current demand (server, empty fallback offline). */
+export async function fetchTrafficZones(
+  neighborhoods: Neighborhood[],
+  tick = 0
+): Promise<TrafficZonesResult> {
+  try {
+    const res = await fetch(`${API_BASE}/traffic/zones`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ neighborhoods, tick })
+    });
+    if (res.ok) {
+      const body = (await res.json()) as TrafficZonesResult;
+      if (body && Array.isArray(body.zones)) return body;
+    }
+  } catch {
+    /* offline → empty zones below */
+  }
+  return { zones: [], live: false, tick };
 }
 

@@ -27,21 +27,22 @@ import {
   buildMetricsCsv,
   datasetCenter,
   downloadFile,
-  pushRecent,
-  searchNeighborhoods,
-  setStoreUser,
-  smartDefaults,
   getStoredVehicles,
   getStoredWarehouses,
+  pushRecent,
   setStoredVehicles,
   setStoredWarehouses,
+  setStoreUser,
+  smartDefaults,
   getWorkspaceUpdatedAt,
   setWorkspaceUpdatedAt,
   WORKSPACE_CHANGED_EVENT
 } from './components/panelStore';
+import { SEARCH_CATEGORIES, searchAll, type SearchCategory } from './components/searchIndex';
+import { SeedResultsPanel } from './components/SeedResultsPanel';
 import { HYDERABAD_SAMPLE } from './data/sample';
-import { Neighborhood, ValidationResult, DatasetSummary, OptimizationConfig, OptimizationResult, MapLayerOptions, BasemapStyle, OverviewAggregate, VehicleType, Warehouse } from './types';
-import { validateData, localValidate, optimizeNetwork, exportCsv, validateVehicles, validateWarehouses, localValidateVehicles, localValidateWarehouses, fetchRouteGeometries, fetchIsochrones, fetchCoverage as fetchCoverageGrid, fetchWarehouseFocus, fetchOverview, fetchUserWorkspace, saveUserWorkspace, isWorkspaceEmpty, type IsoFeature, type CoverageBounds, type CoverageCell, type WarehouseFocus } from './services/api';
+import { Neighborhood, ValidationResult, DatasetSummary, OptimizationConfig, OptimizationResult, MapLayerOptions, BasemapStyle, OverviewAggregate, VehicleType, Warehouse, OrderMove, TrafficZone } from './types';
+import { validateData, localValidate, optimizeNetwork, exportCsv, validateVehicles, validateWarehouses, localValidateVehicles, localValidateWarehouses, fetchRouteGeometries, fetchIsochrones, fetchCoverage as fetchCoverageGrid, fetchWarehouseFocus, fetchOverview, fetchTrafficZones, fetchUserWorkspace, saveUserWorkspace, isWorkspaceEmpty, type IsoFeature, type CoverageBounds, type CoverageCell, type WarehouseFocus } from './services/api';
 import { WarehouseFocusCard } from './components/WarehouseFocusCard';
 
 const DEFAULT_CONFIG: OptimizationConfig = {
@@ -128,12 +129,22 @@ const AppShell: React.FC = () => {
 
   // Search / detail state (gmaps place flow)
   const [searchText, setSearchText] = useState('');
+  // Phase J (#7): category dropdown across nodes/warehouses/vehicles/orders.
+  const [searchCategory, setSearchCategory] = useState<SearchCategory>('all');
   const [resultNodes, setResultNodes] = useState<Neighborhood[]>([]);
   const [resultTitle, setResultTitle] = useState('');
   const [detailNode, setDetailNode] = useState<Neighborhood | null>(null);
   const [detailBack, setDetailBack] = useState<PanelMode>('ask');
   const [focus, setFocus] = useState<MapFocus | null>(null);
   const [highlightId, setHighlightId] = useState<string | null>(null);
+  // Phase G (#4): last seeding result (counts + entities browsable in-app).
+  const [seedResult, setSeedResult] = useState<{
+    source: string;
+    nodes: Neighborhood[];
+    vehicles: import('./types').VehicleType[];
+    warehouses: import('./types').Warehouse[];
+    at: number;
+  } | null>(null);
 
   // Map layer chips (Phase B adds heatmap)
   const [layers, setLayers] = useState<LayerFlags>({ warehouses: true, routes: true, demand: true, radius: true, traffic: false, heatmap: true });
@@ -144,6 +155,10 @@ const AppShell: React.FC = () => {
   const [coverageCells, setCoverageCells] = useState<CoverageCell[]>([]);
   const [coverageRange, setCoverageRange] = useState<{ minKm: number; maxKm: number } | null>(null);
   const [coverageMeta, setCoverageMeta] = useState<{ grid_n?: number; bounds?: CoverageBounds; cell_step?: { dlat: number; dlon: number } } | null>(null);
+  // Phase I (#6): live order moves from the last sim tick (map markers).
+  const [liveMoves, setLiveMoves] = useState<OrderMove[]>([]);
+  // Phase L (#9): dynamic zone-traffic polygons (centre-high → edge-low).
+  const [trafficZones, setTrafficZones] = useState<TrafficZone[]>([]);
 
   // Route line rendering: straight displacement (default) or traced road paths
   const [linesMode, setLinesMode] = useState<'displacement' | 'roads'>('displacement');
@@ -617,18 +632,36 @@ const AppShell: React.FC = () => {
   const handleSyntheticGenerated = (newNodes: Neighborhood[]) => {
     setNeighborhoods(newNodes);
     triggerValidation(newNodes);
+    // Phase G: seeding shows what it created (nodes/orders browsable).
+    setSeedResult({ source: 'Synthetic city', nodes: newNodes, vehicles: [], warehouses: [], at: Date.now() });
   };
 
   const handleVehiclesLoaded = (rows: VehicleType[], valResult: ValidationResult) => {
     setVehiclesState(rows);
     setStoredVehicles(rows);
     setVehiclesValidation(valResult);
+    // Phase G: fleet seeding shows what it created.
+    setSeedResult((s) => ({
+      source: 'Synthetic fleet',
+      nodes: s?.nodes ?? neighborhoods,
+      vehicles: rows,
+      warehouses: s?.warehouses ?? [],
+      at: Date.now()
+    }));
   };
 
   const handleWarehousesLoaded = (rows: Warehouse[], valResult: ValidationResult) => {
     setWarehousesState(rows);
     setStoredWarehouses(rows);
     setWarehousesValidation(valResult);
+    // Phase G: site seeding shows what it created.
+    setSeedResult((s) => ({
+      source: 'Synthetic sites',
+      nodes: s?.nodes ?? neighborhoods,
+      vehicles: s?.vehicles ?? [],
+      warehouses: rows,
+      at: Date.now()
+    }));
   };
 
   const handleApplyZones = (updated: Neighborhood[]) => {
@@ -680,15 +713,77 @@ const AppShell: React.FC = () => {
 
   const submitSearch = (q: string) => {
     const query = q.trim();
-    if (!query) return;
-    pushRecent(query);
-    const hits = searchNeighborhoods(neighborhoods, query);
-    if (hits.length === 1) openDetail(hits[0], 'ask');
-    else {
-      setResultNodes(hits.slice(0, 30));
-      setResultTitle(hits.length ? `${hits.length} matches for “${query}”` : `No matches for “${query}”`);
+    // Phase J acceptance: empty query shows a hint, never a dead state.
+    if (!query) {
+      setResultNodes([]);
+      setResultTitle('Type to search nodes, warehouses, trucks & cars, or orders — pick a category first.');
       setPanel('results');
+      return;
     }
+    pushRecent(query);
+    // Corpus: nodes + warehouses (result + workspace sites) + fleet vehicles.
+    const whById = new Map<string, import('./types').Warehouse>();
+    [...(optimizationResult?.warehouses ?? []), ...warehouses].forEach((w) => {
+      if (!whById.has(w.warehouse_id)) whById.set(w.warehouse_id, w);
+    });
+    const hits = searchAll(
+      { nodes: neighborhoods, warehouses: [...whById.values()], vehicles },
+      query,
+      searchCategory
+    );
+    if (hits.length === 0) {
+      setResultNodes([]);
+      setResultTitle(`No matches for “${query}” in ${SEARCH_CATEGORIES.find((c) => c.id === searchCategory)?.label ?? 'All'} — try another category.`);
+      setPanel('results');
+      return;
+    }
+    // Single node/order hit → open detail; warehouse/vehicle hits → focus/map.
+    if (hits.length === 1) {
+      const h = hits[0];
+      if (h.kind === 'warehouse') {
+        handleWarehouseClick(h.refId);
+        const w = whById.get(h.refId);
+        if (w) setFocus({ lat: w.latitude, lon: w.longitude, zoom: 13, key: Date.now() });
+        return;
+      }
+      if (h.kind === 'vehicle') {
+        setResultTitle(`Vehicle ${h.id} — open the fleet table to edit`);
+        setResultNodes([]);
+        setPanel('results');
+        goTab('data');
+        return;
+      }
+      const node = neighborhoods.find((n) => n.neighborhood_id === h.refId);
+      if (node) {
+        openDetail(node, 'ask');
+        return;
+      }
+    }
+    // Multi-hit: nodes/orders open as tappable rows; warehouses/vehicles list too.
+    const nodeIds = new Set(
+      hits.filter((h) => h.kind === 'node' || h.kind === 'order').map((h) => h.refId)
+    );
+    const nodes = neighborhoods.filter((n) => nodeIds.has(n.neighborhood_id)).slice(0, 30);
+    if (nodes.length > 0) {
+      setResultNodes(nodes);
+      setResultTitle(`${hits.length} matches for “${query}” (${searchCategory})`);
+      setPanel('results');
+      return;
+    }
+    // Warehouse/vehicle-only hits: surface as rows via the first matching node
+    // set when possible, else a hint row state.
+    const whHit = hits.find((h) => h.kind === 'warehouse');
+    if (whHit) {
+      handleWarehouseClick(whHit.refId);
+      const w = whById.get(whHit.refId);
+      if (w) setFocus({ lat: w.latitude, lon: w.longitude, zoom: 13, key: Date.now() });
+      return;
+    }
+    setResultNodes([]);
+    setResultTitle(
+      hits.map((h) => `${h.label} — ${h.sub}`).slice(0, 8).join('\n') || `No matches for “${query}”.`
+    );
+    setPanel('results');
   };
 
   const demandRank = (node: Neighborhood): number | null => {
@@ -702,16 +797,34 @@ const AppShell: React.FC = () => {
   // Traced road paths + coverage polygons belong to a specific result/dataset — drop them on change.
   // A fresh non-road result also drops the roads toggle back to displacement.
   // Phase B: warehouse focus belongs to a result too — clear it here.
+  // Phase I: live moves belong to a tick on a specific assignment — clear too.
   useEffect(() => {
     setRoadGeometries({});
     roadGeometriesRef.current = {};
     setIsoGeometries({});
     setFocusedWarehouseId(null);
     setWarehouseFocus(null);
+    setLiveMoves([]);
     if (optimizationResult && optimizationResult.config.distance_metric !== 'road') {
       setLinesMode('displacement');
     }
   }, [optimizationResult, neighborhoods]);
+
+  // Phase L (#9): zone polygons follow the demand (tick 0 baseline; the live
+  // tick intensities ride along in SimulationLive + corridor factors).
+  useEffect(() => {
+    if (neighborhoods.length === 0) {
+      setTrafficZones([]);
+      return;
+    }
+    let cancelled = false;
+    fetchTrafficZones(neighborhoods, 0).then((r) => {
+      if (!cancelled) setTrafficZones(r.zones || []);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [neighborhoods]);
 
   // Phase B (#2): city-wide continuous heatmap grid — server cells with local
   // fallback, recomputed from the ACTIVE assignment distances whenever they change.
@@ -762,10 +875,46 @@ const AppShell: React.FC = () => {
     };
   }, [focusedWarehouseId, optimizationResult, neighborhoods]);
 
-  /** Phase B (#1): warehouse pin click → isolate zone (click again to clear). */
+  /** Phase K (#8): selecting a warehouse auto-enables + isolates its radius;
+   * deselect restores the previous layer flag (manual toggle still untouched). */
+  const prevRadiusRef = useRef<boolean | null>(null);
   const handleWarehouseClick = useCallback((warehouseId: string) => {
-    setFocusedWarehouseId((prev) => (prev === warehouseId ? null : warehouseId));
+    setFocusedWarehouseId((prev) => {
+      if (prev === warehouseId) {
+        // Deselect (click again): restore the saved layer flag.
+        if (prevRadiusRef.current != null) {
+          const back = prevRadiusRef.current;
+          prevRadiusRef.current = null;
+          setLayers((l) => ({ ...l, radius: back }));
+        }
+        return null;
+      }
+      // New select: remember the flag once, then force radius on.
+      if (prev == null) {
+        prevRadiusRef.current = layers.radius;
+        setLayers((l) => (l.radius ? l : { ...l, radius: true }));
+      }
+      return warehouseId;
+    });
     setHighlightId(null);
+  }, [layers.radius]);
+
+  // Phase K: Esc also clears the warehouse focus (restores the layer flag).
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      setFocusedWarehouseId((prev) => {
+        if (prev == null) return prev;
+        if (prevRadiusRef.current != null) {
+          const back = prevRadiusRef.current;
+          prevRadiusRef.current = null;
+          setLayers((l) => ({ ...l, radius: back }));
+        }
+        return null;
+      });
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
   }, []);
 
   // Service-radius overlay: enforced R_max from the result when present,
@@ -915,6 +1064,13 @@ const AppShell: React.FC = () => {
             neighborhoods={neighborhoods}
             result={optimizationResult}
             zoneColors={zoneColors}
+            onOpenWarehouse={(wid) => {
+              handleWarehouseClick(wid);
+              const w = optimizationResult?.warehouses.find((x) => x.warehouse_id === wid);
+              if (w) setFocus({ lat: w.latitude, lon: w.longitude, zoom: 13, key: Date.now() });
+            }}
+            onOpenVehicle={() => goTab('data')}
+            onOpenNode={(n) => openDetail(n, 'saved')}
             onLoadList={(nodes) => {
               setNeighborhoods(nodes);
               triggerValidation(nodes);
@@ -968,6 +1124,31 @@ const AppShell: React.FC = () => {
             title="Data"
             meta={`${neighborhoods.length} orders • ${vehicles.length} vehicles • ${warehouses.length} warehouses`}
           >
+            {/* Phase G (#4): seeding results — counts + browsable entities. */}
+            {seedResult && (
+              <SeedResultsPanel
+                seed={seedResult}
+                onLoadNodes={(nodes) => {
+                  setNeighborhoods(nodes);
+                  triggerValidation(nodes);
+                }}
+                onLoadVehicles={(fleet) => {
+                  setVehicles(fleet);
+                  setSeedResult((s) => (s ? { ...s, vehicles: fleet } : s));
+                }}
+                onLoadWarehouses={(sites) => {
+                  setWarehouses(sites);
+                  setSeedResult((s) => (s ? { ...s, warehouses: sites } : s));
+                }}
+                onViewOnMap={(nodes) => {
+                  if (nodes.length > 0) {
+                    setFocus({ lat: nodes[0].latitude, lon: nodes[0].longitude, zoom: 11, key: Date.now() });
+                    setHighlightId(nodes[0].neighborhood_id);
+                  }
+                }}
+                onOpenNode={(n) => openDetail(n, 'data')}
+              />
+            )}
             <DataTab
               neighborhoods={neighborhoods}
               vehicles={vehicles}
@@ -1006,6 +1187,8 @@ const AppShell: React.FC = () => {
               onUpdateConfig={handleConfigChange}
               onOptimizationComplete={setOptimizationResult}
               onGoToMap={() => goTab('ask')}
+              onOpenWarehouse={(wid) => handleWarehouseClick(wid)}
+              onLiveMoves={(moves) => setLiveMoves(moves)}
             />
           </SidePanel>
         )}
@@ -1110,6 +1293,10 @@ const AppShell: React.FC = () => {
             coverageMeta={coverageMeta}
             showHeatmap={layers.heatmap}
             coverageRange={coverageRange}
+            liveMoves={liveMoves}
+            showLive={liveMoves.length > 0}
+            trafficZones={trafficZones}
+            showZones={layers.traffic}
             theme={theme}
             highlightId={highlightId}
           />
@@ -1138,13 +1325,26 @@ const AppShell: React.FC = () => {
               e.preventDefault();
               submitSearch(searchText);
             }}
-            className="flex items-center gap-2 bg-white rounded-full pl-5 pr-2 py-2 shadow-lg border border-black/5 w-[380px] max-w-[45%]"
+            className="flex items-center gap-2 bg-white rounded-full pl-2 pr-2 py-2 shadow-lg border border-black/5 w-[440px] max-w-[55%]"
           >
+            {/* Phase J (#7): category dropdown — nodes, warehouses, trucks/cars, orders. */}
+            <select
+              value={searchCategory}
+              onChange={(e) => setSearchCategory(e.target.value as SearchCategory)}
+              title="Search category"
+              className="bg-cream-deep border border-black/5 rounded-full text-[12px] font-bold text-ink px-2.5 py-1.5 focus:outline-none cursor-pointer shrink-0"
+            >
+              {SEARCH_CATEGORIES.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.label}
+                </option>
+              ))}
+            </select>
             <input
               value={searchText}
               onChange={(e) => setSearchText(e.target.value)}
-              placeholder="Search GridPoint maps"
-              className="flex-1 bg-transparent text-[13px] text-ink placeholder:text-ink-faint focus:outline-none"
+              placeholder="Search nodes, warehouses, trucks, orders…"
+              className="flex-1 bg-transparent text-[13px] text-ink placeholder:text-ink-faint focus:outline-none min-w-0"
             />
             {searchText && (
               <button type="button" onClick={() => setSearchText('')} className="text-ink-faint hover:text-ink cursor-pointer">
@@ -1236,7 +1436,10 @@ const AppShell: React.FC = () => {
       <CensusModal
         isOpen={isCensusModalOpen}
         onClose={() => setIsCensusModalOpen(false)}
-        onGenerated={handleSyntheticGenerated}
+        onGenerated={(nodes) => {
+          handleSyntheticGenerated(nodes);
+          setSeedResult({ source: 'Census real demand', nodes, vehicles: [], warehouses: [], at: Date.now() });
+        }}
       />
 
       <ErrorDrawer

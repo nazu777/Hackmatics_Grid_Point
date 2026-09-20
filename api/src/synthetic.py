@@ -260,3 +260,28 @@ def generate_synthetic_warehouses(seed: int = 42, count: int = 2,
             "utilization_pct": 0.0,
         })
     return sites
+
+
+def seed_summary(nodes: List[Dict[str, Any]],
+                 vehicles: List[Dict[str, Any]] | None = None,
+                 warehouses: List[Dict[str, Any]] | None = None) -> Dict[str, Any]:
+    """
+    Phase G (#4): exact counts + order totals for a seeding result so the
+    SeedResultsPanel can show what was created (nodes/orders + warehouses +
+    vehicles). Pure/additive — no generator changes.
+    """
+    nodes = nodes or []
+    vehicles = vehicles or []
+    warehouses = warehouses or []
+    total_orders = sum(int(n.get("daily_orders", 0) or 0) for n in nodes)
+    zones: Dict[str, int] = {}
+    for n in nodes:
+        z = str(n.get("zone") or "Unzoned")
+        zones[z] = zones.get(z, 0) + 1
+    return {
+        "nodes": len(nodes),
+        "total_orders": total_orders,
+        "warehouses": len(warehouses),
+        "vehicles": len(vehicles),
+        "zones": zones,
+    }

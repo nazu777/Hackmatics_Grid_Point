@@ -423,3 +423,143 @@ def corridor_traffic_from_assignments(
     return aggregate_corridor_congestion(
         pts, manual_floor=manual_floor, hour=hour,
         record=record, allow_live=allow_live)
+
+
+# ---------------- Phase L: dynamic zone traffic (followup #9) ----------------
+# City split into radial zones (centre high -> outer low), red/yellow/green,
+# refreshing in realtime (time wave + deterministic jitter) and feeding
+# routes/ETA/fuel through the existing corridor_factor path (extend, not fork).
+# Contract (docs/followup_phases.md §1.3):
+#   GET /api/traffic/zones -> {zones: [{zone_id, name, intensity 0..1,
+#     level low|medium|high, polygon [[lon,lat]...]}], live: bool}
+#   helper zone_factor(lat, lon) -> float (Phase I imports this; falls back
+#   to corridor/manual floor when zones unavailable).
+
+ZONE_LEVELS = ("low", "medium", "high")
+ZONE_COLORS = {"high": "#ef4444", "medium": "#f59e0b", "low": "#22c55e"}
+
+
+def _zone_level(intensity: float) -> str:
+    v = max(0.0, min(1.0, float(intensity)))
+    if v >= 0.55:
+        return "high"
+    if v >= 0.28:
+        return "medium"
+    return "low"
+
+
+def _demand_centroid(neighborhoods: List[Dict[str, Any]]) -> Optional[Tuple[float, float]]:
+    pts = []
+    for n in neighborhoods or []:
+        try:
+            pts.append((float(n.get("latitude")), float(n.get("longitude"))))
+        except (TypeError, ValueError):
+            continue
+    if not pts:
+        return None
+    return (sum(p[0] for p in pts) / len(pts), sum(p[1] for p in pts) / len(pts))
+
+
+def _zone_jitter(zone_id: str, tick: int) -> float:
+    """Deterministic ±0.06 jitter per zone + tick (no RNG state)."""
+    import hashlib
+    h = hashlib.md5(f"{zone_id}@{tick}".encode()).hexdigest()
+    return (int(h[:8], 16) % 1200) / 10000.0 - 0.06
+
+
+def zone_intensity_at(lat: float, lon: float,
+                      center: Optional[Tuple[float, float]],
+                      max_radius_km: float = 20.0,
+                      tick: int = 0) -> float:
+    """
+    Radial falloff from the demand centroid (centre-high -> edge-low) with a
+    realtime time wave + deterministic jitter. Pure function so tests + the
+    offline fallback stay reproducible.
+    """
+    import math
+    if center is None:
+        base = 0.35
+    else:
+        try:
+            dlat = (float(lat) - center[0]) * 111.0
+            dlon = (float(lon) - center[1]) * 111.0 * math.cos(math.radians(center[0]))
+            dist = math.hypot(dlat, dlon)
+        except (TypeError, ValueError):
+            dist = 0.0
+        frac = min(1.0, dist / max(1.0, max_radius_km))
+        base = 0.85 * (1.0 - frac) + 0.12 * frac
+    wave = 0.08 * math.sin(float(tick) / 3.0)
+    return max(0.0, min(1.0, base + wave))
+
+
+def zone_factor(lat: float, lon: float,
+                neighborhoods: Optional[List[Dict[str, Any]]] = None,
+                tick: int = 0) -> float:
+    """
+    Phase I entry point: congestion factor for a point from the zone model.
+    Falls back to corridor/manual floor when zones unavailable (empty data) —
+    callers must keep working if L is late (followup §1.3).
+    """
+    try:
+        center = _demand_centroid(neighborhoods or [])
+        return zone_intensity_at(float(lat), float(lon), center, tick=int(tick))
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def build_traffic_zones(neighborhoods: List[Dict[str, Any]],
+                        rings: int = 3,
+                        segments: int = 12,
+                        tick: int = 0,
+                        max_radius_km: float = 20.0) -> Dict[str, Any]:
+    """
+    Concentric ring zones around the demand centroid. Each ring is split into
+    `segments` wedge polygons so the map renders centre-high -> edge-low
+    variation (not one flat disc). Intensities shift across ticks via the
+    time wave + per-zone jitter.
+    """
+    import math
+    center = _demand_centroid(neighborhoods or [])
+    live = api_key_configured()
+    if center is None:
+        return {"zones": [], "live": live, "tick": int(tick)}
+    clat, clon = center
+    # Degree steps scaled at the centroid latitude (WGS84 in, km logic).
+    lat_deg_per_km = 1.0 / 110.574
+    lon_deg_per_km = 1.0 / (111.320 * max(0.1, math.cos(math.radians(clat))))
+    radii = [(max_radius_km * (r + 1) / max(1, rings)) for r in range(max(1, rings))]
+    zones: List[Dict[str, Any]] = []
+    for ri, radius in enumerate(radii):
+        inner = radii[ri - 1] if ri > 0 else 0.0
+        for s in range(max(3, segments)):
+            a0 = 2 * math.pi * s / max(3, segments)
+            a1 = 2 * math.pi * (s + 1) / max(3, segments)
+            ring: List[List[float]] = []
+            steps = 6
+            for i in range(steps + 1):
+                a = a0 + (a1 - a0) * i / steps
+                ring.append([round(clon + radius * math.sin(a) * lon_deg_per_km, 5),
+                             round(clat + radius * math.cos(a) * lat_deg_per_km, 5)])
+            for i in range(steps, -1, -1):
+                a = a0 + (a1 - a0) * i / steps
+                r = inner if inner > 0 else 0.0
+                ring.append([round(clon + r * math.sin(a) * lon_deg_per_km, 5),
+                             round(clat + r * math.cos(a) * lat_deg_per_km, 5)])
+            mid_a = (a0 + a1) / 2.0
+            mid_r = (inner + radius) / 2.0
+            mlat = clat + mid_r * math.cos(mid_a) * lat_deg_per_km
+            mlon = clon + mid_r * math.sin(mid_a) * lon_deg_per_km
+            intensity = max(0.0, min(1.0, zone_intensity_at(
+                mlat, mlon, center, max_radius_km=max_radius_km, tick=tick)
+                + _zone_jitter(f"ring{ri}-seg{s}", tick)))
+            level = _zone_level(intensity)
+            zones.append({
+                "zone_id": f"ring{ri}-seg{s}",
+                "name": f"{'Centre' if ri == 0 else ('Midtown' if ri == 1 else 'Outer')} {s + 1}",
+                "intensity": round(intensity, 3),
+                "level": level,
+                "color": ZONE_COLORS[level],
+                "polygon": ring,
+            })
+    return {"zones": zones, "live": live, "tick": int(tick),
+            "center": {"lat": round(clat, 5), "lon": round(clon, 5)}}
