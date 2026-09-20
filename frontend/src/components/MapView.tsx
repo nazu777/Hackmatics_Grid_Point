@@ -3,7 +3,7 @@ import mapboxgl from 'mapbox-gl';
 import 'mapbox-gl/dist/mapbox-gl.css';
 import { Neighborhood, Warehouse, Assignment, BasemapStyle, ColorByMode, ZoneColorMap } from '../types';
 import { BASEMAPS, getMapboxToken, colorForZone, zoneCounts } from './mapThemes';
-import type { CoverageCell, IsoFeature } from '../services/api';
+import type { CoverageBounds, CoverageCell, IsoFeature } from '../services/api';
 
 const PALETTE = ['#0ea5e9', '#3b82f6', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4', '#f97316', '#84cc16', '#ec4899', '#6366f1'];
 
@@ -96,6 +96,8 @@ interface MapViewProps {
   focusedWarehouseId?: string | null;
   /** Phase B (#2): proximity heatmap cells (green near → red far). */
   coverageCells?: CoverageCell[];
+  /** City-wide grid geometry (bounds + cell step) for continuous zone polygons. */
+  coverageMeta?: { grid_n?: number; bounds?: CoverageBounds; cell_step?: { dlat: number; dlon: number } } | null;
   /** Phase B (#2): heatmap layer visibility. */
   showHeatmap?: boolean;
   /** Heatmap range labels (km) for the legend. */
@@ -192,6 +194,7 @@ export const MapView: React.FC<MapViewProps> = ({
   onWarehouseClick,
   focusedWarehouseId = null,
   coverageCells = [],
+  coverageMeta = null,
   showHeatmap = false,
   coverageRange = null,
   theme = 'light',
@@ -351,6 +354,7 @@ export const MapView: React.FC<MapViewProps> = ({
     markersRef.current = [];
     removeLayerAndSource(map, ROUTES_OK, ROUTES_OK);
     removeLayerAndSource(map, ROUTES_BAD, ROUTES_BAD);
+    removeLayerAndSource(map, `${HEATMAP_SRC}-zones`, HEATMAP_SRC);
     removeLayerAndSource(map, `${HEATMAP_SRC}-circles`, HEATMAP_SRC);
     removeLayerAndSource(map, `${RADIUS_SRC}-fill`, RADIUS_SRC);
     // (fill + line share one source; remove both layers first)
@@ -395,25 +399,47 @@ export const MapView: React.FC<MapViewProps> = ({
       : null;
     const inFocus = (nid: string) => !focusMembers || focusMembers.has(nid);
 
-    // Phase B (#2 + #5 display): heatmap UNDER bubbles/routes — insert first
-    // so route lines and demand bubbles paint over it.
+    // City-wide continuous heatmap UNDER bubbles/routes — insert first so
+    // route lines and demand bubbles paint over it. Each grid cell renders as
+    // a contiguous zone polygon (no gaps, no isolated dots), tiling the full
+    // padded service-area bounds from edge to edge.
     if (showHeatmap && coverageCells.length > 0) {
+      let dlat = coverageMeta?.cell_step?.dlat;
+      let dlon = coverageMeta?.cell_step?.dlon;
+      if (!Number.isFinite(dlat as number) || !Number.isFinite(dlon as number)) {
+        // Fallback: derive the step from the cell extents when the server
+        // payload predates bounds/cell_step.
+        const cls = coverageCells.map((c) => c.lat);
+        const cns = coverageCells.map((c) => c.lon);
+        const nGuess = Math.max(1, Math.round(Math.sqrt(coverageCells.length)));
+        dlat = (Math.max(...cls) - Math.min(...cls)) / nGuess || 0.02;
+        dlon = (Math.max(...cns) - Math.min(...cns)) / nGuess || 0.02;
+      }
+      const hl = (dlat as number) / 2;
+      const hw = (dlon as number) / 2;
       const feats = coverageCells.map((c) => ({
         type: 'Feature' as const,
         properties: { color: c.color },
-        geometry: { type: 'Point' as const, coordinates: [c.lon, c.lat] }
+        geometry: {
+          type: 'Polygon' as const,
+          coordinates: [[
+            [c.lon - hw, c.lat - hl],
+            [c.lon + hw, c.lat - hl],
+            [c.lon + hw, c.lat + hl],
+            [c.lon - hw, c.lat + hl],
+            [c.lon - hw, c.lat - hl]
+          ]]
+        }
       }));
       try {
         map.addSource(HEATMAP_SRC, { type: 'geojson', data: { type: 'FeatureCollection', features: feats } });
         map.addLayer({
-          id: `${HEATMAP_SRC}-circles`,
-          type: 'circle',
+          id: `${HEATMAP_SRC}-zones`,
+          type: 'fill',
           source: HEATMAP_SRC,
           paint: {
-            'circle-color': ['get', 'color'],
-            'circle-radius': ['interpolate', ['linear'], ['zoom'], 4, 6, 10, 14, 14, 26],
-            'circle-opacity': 0.32,
-            'circle-blur': 0.65
+            'fill-color': ['get', 'color'],
+            'fill-opacity': 0.32
           }
         });
       } catch { /* style race — next render retries */ }
@@ -619,7 +645,7 @@ export const MapView: React.FC<MapViewProps> = ({
     try {
       map.resize();
     } catch { /* ignore */ }
-  }, [neighborhoods, warehouses, assignments, radiusKm, basemap, styleReady, token, colorBy, zoneColors, showWarehouses, showRoutes, showDemand, showRadius, routeColor, colorRoutesByTraffic, linesMode, roadGeometries, isochrones, theme, highlightId, focus, focusedWarehouseId, coverageCells, showHeatmap, onWarehouseClick]);
+  }, [neighborhoods, warehouses, assignments, radiusKm, basemap, styleReady, token, colorBy, zoneColors, showWarehouses, showRoutes, showDemand, showRadius, routeColor, colorRoutesByTraffic, linesMode, roadGeometries, isochrones, theme, highlightId, focus, focusedWarehouseId, coverageCells, coverageMeta, showHeatmap, onWarehouseClick]);
 
   // Fly-to on focus requests (gmaps "Center" action)
   useEffect(() => {

@@ -22,7 +22,7 @@ Bonus + Polish (shipped) + Overview (shipped — Phase F, `/app/overview` + `POS
 
 > **Docs-vs-code status (Sept 20 2026, read first):** `docs/phases.md` concurrent plan **Phases A–F** covering user backlog #1–#14 (`phases.md` §0) — **ALL SHIPPED** (Person 1: A onboarding trio with vehicle/warehouse CRUD + seeders, D per-order road+fuel cost truth + populated Fuel/Congestion/Feasibility fields + elbow, E expansion policy with abandon/sell/revenue; Person 2: B warehouse click-to-focus + coverage heatmap + `{frm|from}` roads fix + traffic overlay, C optimize-on-current-traffic + `traffic_aware_reroute` + corridor traffic, F realtime simulation tick + spillover + Overview tab). `docs/prd.md` §§5.1–5.11, `docs/schema.md` §§2.8–2.10 + traffic/simulation config fields, and `docs/demo_script.md` beats carry the shipped spec. `docs/problem_statement.md` requirements are frozen — its addendum is a pointer only.
 
-Live prod URL (if deployed): `https://hackmatics-grid-point.vercel.app` (`README.md:7`). Auth store is in-memory (Neon `users` table = documented TODO in `backend/src/auth.py`); `DATABASE_URL`/`NEON_*` are env-plumbed via `.env.example:3`.
+Live prod URL (if deployed): `https://hackmatics-grid-point.vercel.app` (`README.md:7`). Auth store is file-backed JSON (`GRIDPOINT_USERS_FILE`, default `backend/data/users.json`; Vercel: `/tmp/gridpoint_users.json` — Neon `users` table = documented TODO in `backend/src/auth.py`); `DATABASE_URL`/`NEON_*` are env-plumbed via `.env.example:3`.
 
 ## 2. Repo Structure (Monorepo)
 
@@ -52,7 +52,7 @@ Hackmatics_Grid_Point/
 │   │   ├── fuel.py           # Live India fuel via RapidAPI (12h TTL + static fallback)
 │   │   ├── census.py         # US Census ACS seeder (tract pop → daily_orders, data/census_cache/)
 │   │   ├── expansion.py      # Incremental expansion (MAX_WAREHOUSES=10)
-│   │   ├── auth.py           # JWT (PBKDF2 + HS256, 24h TTL, in-memory store; Neon TODO)
+│   │   ├── auth.py           # JWT (PBKDF2 + HS256, 24h TTL, file-backed JSON store; Neon TODO)
 │   │   └── api.py            # FastAPI app `app` (schema.md §6) — 39 routes (optimize, expand, scenarios, fuel, traffic, census, routes, simulation, overview, auth…)
 │   ├── tests/                # 159 tests in 25 files: schema, validation, ingestion, synthetic, distance, optimization, cost, mapping, scenarios, expansion, routing, fuel, traffic, census, auth, api, acceptance phase1/2/3/5 + onboarding/cost-truth/expansion-policy + phase-B/phase-C/simulation + perf (N=1000 <5s)
 │   ├── requirements.txt      # Floating deps (FastAPI/Uvicorn/Pydantic/Pandas/NumPy/SciPy/sklearn/PuLP/Geopy/pytest + httpx)
@@ -140,7 +140,7 @@ Client fallback `frontend/src/services/api.ts:88 localValidate()` must stay in s
 | `/api/export/metrics` | POST | Metrics table export |
 | `/api/export/assignments` | POST | Assignment table export |
 | `/api/map/summary` | POST `{neighborhoods}` | Bounds, center, zoom + bubble styling |
-| `/api/map/coverage` | POST | SHIPPED Phase B: green→red proximity heatmap cells + legend |
+| `/api/map/coverage` | POST | SHIPPED Phase B: green→red proximity heatmap cells + legend; UPDATED Sept 20 2026: city-wide padded bounds + `bounds`/`cell_step`, rendered as continuous zone polygons |
 | `/api/map/warehouse-focus` | POST | SHIPPED Phase B: isolated zone payload for a clicked warehouse (`warehouse_focus_summary`) |
 | `/api/fuel/rates?state=` | GET | Live India fuel rates + fallback (`live` flag) |
 | `/api/fuel/price` | GET | Single fuel price lookup |
@@ -207,7 +207,7 @@ vercel ls / vercel project ls   # verify
 
 **Shipped (do not regress):**
 - **Ingestion ✅ (Phase A SHIPPED)** — neighborhoods + owned vehicles + existing warehouses (CSV/JSON upload with `?dataset=`, manual tables, synthetic + Census ACS + opt-in Hyderabad sample, per-account EMPTY 0/0/0 + checklist, JWT-gated). Seeds: `data/samples/vehicles_seed.*, warehouses_seed.*` + `GET /api/synthetic/vehicles|warehouses` (seed=42).
-- **Map ✅ (Phase B SHIPPED)** — Mapbox GL (Standard/Light/Dark), bubbles ∝√orders, displacement/road lines, R_max circles + road isochrones, layer chips, Gmaps rail (`ask/saved/optimize/compare/data/lab/overview/export/settings/help`). Click-to-focus zone card (`WarehouseFocusCard.tsx`, `POST /api/map/warehouse-focus`), green→red coverage heatmap (`POST /api/map/coverage`), corridor-traffic overlay from traced roads, `{frm|from}` roads fix with friendly fallback (never raw `Pair #0…`).
+- **Map ✅ (Phase B SHIPPED, heatmap refreshed Sept 20 2026)** — Mapbox GL (Standard/Light/Dark), bubbles ∝√orders, displacement/road lines, R_max circles + road isochrones, layer chips, Gmaps rail (`ask/saved/optimize/compare/data/lab/overview/export/settings/help`). Click-to-focus zone card (`WarehouseFocusCard.tsx`, `POST /api/map/warehouse-focus`), city-wide continuous coverage zones — padded bounds + contiguous `fill` polygons via `bounds`/`cell_step` (`POST /api/map/coverage`), corridor-traffic overlay from traced roads, `{frm|from}` roads fix with friendly fallback (never raw `Pair #0…`).
 - **Optimization ✅ (Phase C SHIPPED)** — Haversine/Euclidean/Manhattan + road mode, Weiszfeld K=1, weighted K-Means K>1, PuLP MILP CFLP, road-aware assignment, incremental expansion (`POST /api/expand` + policy recommendation). Optimize-on-current-traffic (`use_live_traffic_for_routing`) + `traffic_aware_reroute` (`α·cost + β·time`, `POST /api/routes/reroute` + `POST /api/traffic/corridors`) with `traffic_note`/`routing_note` provenance.
 - **Cost/compare ✅ (Phase D SHIPPED)** — per-order road+fuel truth (`per_order_breakdown`, `assignment_table_rows`), baseline-vs-optimized dashboard with per-node avg cost/order, populated Fuel-portion/Avg-congestion/Feasibility fields, annotated infra-vs-delivery elbow (`TradeoffElbow.tsx`), CSV exports with fuel columns.
 - **Expansion ✅ (Phase E SHIPPED)** — keep-vs-abandon/demolish + keep-vs-sell policy (`expansion_policy`, `horizon_months`, `revenue_per_order`), ranked NPV recommendation with costed rationale + before/after map.
@@ -215,7 +215,7 @@ vercel ls / vercel project ls   # verify
 
 **All six phases shipped (nothing remaining planned):** A Onboarding (#4, #6, #8) · B Map UX (#1–#3, #5-display) · C Traffic-aware routing (#5-opt, #9, #12-engine) · D Cost truth (#7, #10) · E Expansion advisor (#11) · F Realtime automation + Overview (#12-UI, #13, #14). Shared frozen interfaces in `phases.md` §1; traceability in Appendix A.
 
-Next (code): standing items — Neon-backed `users` table, production secrets via `vercel env add … production`, demo video refresh (see `docs/demo_script.md`).
+Next (code): standing items — Neon-backed `users` table, production secrets via `vercel env add … production`, demo video refresh (see `docs/demo_script.md`). Follow-up user backlog #4–#9 is planned as parallel phases G–L in `docs/followup_phases.md` (seed-viz, bookmarks, sim-live, search, auto-radius, zone-traffic) with frozen shared contracts in §1.
 
 Traceability: `docs/phases.md` Appendix A + `docs/prd.md` §4.
 

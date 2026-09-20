@@ -36,7 +36,7 @@ import {
 } from './components/panelStore';
 import { HYDERABAD_SAMPLE } from './data/sample';
 import { Neighborhood, ValidationResult, DatasetSummary, OptimizationConfig, OptimizationResult, MapLayerOptions, BasemapStyle, OverviewAggregate } from './types';
-import { validateData, localValidate, optimizeNetwork, exportCsv, fetchRouteGeometries, fetchIsochrones, fetchCoverage as fetchCoverageGrid, fetchWarehouseFocus, friendlyRouteError, fetchOverview, type IsoFeature, type CoverageCell, type WarehouseFocus } from './services/api';
+import { validateData, localValidate, optimizeNetwork, exportCsv, fetchRouteGeometries, fetchIsochrones, fetchCoverage as fetchCoverageGrid, fetchWarehouseFocus, fetchOverview, type IsoFeature, type CoverageBounds, type CoverageCell, type WarehouseFocus } from './services/api';
 import { WarehouseFocusCard } from './components/WarehouseFocusCard';
 
 const DEFAULT_CONFIG: OptimizationConfig = {
@@ -130,9 +130,10 @@ const AppShell: React.FC = () => {
   // Phase B (#1): clicked warehouse zone isolation.
   const [focusedWarehouseId, setFocusedWarehouseId] = useState<string | null>(null);
   const [warehouseFocus, setWarehouseFocus] = useState<WarehouseFocus | null>(null);
-  // Phase B (#2): proximity heatmap cells (server grid w/ local fallback).
+  // Phase B (#2): city-wide continuous heatmap zones (server grid w/ local fallback).
   const [coverageCells, setCoverageCells] = useState<CoverageCell[]>([]);
   const [coverageRange, setCoverageRange] = useState<{ minKm: number; maxKm: number } | null>(null);
+  const [coverageMeta, setCoverageMeta] = useState<{ grid_n?: number; bounds?: CoverageBounds; cell_step?: { dlat: number; dlon: number } } | null>(null);
 
   // Route line rendering: straight displacement (default) or traced road paths
   const [linesMode, setLinesMode] = useState<'displacement' | 'roads'>('displacement');
@@ -143,7 +144,6 @@ const AppShell: React.FC = () => {
     roadGeometriesRef.current = roadGeometries;
   }, [roadGeometries]);
   const [tracing, setTracing] = useState(false);
-  const [routeNotice, setRouteNotice] = useState<string | null>(null);
   // Full re-optimization in flight (roads toggle switches distance metric).
   const [reopting, setReopting] = useState(false);
   // Last non-road metric, restored when leaving roads mode.
@@ -169,12 +169,9 @@ const AppShell: React.FC = () => {
     // Small chunks with progressive rendering: each chunk stays comfortably
     // inside serverless execution limits and traced roads appear incrementally.
     const CHUNK = 12;
-    const seenProviders = new Set<string>();
-    let stored = 0;
     try {
       for (let s = 0; s < pairs.length; s += CHUNK) {
         const slice = pairs.slice(s, s + CHUNK);
-        setRouteNotice(`Tracing road paths… ${Math.min(s + slice.length, pairs.length)}/${pairs.length}`);
         const routes = await fetchRouteGeometries(
           slice.map((p) => ({ from: p.from, to: p.to })),
           !!res.config.use_live_traffic
@@ -186,26 +183,15 @@ const AppShell: React.FC = () => {
           const line = r && Array.isArray(r.line) ? r.line : null;
           if (line && line.length >= 2 && slice[i]) good[slice[i].id] = line;
         });
-        stored += Object.keys(good).length;
         if (Object.keys(good).length > 0) {
           roadGeometriesRef.current = { ...roadGeometriesRef.current, ...good };
           setRoadGeometries(roadGeometriesRef.current);
         }
-        routes.forEach((r) => seenProviders.add(String(r?.provider ?? 'unknown').replace(' (cached)', '')));
       }
-      // Traced/total counter (Phase B #3): missing entries fall back to
-      // straight lines — the notice always shows traced/total, never raw errors.
-      const tracedTotal = Object.keys(roadGeometriesRef.current).length;
-      const provider = [...seenProviders].join(' + ') || 'road network';
-      setRouteNotice(
-        stored > 0
-          ? `Road paths via ${provider} (${tracedTotal}/${res.assignments.length} traced, rest straight lines)`
-          : 'Road path unavailable — showing straight line'
-      );
-    } catch (e: any) {
-      // Phase B (#3): ANY geometry failure maps to the friendly notice —
-      // the raw `Pair #0…` validator string must never reach the map UI.
-      setRouteNotice(friendlyRouteError(e));
+      // Missing entries silently fall back to straight displacement lines.
+    } catch {
+      // Geometry failures are silent in the UI — the map falls back to
+      // straight lines. Never surface raw validator strings (e.g. Pair #0…).
     } finally {
       setTracing(false);
     }
@@ -255,7 +241,6 @@ const AppShell: React.FC = () => {
         const roadCfg = { ...optimizationResult.config, distance_metric: 'road' as const };
         setLinesMode(mode);
         setReopting(true);
-        setRouteNotice('Re-optimizing on the road network…');
         try {
           const res = await optimizeNetwork(neighborhoods, roadCfg);
           setOptimizationResult(res);
@@ -263,11 +248,10 @@ const AppShell: React.FC = () => {
           const rKm = res.config.radius_enabled ? (res.config.R_max_km ?? null) : previewRadiusKm;
           await traceRoutes(res.assignments.map((a) => a.neighborhood_id), res);
           await fetchCoverage(res, rKm);
-          setRouteNotice((prev) => prev ?? `Road-network optimization complete (${res.assignments.length} routes).`);
-        } catch (e: any) {
+        } catch {
           setLinesMode('displacement');
-          // Sanitize: road-path validator strings never reach the map UI.
-          setRouteNotice(friendlyRouteError(e, e instanceof Error ? e.message : 'Road re-optimization failed.'));
+          // Silent fallback to straight lines — raw validator strings
+          // (e.g. Pair #0…) must never reach the map UI.
         } finally {
           setReopting(false);
         }
@@ -275,14 +259,12 @@ const AppShell: React.FC = () => {
       }
       // Already road-based: just trace any missing driving paths.
       setLinesMode(mode);
-      setRouteNotice(null);
       const missing = optimizationResult.assignments
         .map((a) => a.neighborhood_id)
         .filter((id) => !roadGeometries[id]);
       if (missing.length === 0) {
         const rKm = optimizationResult.config.radius_enabled ? (optimizationResult.config.R_max_km ?? null) : previewRadiusKm;
         await fetchCoverage(optimizationResult, rKm);
-        setRouteNotice(`All ${optimizationResult.assignments.length} road paths traced.`);
         return;
       }
       traceRoutes(missing);
@@ -296,19 +278,17 @@ const AppShell: React.FC = () => {
       const back = prevMetricRef.current;
       const dispCfg = { ...optimizationResult.config, distance_metric: back };
       setReopting(true);
-      setRouteNotice(`Re-optimizing with ${back} distances…`);
       try {
         const res = await optimizeNetwork(neighborhoods, dispCfg);
         setOptimizationResult(res);
         handleConfigChange({ ...optimizationConfig, distance_metric: back });
-        setRouteNotice(null);
-      } catch (e: any) {
-        setRouteNotice(e instanceof Error ? e.message : 'Re-optimization failed.');
+      } catch {
+        // Silent fallback — raw validator strings never reach the map UI.
       } finally {
         setReopting(false);
       }
     } else {
-      setRouteNotice(null);
+      // Back to displacement: straight lines render from the result as-is.
     }
   };
 
@@ -575,7 +555,6 @@ const AppShell: React.FC = () => {
     setRoadGeometries({});
     roadGeometriesRef.current = {};
     setIsoGeometries({});
-    setRouteNotice(null);
     setFocusedWarehouseId(null);
     setWarehouseFocus(null);
     if (optimizationResult && optimizationResult.config.distance_metric !== 'road') {
@@ -583,12 +562,13 @@ const AppShell: React.FC = () => {
     }
   }, [optimizationResult, neighborhoods]);
 
-  // Phase B (#2): proximity heatmap grid — server cells with local fallback,
-  // recomputed from the ACTIVE assignment distances whenever they change.
+  // Phase B (#2): city-wide continuous heatmap grid — server cells with local
+  // fallback, recomputed from the ACTIVE assignment distances whenever they change.
   useEffect(() => {
     if (!optimizationResult || !layers.heatmap || neighborhoods.length === 0) {
       setCoverageCells([]);
       setCoverageRange(null);
+      setCoverageMeta(null);
       return;
     }
     let cancelled = false;
@@ -603,6 +583,7 @@ const AppShell: React.FC = () => {
         if (typeof grid.min_km === 'number' && typeof grid.max_km === 'number') {
           setCoverageRange({ minKm: grid.min_km, maxKm: grid.max_km });
         }
+        setCoverageMeta({ grid_n: grid.grid_n, bounds: grid.bounds, cell_step: grid.cell_step });
       }
     });
     return () => {
@@ -973,6 +954,7 @@ const AppShell: React.FC = () => {
             onWarehouseClick={handleWarehouseClick}
             focusedWarehouseId={focusedWarehouseId}
             coverageCells={coverageCells}
+            coverageMeta={coverageMeta}
             showHeatmap={layers.heatmap}
             coverageRange={coverageRange}
             theme={theme}
@@ -1072,15 +1054,9 @@ const AppShell: React.FC = () => {
             </div>
           )}
         </div>
-        {routeNotice && (
-          <div className="absolute top-[124px] z-10 text-[11px] font-semibold text-ink bg-white/95 rounded-full px-4 py-1.5 shadow border border-black/5"
-            style={{ left: sidebarWidth + 32 }}>
-            {routeNotice}
-          </div>
-        )}
         {usingPreviewRadius && (
           <div className="absolute top-[124px] z-10 flex items-center gap-2 text-[11px] font-semibold text-ink bg-white/95 rounded-full pl-4 pr-2 py-1.5 shadow border border-black/5"
-            style={{ left: sidebarWidth + 32, marginTop: routeNotice ? 34 : 0 }}>
+            style={{ left: sidebarWidth + 32 }}>
             <span>Preview circles ({previewRadiusKm} km) — not enforced</span>
             <button
               onClick={() => setPreviewRadiusKm((v) => Math.max(1, v - 5))}

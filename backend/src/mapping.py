@@ -382,8 +382,14 @@ def coverage_heatmap(
     assignments: List[Dict[str, Any]],
     grid_n: int = 24,
     top_k: int = 0,
+    pad: float = 0.18,
 ) -> Dict[str, Any]:
     """Phase B (#2): green (near warehouse) → red (far) proximity gradient.
+
+    City-wide continuous zone grid: the node bounding box is padded on every
+    side (default 18%) so cells cover the ENTIRE service area — not just the
+    tight node extents — and clients render them as contiguous zone polygons
+    (no gaps, no isolated dots).
 
     Recomputed from ACTIVE assignment distances: each node contributes its
     assigned distance_km; grid cells interpolate nearby nodes (inverse-distance
@@ -410,7 +416,22 @@ def coverage_heatmap(
     if abs(max_lon - min_lon) < 1e-6:
         min_lon -= 0.02
         max_lon += 0.02
-    n = max(4, min(48, int(grid_n)))
+    # Pad the bounds so the grid covers the whole city/area, not just the
+    # convex node extents. Guaranteed minimum margin keeps single-city
+    # datasets framed with breathing room on every side.
+    try:
+        pad_frac = max(0.0, float(pad))
+    except (TypeError, ValueError):
+        pad_frac = 0.18
+    lat_span = max_lat - min_lat
+    lon_span = max_lon - min_lon
+    min_lat -= max(lat_span * pad_frac, 0.02)
+    max_lat += max(lat_span * pad_frac, 0.02)
+    min_lon -= max(lon_span * pad_frac, 0.02)
+    max_lon += max(lon_span * pad_frac, 0.02)
+    n = max(4, min(64, int(grid_n)))
+    step_lat = (max_lat - min_lat) / n
+    step_lon = (max_lon - min_lon) / n
     cells: List[Dict[str, Any]] = []
     for gi in range(n):
         for gj in range(n):
@@ -450,7 +471,10 @@ def coverage_heatmap(
                 "color": proximity_color(t),
             })
     return {"cells": cells, "min_km": round(lo, 2), "max_km": round(hi, 2),
-            "grid_n": n, "hotspots": hotspots}
+            "grid_n": n, "hotspots": hotspots,
+            "bounds": {"min_lat": round(min_lat, 5), "max_lat": round(max_lat, 5),
+                       "min_lon": round(min_lon, 5), "max_lon": round(max_lon, 5)},
+            "cell_step": {"dlat": round(step_lat, 6), "dlon": round(step_lon, 6)}}
 
 
 def corridor_traffic_summary(assignments: List[Dict[str, Any]]) -> Dict[str, Any]:

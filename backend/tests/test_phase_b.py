@@ -61,6 +61,20 @@ def test_coverage_heatmap_cells_and_range():
     assert hot["hotspots"][0]["neighborhood_id"] == "N2"
 
 
+def test_coverage_heatmap_covers_full_padded_area():
+    # City-wide: padded bounds must extend beyond the raw node extents and
+    # ship the geometry clients need for continuous zone polygons.
+    grid = coverage_heatmap(NBS, ASG, grid_n=6)
+    b = grid["bounds"]
+    assert b["min_lat"] < 17.38 and b["max_lat"] > 17.44
+    assert b["min_lon"] < 78.38 and b["max_lon"] > 78.48
+    assert grid["cell_step"]["dlat"] > 0 and grid["cell_step"]["dlon"] > 0
+    assert abs(grid["cell_step"]["dlat"] - (b["max_lat"] - b["min_lat"]) / 6) < 1e-5
+    # Zero-pad keeps the legacy tight-bounds behavior for API compat.
+    tight = coverage_heatmap(NBS, ASG, grid_n=6, pad=0.0)
+    assert tight["bounds"]["min_lat"] < 17.38  # minimum 0.02° margin still applies
+
+
 def test_warehouse_focus_aggregates_orders_and_members():
     f = warehouse_focus_summary("W1", NBS, WHS, ASG)
     assert f["found"] is True

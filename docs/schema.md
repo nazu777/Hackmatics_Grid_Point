@@ -340,6 +340,7 @@ Request: `{ neighborhoods }` → `{ bounds, center, zoom, bubbles }` for the Map
 ### `POST /api/map/coverage` · `POST /api/map/warehouse-focus`
 
 SHIPPED Phase B Sept 20 2026 (#1, #2): green→red proximity heatmap cells + legend recomputed from active assignment distances; isolated zone payload for a clicked warehouse (`warehouse_focus_summary`: center, `assigned_orders = Σ daily_orders`, utilization, capacity/radius/infra, full assigned-node list).
+UPDATED Sept 20 2026 (city-wide heatmap): the node bounding box is padded 18% per side (`pad` param, min 0.02° margin) so the grid covers the ENTIRE service area; responses add `bounds` + `cell_step` and the map renders cells as contiguous `fill` zone polygons (no isolated dots). `grid_n` cap raised 48→64.
 
 ### `GET /api/fuel/rates?state=` · `GET /api/fuel/price`
 
@@ -372,14 +373,14 @@ Phase F realtime loop (shipped — #12–#14): one poll tick scales `w_i` from t
 
 ### `POST /api/auth/signup` · `POST /api/auth/login` · `GET /api/auth/me`
 
-PBKDF2-HMAC-SHA256 passwords, HS256 JWTs. Store is currently in-memory (`_USERS`); production path is a Neon `users` table (see `backend/src/auth.py` TODO).
+PBKDF2-HMAC-SHA256 passwords, HS256 JWTs. FIXED Sept 20 2026 (login persistence): users are file-backed (`GRIDPOINT_USERS_FILE`, default `backend/data/users.json`, git-ignored; Vercel: `/tmp/gridpoint_users.json`) so accounts survive backend restarts/reloads/cold starts — previously the pure in-memory `_USERS` dict wiped every account and logins failed with "Invalid email or password". Long-term production path is still a Neon `users` table (see `backend/src/auth.py` TODO).
 
 ---
 
 ## 7. Storage (Session / Persistence)
 
 - **React**: per-user namespaced `localStorage` (`gridpoint_neighborhoods_<uid>`, `gridpoint_opt_config_<uid>`, zone colors, recents). Every account starts EMPTY — the Hyderabad sample is opt-in only and never auto-loaded.
-- **Auth**: JWT in `localStorage` (`gridpoint_auth_token`, 24h TTL); `AuthContext` resolves the user via `GET /api/auth/me`. Backend store is currently in-memory; Neon Postgres `users` table is the documented production path.
+- **Auth**: JWT in `localStorage` (`gridpoint_auth_token`, 24h TTL); `AuthContext` resolves the user via `GET /api/auth/me`. Backend store is file-backed JSON (`GRIDPOINT_USERS_FILE`); Neon Postgres `users` table is the documented production path.
 - **Optional DB (Postgres/SQLite)** — demand tables (auth `users` table still TODO in `backend/src/auth.py`):
 
 ```sql

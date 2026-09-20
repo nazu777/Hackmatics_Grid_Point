@@ -5,7 +5,7 @@
 > Aligned to [problem_statement.md](docs/problem_statement.md), [prd.md](docs/prd.md), [schema.md](docs/schema.md), and [phases.md](docs/phases.md).
 
 **Live Production Deployment**: [https://hackmatics-grid-point.vercel.app](https://hackmatics-grid-point.vercel.app)  
-**Database**: Neon Serverless Postgres (env-plumbed via `DATABASE_URL`; auth store is currently in-memory with a Neon `users` table as the documented next step — see `backend/src/auth.py`)  
+**Database**: Neon Serverless Postgres (env-plumbed via `DATABASE_URL`; auth store is file-backed JSON with a Neon `users` table as the documented next step — see `backend/src/auth.py`)  
 **Automated Tests**: 159 tests across 25 files (100% pass rate, `make test`)
 
 ---
@@ -30,7 +30,7 @@ What-If Scenarios & Bonus Fleet (shipped, slider-driven)
 Overview Tab (SHIPPED Sept 20 2026 — Phase F: `/app/overview` + `POST /api/overview`)
 ```
 
-> **Docs-vs-code status (Sept 20 2026):** `docs/phases.md` concurrent plan (**Phases A–F**, backlog #1–#14, §0) — **ALL SHIPPED** (Person 1: A onboarding trio, D per-order cost truth + elbow, E expansion policy; Person 2: B map focus + heatmap + roads fix, C traffic-aware routing, F realtime automation + Overview). Shipped spec lives in `docs/prd.md` §§5.1–5.11, `docs/schema.md` §§2.8–2.10, `docs/demo_script.md` beats.
+> **Docs-vs-code status (Sept 20 2026):** `docs/phases.md` concurrent plan (**Phases A–F**, backlog #1–#14, §0) — **ALL SHIPPED** (Person 1: A onboarding trio, D per-order cost truth + elbow, E expansion policy; Person 2: B map focus + heatmap + roads fix, C traffic-aware routing, F realtime automation + Overview). Follow-up backlog #4–#9 is planned as parallel phases G–L in `docs/followup_phases.md`. Shipped spec lives in `docs/prd.md` §§5.1–5.11, `docs/schema.md` §§2.8–2.10, `docs/demo_script.md` beats.
 
 ---
 
@@ -57,7 +57,7 @@ Hackmatics_Grid_Point/
 │   │   ├── fuel.py                # Live India fuel prices via RapidAPI (12h TTL + static fallback)
 │   │   ├── census.py              # US Census ACS demand seeder (tract populations → daily_orders)
 │   │   ├── expansion.py           # Incremental warehouse expansion (add K without moving existing sites)
-│   │   ├── auth.py                # JWT auth (PBKDF2 passwords, HS256 tokens, in-memory store)
+│   │   ├── auth.py                # JWT auth (PBKDF2 passwords, HS256 tokens, file-backed store)
 │   │   └── api.py                 # FastAPI application & REST endpoints (39 routes, § API Reference)
 │   ├── tests/                     # 159 automated unit, integration & acceptance tests (25 files)
 │   ├── requirements.txt           # Python dependencies (FastAPI, PuLP, scikit-learn, etc.)
@@ -191,7 +191,7 @@ make sync-api
 - **Area-Proportional Demand Bubbles**: Circle marker radius proportional to $\sqrt{w_i}$ for true visual perception of order density.
 - **Controls Panel**: Live $K \in [1, 10]$ selector, distance metric toggles (Haversine, Euclidean, Manhattan, **Road**), and capacity/radius toggles (capacity, radius, live fuel + live traffic are ON by default with demand-sized $C_{\max}$).
 - **Map UX**: Gmaps-style icon rail (`ask/saved/optimize/compare/data/lab/export/settings/help`), layer chips (warehouses/routes/demand/radius/traffic), displacement-vs-roads line toggle, click-to-trace driving paths, adjustable radius preview, and Mapbox isochrone service-area heatmaps in roads mode.
-- **SHIPPED (Phase B)**: warehouse click-to-focus (zone detail + assigned-node table via `WarehouseFocusCard.tsx` + `POST /api/map/warehouse-focus`, dim others, highlight selected), green→red proximity coverage heatmap (`POST /api/map/coverage`), corridor-traffic overlay from traced roads. **Fixed**: switching displacement→roads never surfaces raw `Pair #0…` — backend accepts `{frm|from}` spellings with straight-line fallback + friendly notice + traced/total counter.
+- **SHIPPED (Phase B)**: warehouse click-to-focus (zone detail + assigned-node table via `WarehouseFocusCard.tsx` + `POST /api/map/warehouse-focus`, dim others, highlight selected), city-wide continuous coverage zones (`POST /api/map/coverage` — padded bounds + contiguous `fill` polygons, green near → red far), corridor-traffic overlay from traced roads. **Fixed**: switching displacement→roads never surfaces raw `Pair #0…` — backend accepts `{frm|from}` spellings with straight-line fallback + friendly notice + traced/total counter.
 
 ### Phase 3: Multi-Facility Optimization Engine (SHIPPED Sept 20 2026: traffic-aware routing — Phase C)
 - **$K = 1$ Weiszfeld Algorithm**: Exact weighted Fermat-Weber geometric median with numerical singularity perturbation ($\epsilon = 10^{-7}$).
@@ -270,7 +270,7 @@ Beyond the 8 bonuses, the repo also ships: real road-network optimization (`dist
 | POST | `/api/export/csv` / `/api/export/json` | Canonical dataset exports |
 | POST | `/api/export/metrics` / `/api/export/assignments` | Metrics table / assignment table exports |
 | POST | `/api/map/summary` | Map bounds, center, zoom + bubble styling |
-| POST | `/api/map/coverage` / `/api/map/warehouse-focus` | Green→red proximity heatmap cells + legend / isolated click-to-focus zone payload (Phase B) |
+| POST | `/api/map/coverage` / `/api/map/warehouse-focus` | City-wide continuous coverage zones + legend / isolated click-to-focus zone payload (Phase B, heatmap refreshed Sept 20 2026) |
 | GET | `/api/fuel/rates` / `/api/fuel/price` | Live India fuel rates (RapidAPI) with static fallback |
 | GET | `/api/traffic/flow` / `/api/traffic/history` | Live TomTom segment speed + rolling corridor history |
 | POST | `/api/traffic/corridors` | Corridor congestion aggregated from road geometries (Phase C) |

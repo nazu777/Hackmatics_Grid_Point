@@ -94,6 +94,7 @@ class MapCoverageRequest(BaseModel):
     assignments: List[Dict[str, Any]] = []
     grid_n: Optional[int] = 24
     top_k: Optional[int] = 0
+    pad: Optional[float] = 0.18
 
 
 class WarehouseFocusRequest(BaseModel):
@@ -122,7 +123,7 @@ def get_map_summary(payload: MapSummaryRequest):
         return base
     warehouses = payload.warehouses or []
     assignments = payload.assignments or []
-    grid_n = max(4, min(48, int(payload.grid_n or 24)))
+    grid_n = max(4, min(64, int(payload.grid_n or 24)))
     return {
         **base,
         "coverage": coverage_heatmap(payload.neighborhoods, assignments, grid_n=grid_n),
@@ -139,10 +140,11 @@ def get_map_summary(payload: MapSummaryRequest):
 def get_map_coverage(payload: MapCoverageRequest):
     """Phase B (#2): proximity heatmap grid recomputed from active assignment distances."""
     from .mapping import coverage_heatmap
-    grid_n = max(4, min(48, int(payload.grid_n or 24)))
+    grid_n = max(4, min(64, int(payload.grid_n or 24)))
     top_k = max(0, min(50, int(payload.top_k or 0)))
+    pad = payload.pad if payload.pad is not None else 0.18
     return coverage_heatmap(payload.neighborhoods, payload.assignments,
-                            grid_n=grid_n, top_k=top_k)
+                            grid_n=grid_n, top_k=top_k, pad=pad)
 
 
 @app.post("/api/map/warehouse-focus")
@@ -857,7 +859,7 @@ def auth_me(request: Request):
     payload = auth_module.decode_token(token)
     if not payload:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired token")
-    user = auth_module._USERS.get((payload.get("email") or "").lower())
+    user = auth_module.get_user(payload.get("email") or "")
     if not user:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User no longer exists")
     return auth_module.public_user(user)

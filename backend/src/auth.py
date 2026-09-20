@@ -16,6 +16,7 @@ import os
 import re
 import secrets
 import time
+from pathlib import Path
 from typing import Dict, Optional, Tuple
 
 JWT_SECRET = os.environ.get("GRIDPOINT_JWT_SECRET", "gridpoint-dev-secret-change-me")
@@ -23,9 +24,25 @@ JWT_ALGORITHM = "HS256"
 TOKEN_TTL_SECONDS = int(os.environ.get("GRIDPOINT_JWT_TTL", "86400"))  # 24h
 PBKDF2_ITERATIONS = 210_000
 
+# File-backed user store.
+# The in-memory dict alone wiped every account on backend restart / reload /
+# serverless cold start, so users who just signed up got "Invalid email or
+# password" on their next login. Users are now persisted to a JSON file and
+# reloaded on access. Override with GRIDPOINT_USERS_FILE (production/Vercel:
+# a /tmp path, e.g. GRIDPOINT_USERS_FILE=/tmp/gridpoint_users.json).
+# Long-term production path remains the Neon Postgres users table (see TODO).
+def _users_file() -> Path:
+    override = os.environ.get("GRIDPOINT_USERS_FILE")
+    if override:
+        return Path(override)
+    return Path(__file__).resolve().parent.parent / "data" / "users.json"
+
+
 # TODO(prod): replace with Neon Postgres users table.
 #   CREATE TABLE users(id TEXT PK, name TEXT, email TEXT UNIQUE, pw_hash TEXT, created_at TIMESTAMPTZ)
 _USERS: Dict[str, dict] = {}
+# Path the in-memory cache was last loaded from (None = not loaded yet).
+_LOADED_FROM: Optional[str] = None
 
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
@@ -82,6 +99,45 @@ def decode_token(token: str) -> Optional[dict]:
         return None
 
 
+def _ensure_loaded() -> None:
+    """Reload users from disk when the file path changed or was never read.
+
+    Never raises and never wipes in-memory users — a missing/corrupt file
+    simply means "start from what's in memory".
+    """
+    global _LOADED_FROM
+    path = _users_file()
+    key = str(path)
+    if _LOADED_FROM == key:
+        return
+    _LOADED_FROM = key
+    try:
+        if path.is_file():
+            data = json.loads(path.read_text(encoding="utf-8"))
+            if isinstance(data, list):
+                for u in data:
+                    if isinstance(u, dict) and u.get("email") and u.get("pw_hash"):
+                        _USERS.setdefault(str(u["email"]).lower(), u)
+    except Exception:
+        pass
+
+
+def _persist_users() -> None:
+    """Best-effort save of the user store. Never raises (read-only serverless
+    filesystems fall back to memory-only for that instance)."""
+    try:
+        path = _users_file()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(list(_USERS.values()), indent=2), encoding="utf-8")
+    except Exception:
+        pass
+
+
+def get_user(email: str) -> Optional[dict]:
+    _ensure_loaded()
+    return _USERS.get((email or "").strip().lower())
+
+
 def validate_signup(name: str, email: str, password: str) -> Optional[str]:
     if not name or not name.strip():
         return "Name is required"
@@ -94,6 +150,7 @@ def validate_signup(name: str, email: str, password: str) -> Optional[str]:
 
 
 def signup_user(name: str, email: str, password: str) -> Tuple[Optional[dict], Optional[str]]:
+    _ensure_loaded()
     email = email.strip().lower()
     err = validate_signup(name, email, password)
     if err:
@@ -108,10 +165,12 @@ def signup_user(name: str, email: str, password: str) -> Tuple[Optional[dict], O
         "created_at": int(time.time()),
     }
     _USERS[email] = user
+    _persist_users()
     return user, None
 
 
 def authenticate_user(email: str, password: str) -> Tuple[Optional[dict], Optional[str]]:
+    _ensure_loaded()
     email = (email or "").strip().lower()
     user = _USERS.get(email)
     if not user or not verify_password(password or "", user["pw_hash"]):
@@ -126,3 +185,5 @@ def public_user(user: dict) -> dict:
 def clear_users() -> None:
     """Test helper — resets the in-memory store."""
     _USERS.clear()
+    global _LOADED_FROM
+    _LOADED_FROM = None

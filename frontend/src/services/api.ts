@@ -490,7 +490,9 @@ export function apiErrorMessage(err: unknown, fallback: string): string {
  * falls back to straight displacement lines with a traced/total counter. */
 export const ROAD_FALLBACK_NOTICE = 'Road path unavailable — showing straight line';
 
-/** Map ANY route-geometry failure to the friendly notice (Phase B #3). */
+/** Map ANY route-geometry failure to the friendly notice (Phase B #3).
+ * Raw backend validator strings (e.g. `Pair #0: expected {frm…}`) must NEVER
+ * reach the map UI: anything technical-looking falls back to the notice. */
 export function friendlyRouteError(err: unknown, fallback = ROAD_FALLBACK_NOTICE): string {
   const raw = err instanceof Error ? err.message : typeof err === 'string' ? err : apiErrorMessage(err, fallback);
   if (
@@ -504,6 +506,8 @@ export function friendlyRouteError(err: unknown, fallback = ROAD_FALLBACK_NOTICE
   }
   // Any other geometry failure still gets a friendly, actionable message.
   if (/failed|shape|network|fetch|timeout|500|502|503/i.test(raw)) return fallback;
+  // Last resort: anything resembling a validator/debug dump is swallowed too.
+  if (/[{}\[\]#;]|expected|loc\.|undefined|NaN|object Object|Error:/i.test(raw)) return fallback;
   return raw || fallback;
 }
 
@@ -548,12 +552,23 @@ export interface CoverageCell {
   color: string;
 }
 
+export interface CoverageBounds {
+  min_lat: number;
+  max_lat: number;
+  min_lon: number;
+  max_lon: number;
+}
+
 export interface CoverageResult {
   cells: CoverageCell[];
   min_km: number;
   max_km: number;
   grid_n?: number;
   hotspots?: { neighborhood_id: string; distance_km: number; t: number; color: string }[];
+  /** Padded city-wide bounds the grid covers (backend + local fallback). */
+  bounds?: CoverageBounds;
+  /** Per-cell step in degrees — clients render contiguous zone polygons. */
+  cell_step?: { dlat: number; dlon: number };
 }
 
 export interface WarehouseFocusMember {
@@ -608,11 +623,13 @@ export function corridorBucket(congestionPct: number | null | undefined): 'fluid
   return 'jammed';
 }
 
-/** Local coverage fallback (mirrors backend mapping.coverage_heatmap IDW grid). */
+/** Local coverage fallback (mirrors backend mapping.coverage_heatmap IDW grid,
+ * including the padded city-wide bounds + cell step for zone rendering). */
 export function computeCoverageCells(
   neighborhoods: Neighborhood[],
   assignments: Assignment[],
-  gridN = 24
+  gridN = 24,
+  pad = 0.18
 ): CoverageResult {
   const nodes = neighborhoods.filter((n) => Number.isFinite(n.latitude) && Number.isFinite(n.longitude));
   if (nodes.length === 0) return { cells: [], min_km: 0, max_km: 0 };
@@ -627,7 +644,16 @@ export function computeCoverageCells(
   let minLon = Math.min(...lons); let maxLon = Math.max(...lons);
   if (Math.abs(maxLat - minLat) < 1e-6) { minLat -= 0.02; maxLat += 0.02; }
   if (Math.abs(maxLon - minLon) < 1e-6) { minLon -= 0.02; maxLon += 0.02; }
-  const n = Math.max(4, Math.min(48, Math.round(gridN) || 24));
+  const padFrac = Math.max(0, Number(pad) || 0);
+  const latSpan = maxLat - minLat;
+  const lonSpan = maxLon - minLon;
+  minLat -= Math.max(latSpan * padFrac, 0.02);
+  maxLat += Math.max(latSpan * padFrac, 0.02);
+  minLon -= Math.max(lonSpan * padFrac, 0.02);
+  maxLon += Math.max(lonSpan * padFrac, 0.02);
+  const n = Math.max(4, Math.min(64, Math.round(gridN) || 24));
+  const stepLat = (maxLat - minLat) / n;
+  const stepLon = (maxLon - minLon) / n;
   const cells: CoverageCell[] = [];
   for (let gi = 0; gi < n; gi++) {
     for (let gj = 0; gj < n; gj++) {
@@ -647,7 +673,11 @@ export function computeCoverageCells(
       cells.push({ lat: Math.round(clat * 1e5) / 1e5, lon: Math.round(clon * 1e5) / 1e5, distance_km: Math.round(mean * 100) / 100, t: Math.round(t * 1000) / 1000, color: proximityColor(t) });
     }
   }
-  return { cells, min_km: Math.round(lo * 100) / 100, max_km: Math.round(hi * 100) / 100, grid_n: n };
+  return {
+    cells, min_km: Math.round(lo * 100) / 100, max_km: Math.round(hi * 100) / 100, grid_n: n,
+    bounds: { min_lat: minLat, max_lat: maxLat, min_lon: minLon, max_lon: maxLon },
+    cell_step: { dlat: stepLat, dlon: stepLon }
+  };
 }
 
 /** Local focus fallback (mirrors backend mapping.warehouse_focus_summary). */

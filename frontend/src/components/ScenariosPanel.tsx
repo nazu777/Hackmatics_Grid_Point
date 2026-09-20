@@ -605,6 +605,7 @@ export const ScenariosPanel: React.FC<ScenariosPanelProps> = ({
             <div className="text-xs text-ink-faint bg-amber-50/70 border border-amber-200 p-3 rounded-xl">
               💡 <strong>Impact Insight:</strong> Shifting volume adjusts the Weiszfeld geometric medoids toward high-demand clusters and tests whether your warehouses breach the {config.C_max ? `${config.C_max} order C_max limit` : 'capacity threshold'}.
             </div>
+
           </div>
 
           <div className="mt-5 pt-4 border-t border-[#E4E1D2]">

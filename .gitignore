@@ -4,6 +4,9 @@ __pycache__/
 data/census_cache/
 data/*.json
 !data/samples/
+# Local auth user store (password hashes — never commit)
+backend/data/
+api/data/
 *.py[cod]
 *$py.class
 *.so

@@ -43,7 +43,7 @@ Directly derived from `problem_statement.md`:
 - **Synthetic seeders for each (#4)**: neighborhoods (exists) + NEW deterministic vehicles seeder + NEW deterministic warehouses seeder for demo reproducibility.
 - **Schema** (see `schema.md`): `neighborhood_id` (string, PK), `latitude` (-90 to 90), `longitude` (-180 to 180), `daily_orders` (int ≥0), optional `name`, optional `zone`.
 - **Validation**: null check, type check, range check, duplicate ID detection; inline error messages; reject/flag invalid rows.
-- **Persistence**: Per-user `localStorage` (datasets, configs, zone colors, recents); optional export to CSV/JSON; auth via JWT (in-memory store; Neon `users` table = production path).
+- **Persistence**: Per-user `localStorage` (datasets, configs, zone colors, recents); optional export to CSV/JSON; auth via JWT (file-backed JSON user store; Neon `users` table = production path).
 - **Access**: Landing page + login/signup; `/app/:tab` routes are guarded by `ProtectedRoute`.
 
 ### 5.2 Interactive Spatial Mapping
@@ -53,7 +53,7 @@ Directly derived from `problem_statement.md`:
 - Polylines/vectors from each neighborhood to its assigned warehouse — straight displacement by default, traced road paths in road mode; cluster coloring by assignment.
 - Map auto-fits bounds of dataset; pan/zoom support; layer chips (warehouses/routes/demand/radius/traffic); radius preview + Mapbox isochrone service-area heatmaps in road mode.
 - **Warehouse click-to-focus (#1)**: clicking a warehouse opens its zone detail (center, zone id, `assigned_orders = Σ daily_orders` of member nodes (#6, #8), utilization, capacity/radius/infra, full assigned-node list with per-node orders + distance); non-selected zones dim/hide; selected zone boundary + members highlight; clear-focus control.
-- **Coverage heatmap (#2)**: green (near warehouse) → red (far) continuous gradient over the service area, blended under bubbles/routes, with legend + toggle; recomputed from active assignment distances.
+- **Coverage heatmap (#2)**: green (near warehouse) → red (far) continuous gradient over the ENTIRE service area, rendered as contiguous zone polygons blended under bubbles/routes, with legend + toggle; grid bounds are padded 18% past node extents (`bounds` + `cell_step` contract); recomputed from active assignment distances.
 - **Traffic overlay from roads (#5-display)**: corridor congestion derived from traced road geometries, rendered as green→amber→red segments with toggle.
 - **Roads-error contract (#3)**: the `displacement → roads` toggle MUST NEVER surface the raw `Pair #0: expected {frm:{lat,lon}, to:{lat,lon}}` validator string — server accepts `{frm|from}` spellings, client falls back to straight lines with a friendly notice + traced/total counter.
 
@@ -140,7 +140,7 @@ Shipped extensions beyond the 8 bonuses: road-network optimization (`distance_me
 | Geospatial | Geopy (Haversine), Mapbox GL JS | Distance & mapping (TomTom/OSRM for road mode) |
 | Visualization | Mapbox GL + app charts (histogram, elbow curve, fuel graph) | Metrics & comparison |
 | Live data | TomTom Traffic/Matrix, RapidAPI India fuel, US Census ACS | Congestion, road distances, fuel prices, real demand |
-| Auth | JWT (PBKDF2 + HS256, 24h TTL; in-memory store, Neon `users` table = production path) | Login/signup, per-account workspaces |
+| Auth | JWT (PBKDF2 + HS256, 24h TTL; file-backed JSON store, Neon `users` table = production path) | Login/signup, per-account workspaces |
 
 Repo structure (actual): `backend/src/*.py` (18 modules incl. `simulation.py`) + `backend/tests/` (159 tests, 25 files), `frontend/src/` (App router, services/api, context/AuthContext, data/sample, 30+ components incl. `OverviewTab`, `WarehouseFocusCard`), `api/index.py` + `api/src/` mirror (Vercel), `data/samples/` (11 files + census cache), `docs/`, `Makefile` (`setup/test/run-backend/run-frontend/build-frontend/sync-api`), root + frontend `package.json`, `vercel.json`, `pnpm-workspace.yaml`.
 
@@ -165,7 +165,7 @@ Video script checklist included in `phases.md` Phase 5.
 ## 9. Out of Scope (v1) — status update
 - ~~Real road-network routing (OSRM/Google Directions) — approximated via Haversine/Manhattan.~~ **SHIPPED**: `distance_metric=road` (TomTom Matrix v2 → OSRM table → Haversine fallback) with traced polylines, re-optimization on toggle, and isochrone radius heatmaps.
 - Multi-period inventory or dynamic re-routing — static single-period optimization only (demand-shift re-optimization is supported, not multi-period inventory).
-- ~~Authentication / multi-tenant persistence — single-session prototype.~~ **SHIPPED (v1)**: JWT login/signup + per-account namespaced workspaces (in-memory store; Neon `users` table is the production path).
+- ~~Authentication / multi-tenant persistence — single-session prototype.~~ **SHIPPED (v1)**: JWT login/signup + per-account namespaced workspaces (file-backed JSON store — FIXED Sept 20 2026: accounts survive restarts; Neon `users` table is the production path).
 
 ## 10. Risks & Mitigations
 | Risk | Mitigation |

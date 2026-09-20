@@ -39,7 +39,7 @@ export const MapChips: React.FC<MapChipsProps> = ({ layers, onToggle, hasResult 
           key={c.id}
           disabled={disabled}
           onClick={() => onToggle(c.id)}
-          title={disabled ? 'Run the optimizer to unlock' : c.id === 'traffic' ? 'Color routes by corridor congestion (green→amber→red)' : c.id === 'heatmap' ? 'Proximity heatmap: green near a warehouse, red far' : `Toggle ${c.label.toLowerCase()} layer`}
+          title={disabled ? 'Run the optimizer to unlock' : c.id === 'traffic' ? 'Color routes by corridor congestion (green→amber→red)' : c.id === 'heatmap' ? 'City-wide coverage zones: green near a warehouse, red far' : `Toggle ${c.label.toLowerCase()} layer`}
           className={`flex items-center gap-1.5 px-3.5 py-2 rounded-full text-[13px] font-semibold whitespace-nowrap border transition cursor-pointer shadow-sm ${
             on
               ? 'bg-white text-ink border-white'
