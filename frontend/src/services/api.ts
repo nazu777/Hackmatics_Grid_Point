@@ -23,6 +23,88 @@ import {
 // For split deployments, set VITE_API_URL to backend URL (e.g., https://hackmatics-grid-point-backend.vercel.app)
 const API_BASE = (import.meta.env.VITE_API_URL as string) || '/api';
 
+const TOKEN_KEY = 'gridpoint_auth_token';
+
+export function getAuthToken(): string | null {
+  try {
+    return localStorage.getItem(TOKEN_KEY);
+  } catch {
+    return null;
+  }
+}
+
+export function setAuthToken(token: string): void {
+  try {
+    localStorage.setItem(TOKEN_KEY, token);
+  } catch {
+    /* ignore */
+  }
+}
+
+export function clearAuthToken(): void {
+  try {
+    localStorage.removeItem(TOKEN_KEY);
+  } catch {
+    /* ignore */
+  }
+}
+
+function authHeaders(extra: Record<string, string> = {}): Record<string, string> {
+  const t = getAuthToken();
+  return t ? { ...extra, Authorization: `Bearer ${t}` } : extra;
+}
+
+export interface AuthUser {
+  id: string;
+  name: string;
+  email: string;
+}
+
+export interface AuthResponse {
+  token: string;
+  user: AuthUser;
+}
+
+async function parseAuthError(res: Response, fallback: string): Promise<never> {
+  let msg = fallback;
+  try {
+    const data = await res.json();
+    if (typeof data?.detail === 'string') msg = data.detail;
+    else if (typeof data?.message === 'string') msg = data.message;
+  } catch {
+    /* keep fallback */
+  }
+  throw new Error(msg);
+}
+
+export async function signupUser(name: string, email: string, password: string): Promise<AuthResponse> {
+  const res = await fetch(`${API_BASE}/auth/signup`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name, email, password })
+  });
+  if (!res.ok) await parseAuthError(res, 'Signup failed');
+  return await res.json();
+}
+
+export async function loginUser(email: string, password: string): Promise<AuthResponse> {
+  const res = await fetch(`${API_BASE}/auth/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email, password })
+  });
+  if (!res.ok) await parseAuthError(res, 'Login failed');
+  return await res.json();
+}
+
+export async function authMe(): Promise<AuthUser> {
+  const res = await fetch(`${API_BASE}/auth/me`, {
+    headers: authHeaders()
+  });
+  if (!res.ok) await parseAuthError(res, 'Session expired');
+  return await res.json();
+}
+
 export async function validateOptimizationConfig(
   config: OptimizationConfig,
   neighborhoods: Neighborhood[]
@@ -67,7 +149,7 @@ export async function validateData(neighborhoods: Neighborhood[]): Promise<Valid
   try {
     const res = await fetch(`${API_BASE}/validate`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: authHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify({ neighborhoods })
     });
     if (!res.ok) throw new Error(`HTTP error ${res.status}`);
@@ -176,7 +258,7 @@ export async function optimizeNetwork(
   try {
     const res = await fetch(`${API_BASE}/optimize`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: authHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify({ neighborhoods, config })
     });
     if (res.ok) {

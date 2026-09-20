@@ -25,11 +25,21 @@ export type RailTab =
   | 'settings'
   | 'help';
 
+export const VALID_TABS: RailTab[] = [
+  'ask', 'saved', 'optimize', 'compare', 'data', 'lab', 'export', 'settings', 'help'
+];
+
+export function isRailTab(v: string | undefined): v is RailTab {
+  return !!v && (VALID_TABS as string[]).includes(v);
+}
+
 interface GmapsRailProps {
   tab: RailTab;
   onTab: (t: RailTab) => void;
   theme: ThemeMode;
   onThemeChange: (t: ThemeMode) => void;
+  userName?: string | null;
+  onLogout?: () => void;
 }
 
 const ITEMS: { id: RailTab; label: string; icon: React.ElementType }[] = [
@@ -47,7 +57,7 @@ const BOTTOM: { id: RailTab; label: string; icon: React.ElementType }[] = [
   { id: 'help', label: 'Help', icon: LifeBuoy }
 ];
 
-export const GmapsRail: React.FC<GmapsRailProps> = ({ tab, onTab, theme, onThemeChange }) => {
+export const GmapsRail: React.FC<GmapsRailProps> = ({ tab, onTab, theme, onThemeChange, userName, onLogout }) => {
   const render = (item: { id: RailTab; label: string; icon: React.ElementType }) => {
     const Icon = item.icon;
     const active = tab === item.id;
@@ -92,10 +102,19 @@ export const GmapsRail: React.FC<GmapsRailProps> = ({ tab, onTab, theme, onTheme
           </span>
           <span className="text-[9px] font-semibold leading-none text-ink-faint">Theme</span>
         </button>
-        <div className="flex flex-col items-center gap-1 py-2">
+        <div className="flex flex-col items-center gap-1 py-2" title={userName || 'Account'}>
           <span className="w-9 h-9 rounded-full bg-gradient-to-br from-grape-300 to-grape-600 flex items-center justify-center text-white text-[11px] font-bold">
-            OP
+            {userName ? userName.trim().charAt(0).toUpperCase() : 'OP'}
           </span>
+          {onLogout && (
+            <button
+              onClick={onLogout}
+              title="Log out"
+              className="text-[9px] font-semibold text-ink-faint hover:text-ink transition cursor-pointer"
+            >
+              Logout
+            </button>
+          )}
         </div>
       </div>
     </nav>

@@ -1,6 +1,11 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { Search, X, Plus, Download } from 'lucide-react';
-import { GmapsRail, type RailTab } from './components/GmapsRail';
+import { BrowserRouter, Routes, Route, Navigate, useParams, useNavigate } from 'react-router-dom';
+import { GmapsRail, type RailTab, isRailTab } from './components/GmapsRail';
+import { LandingPage } from './components/LandingPage';
+import { LoginPage, SignupPage } from './components/AuthPages';
+import { ProtectedRoute } from './components/ProtectedRoute';
+import { AuthProvider, useAuth } from './context/AuthContext';
 import { AskPanel } from './components/AskPanel';
 import { CensusModal } from './components/CensusModal';
 import { DetailCard } from './components/DetailCard';
@@ -79,8 +84,14 @@ const SidePanel: React.FC<{ title: string; meta?: string; children: React.ReactN
   </div>
 );
 
-export const App: React.FC = () => {
-  const [panel, setPanel] = useState<PanelMode>('ask');
+const AppShell: React.FC = () => {
+  const { tab } = useParams<{ tab: string }>();
+  const navigate = useNavigate();
+  const { user, logout } = useAuth();
+  const urlTab: RailTab = isRailTab(tab) ? tab : 'ask';
+  const [panel, setPanel] = useState<PanelMode>(urlTab);
+
+
   const [neighborhoods, setNeighborhoods] = useState<Neighborhood[]>(() => {
     const saved = localStorage.getItem('gridpoint_neighborhoods');
     if (saved) {
@@ -439,24 +450,49 @@ export const App: React.FC = () => {
   const mapAssignments = useMemo(() => optimizationResult?.assignments ?? [], [optimizationResult]);
 
   const railTab: RailTab =
-    panel === 'results' || panel === 'detail' ? 'ask' : (panel as RailTab);
+    panel === 'results' || panel === 'detail' ? urlTab : (panel as RailTab);
+
+  // Keep panel in sync with the URL — browser back/forward and deep links work.
+  useEffect(() => {
+    setPanel(urlTab);
+  }, [urlTab]);
+
+  /** Switch sidebar tabs via the URL (e.g. /app/optimize). */
+  const goTab = useCallback((t: RailTab) => {
+    navigate(`/app/${t}`);
+  }, [navigate]);
 
   // Clicking the already-open tab toggles the panel; switching tabs reveals it.
   const handleRailTab = useCallback((t: RailTab) => {
     if (t === railTab) {
       setCollapsedPersist(!sidebarCollapsed);
     } else {
-      setPanel(t);
+      navigate(`/app/${t}`);
       if (sidebarCollapsed) setCollapsedPersist(false);
     }
-  }, [railTab, sidebarCollapsed, setCollapsedPersist]);
+  }, [railTab, sidebarCollapsed, setCollapsedPersist, navigate]);
 
   const today = new Date().toLocaleDateString(undefined, { day: '2-digit', month: '2-digit', year: 'numeric' });
   const kCount = optimizationResult?.warehouses.length ?? optimizationConfig.K;
+  /** Back navigation from transient panels (detail/results) — tab targets go via URL. */
+  const goBack = useCallback((back: PanelMode) => {
+    if (back === 'results' || back === 'detail') setPanel(back);
+    else navigate(`/app/${back}`);
+  }, [navigate]);
 
   return (
     <div className="relative h-screen w-screen flex overflow-hidden bg-cream text-ink">
-      <GmapsRail tab={railTab} onTab={handleRailTab} theme={theme} onThemeChange={handleThemeChange} />
+      <GmapsRail
+        tab={railTab}
+        onTab={handleRailTab}
+        theme={theme}
+        onThemeChange={handleThemeChange}
+        userName={user?.name}
+        onLogout={() => {
+          logout();
+          navigate('/', { replace: true });
+        }}
+      />
 
       {/* Floating panel — overlays the full-bleed map, never pushes it */}
       <aside
@@ -486,7 +522,7 @@ export const App: React.FC = () => {
             config={optimizationConfig}
             result={optimizationResult}
             onOptimize={runOptimize}
-            onOpenCompare={() => setPanel('compare')}
+            onOpenCompare={() => goTab('compare')}
             onApplyZones={handleApplyZones}
             onExportDataset={handleExportDataset}
             onExportComparison={handleExportComparison}
@@ -505,7 +541,7 @@ export const App: React.FC = () => {
             nodes={resultNodes}
             title={resultTitle}
             onOpen={(n) => openDetail(n, 'results')}
-            onClose={() => setPanel('ask')}
+            onClose={() => goTab('ask')}
           />
         )}
 
@@ -515,7 +551,7 @@ export const App: React.FC = () => {
             allNodes={neighborhoods}
             assignment={optimizationResult?.assignments.find((a) => a.neighborhood_id === detailNode.neighborhood_id) ?? null}
             demandRank={demandRank(detailNode)}
-            onBack={() => setPanel(detailBack)}
+            onBack={() => goBack(detailBack)}
             onCenter={(n) => {
               setHighlightId(n.neighborhood_id);
               setFocus({ lat: n.latitude, lon: n.longitude, zoom: 14, key: Date.now() });
@@ -533,11 +569,11 @@ export const App: React.FC = () => {
             onLoadList={(nodes) => {
               setNeighborhoods(nodes);
               triggerValidation(nodes);
-              setPanel('ask');
+              goTab('ask');
             }}
             onLoadResult={(res) => {
               setOptimizationResult(res);
-              setPanel('compare');
+              goTab('compare');
             }}
           />
         )}
@@ -548,7 +584,7 @@ export const App: React.FC = () => {
               neighborhoods={neighborhoods}
               onOptimizationComplete={setOptimizationResult}
               lastResult={optimizationResult}
-              onGoToComparison={() => setPanel('compare')}
+              onGoToComparison={() => goTab('compare')}
             />
           </SidePanel>
         )}
@@ -568,7 +604,7 @@ export const App: React.FC = () => {
               <div className="card p-8 text-center">
                 <p className="text-[13px] text-ink-faint">No result yet — run the optimizer first.</p>
                 <button
-                  onClick={() => setPanel('optimize')}
+                  onClick={() => goTab('optimize')}
                   className="mt-4 px-5 py-2 rounded-full bg-[#14424E] text-white text-xs font-bold cursor-pointer"
                 >
                   Go to Optimize
@@ -612,7 +648,7 @@ export const App: React.FC = () => {
               }}
               onUpdateConfig={handleConfigChange}
               onOptimizationComplete={setOptimizationResult}
-              onGoToMap={() => setPanel('ask')}
+              onGoToMap={() => goTab('ask')}
             />
           </SidePanel>
         )}
@@ -731,7 +767,7 @@ export const App: React.FC = () => {
               if (window.confirm('Start a new planning run? This discards the current optimization result (data is kept).')) {
                 setOptimizationResult(null);
                 setHighlightId(null);
-                setPanel('optimize');
+                goTab('optimize');
               }
             }}
             className="hidden sm:flex items-center gap-1.5 px-4 py-2.5 rounded-full bg-white shadow-lg border border-black/5 text-[13px] font-bold text-ink hover:bg-cream-deep transition cursor-pointer whitespace-nowrap"
@@ -743,7 +779,7 @@ export const App: React.FC = () => {
               if (optimizationResult) {
                 downloadFile('gridpoint_metrics_comparison.csv', buildMetricsCsv(optimizationResult));
                 downloadFile('gridpoint_assignments.csv', buildAssignmentsCsv(optimizationResult));
-              } else setPanel('export');
+              } else goTab('export');
             }}
             className="flex items-center gap-1.5 px-4 py-2.5 rounded-full bg-grape-300 shadow-lg text-[13px] font-bold text-[#10333D] hover:bg-grape-200 transition cursor-pointer whitespace-nowrap"
           >
@@ -837,5 +873,44 @@ export const App: React.FC = () => {
         warnings={validation.warnings}
       />
     </div>
+  );
+};
+
+/** Root redirect: logged-in users go straight to the app, others see the landing page. */
+const RootRoute: React.FC = () => {
+  const { user, token, loading } = useAuth();
+  if (loading) {
+    return (
+      <div className="h-screen w-screen flex items-center justify-center bg-cream text-ink">
+        <p className="text-[13px] font-semibold text-ink-soft">Loading GridPoint…</p>
+      </div>
+    );
+  }
+  if (user && token) return <Navigate to="/app/ask" replace />;
+  return <LandingPage />;
+};
+
+/** App router — URL reflects the active sidebar tab (/app/:tab). */
+export const App: React.FC = () => {
+  return (
+    <BrowserRouter>
+      <AuthProvider>
+        <Routes>
+          <Route path="/" element={<RootRoute />} />
+          <Route path="/login" element={<LoginPage />} />
+          <Route path="/signup" element={<SignupPage />} />
+          <Route path="/app" element={<Navigate to="/app/ask" replace />} />
+          <Route
+            path="/app/:tab"
+            element={
+              <ProtectedRoute>
+                <AppShell />
+              </ProtectedRoute>
+            }
+          />
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
+      </AuthProvider>
+    </BrowserRouter>
   );
 };
