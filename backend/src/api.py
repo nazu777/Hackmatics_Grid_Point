@@ -359,15 +359,21 @@ def route_geometries(payload: RouteGeometryRequest):
     duration). TomTom first (live when requested + keyed), OSRM fallback,
     straight line last resort. Capped per request for quota/latency.
     """
+    from concurrent.futures import ThreadPoolExecutor
     from .routing import MAX_ROUTE_PAIRS_PER_CALL, route_geometry
     if len(payload.pairs) > MAX_ROUTE_PAIRS_PER_CALL:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
                             detail=f"Max {MAX_ROUTE_PAIRS_PER_CALL} pairs per request.")
-    out = []
-    for i, p in enumerate(payload.pairs):
-        flat, flon, tlat, tlon = _parse_route_pair(p, i)
-        out.append(route_geometry((flat, flon), (tlat, tlon),
-                                  live_traffic=payload.live_traffic))
+    parsed = [_parse_route_pair(p, i) for i, p in enumerate(payload.pairs)]
+    # I/O-bound provider calls run in parallel; order preserved for 1:1
+    # mapping with the request pairs. Keeps large batches inside serverless
+    # execution limits (a 55-pair batch drops from ~34s to ~5s).
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        out = list(pool.map(
+            lambda q: route_geometry((q[0], q[1]), (q[2], q[3]),
+                                     live_traffic=payload.live_traffic),
+            parsed,
+        ))
     return {"routes": out}
 
 

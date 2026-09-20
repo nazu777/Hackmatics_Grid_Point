@@ -115,29 +115,37 @@ export const App: React.FC = () => {
     });
     if (pairs.length === 0) return;
     setTracing(true);
+    // Small chunks with progressive rendering: each chunk stays comfortably
+    // inside serverless execution limits and traced roads appear incrementally.
+    const CHUNK = 12;
+    const seenProviders = new Set<string>();
+    let stored = 0;
     try {
-      const routes = await fetchRouteGeometries(
-        pairs.map((p) => ({ from: p.from, to: p.to })),
-        !!optimizationResult.config.use_live_traffic
-      );
-      if (!Array.isArray(routes)) throw new Error('Route service returned an unexpected shape.');
-      let stored = 0;
-      setRoadGeometries((prev) => {
-        const next = { ...prev };
-        routes.forEach((r, i) => {
-          const line = r && Array.isArray(r.line) ? r.line : null;
-          if (line && line.length >= 2 && pairs[i]) {
-            next[pairs[i].id] = line;
-            stored += 1;
-          }
+      for (let s = 0; s < pairs.length; s += CHUNK) {
+        const slice = pairs.slice(s, s + CHUNK);
+        setRouteNotice(`Tracing road paths… ${Math.min(s + slice.length, pairs.length)}/${pairs.length}`);
+        const routes = await fetchRouteGeometries(
+          slice.map((p) => ({ from: p.from, to: p.to })),
+          !!optimizationResult.config.use_live_traffic
+        );
+        if (!Array.isArray(routes)) throw new Error('Route service returned an unexpected shape.');
+        setRoadGeometries((prev) => {
+          const next = { ...prev };
+          routes.forEach((r, i) => {
+            const line = r && Array.isArray(r.line) ? r.line : null;
+            if (line && line.length >= 2 && slice[i]) {
+              next[slice[i].id] = line;
+              stored += 1;
+            }
+          });
+          return next;
         });
-        return next;
-      });
-      const providers = [...new Set(routes.map((r) => String(r?.provider ?? 'unknown').replace(' (cached)', '')))].join(' + ');
+        routes.forEach((r) => seenProviders.add(String(r?.provider ?? 'unknown').replace(' (cached)', '')));
+      }
       const total = Object.keys(roadGeometries).length + stored;
       setRouteNotice(
         stored > 0
-          ? `Road paths via ${providers} (${total}/${optimizationResult.assignments.length} traced)`
+          ? `Road paths via ${[...seenProviders].join(' + ')} (${total}/${optimizationResult.assignments.length} traced)`
           : 'No road paths returned — showing displacement lines.'
       );
     } catch (e: any) {
@@ -154,11 +162,11 @@ export const App: React.FC = () => {
       const missing = optimizationResult.assignments
         .map((a) => a.neighborhood_id)
         .filter((id) => !roadGeometries[id]);
-      if (missing.length === 0) return;
-      if (missing.length > 60) {
-        setRouteNotice(`${missing.length} routes is a lot — tracing on demand. Click any route line to trace its road path.`);
+      if (missing.length === 0) {
+        setRouteNotice(`All ${optimizationResult.assignments.length} road paths traced.`);
         return;
       }
+      // Chunked + progressive: any dataset size traces incrementally.
       traceRoutes(missing);
     }
   }, [optimizationResult, roadGeometries, traceRoutes]);
