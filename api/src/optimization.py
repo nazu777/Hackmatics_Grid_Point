@@ -333,12 +333,14 @@ def evaluate_network_layout(
         t_min = None
         if dur_matrix is not None:
             t_min = round(float(dur_matrix[i, assigned_k]), 1)
+        fuel_i = assignment_fuel_cost(w_i, d_km, config, fuel_prices, cong)
         assignments.append(Assignment(
             neighborhood_id=nid,
             warehouse_id=wid,
             distance_km=round(d_km, 2),
             weighted_distance=round(weighted_d, 2),
             cost=round(cost_i, 2),
+            fuel_cost=round(fuel_i, 2),
             within_radius=within_rad,
             is_feasible=is_feas,
             congestion_pct=round(cong, 4),
@@ -482,8 +484,10 @@ def run_optimization(
     infeasibility_reason = None
 
     # Resolve live fuel prices once per run (TTL-cached) so baseline and
-    # optimized layouts share identical fuel economics.
-    fuel_prices, fuel_live, fuel_note = resolve_fuel_prices(config)
+    # optimized layouts share identical fuel economics. The price city is
+    # auto-derived from the dataset center — the user is never asked.
+    data_center = (float(np.mean(coords[:, 0])), float(np.mean(coords[:, 1])))
+    fuel_prices, fuel_live, fuel_note = resolve_fuel_prices(config, center=data_center)
     hour = config.traffic_hour
     manual_traffic = float(config.traffic_factor or 0.0)
 

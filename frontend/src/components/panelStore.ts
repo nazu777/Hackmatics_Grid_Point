@@ -24,8 +24,62 @@ export function smartDefaults(neighborhoods: Neighborhood[], k: number): Partial
     R_max_km: 25,
     use_live_fuel: true,
     fuel_state: 'Karnataka',
+    fuel_city: null,
     use_live_traffic: true
   };
+}
+
+/** Geographic center of a dataset (mean lat/lon). */
+export function datasetCenter(neighborhoods: Neighborhood[]): { lat: number; lon: number } | null {
+  const pts = neighborhoods.filter(
+    (n) => Number.isFinite(Number(n.latitude)) && Number.isFinite(Number(n.longitude))
+  );
+  if (pts.length === 0) return null;
+  return {
+    lat: pts.reduce((s, n) => s + Number(n.latitude), 0) / pts.length,
+    lon: pts.reduce((s, n) => s + Number(n.longitude), 0) / pts.length
+  };
+}
+
+/** Approximate centroids for auto-matching a dataset to its nearest price city. */
+export const CITY_COORDS: Record<string, { lat: number; lon: number }> = {
+  Bagalkot: { lat: 16.18, lon: 75.7 }, Ballari: { lat: 15.14, lon: 76.93 },
+  Belgaum: { lat: 15.85, lon: 74.51 }, Bengaluru: { lat: 12.97, lon: 77.59 },
+  Bidar: { lat: 17.91, lon: 77.52 }, Chamarajanagar: { lat: 11.93, lon: 76.95 },
+  Chickmagaluru: { lat: 13.32, lon: 75.77 }, Chikkaballapura: { lat: 13.43, lon: 77.73 },
+  Chitradurga: { lat: 14.23, lon: 76.4 }, Davangere: { lat: 14.47, lon: 75.92 },
+  Dharwad: { lat: 15.46, lon: 75.01 }, Gadag: { lat: 15.43, lon: 75.63 },
+  Gulbarga: { lat: 17.33, lon: 76.83 }, Hassan: { lat: 13.01, lon: 76.1 },
+  Haveri: { lat: 14.8, lon: 75.14 }, Karwar: { lat: 14.81, lon: 74.13 },
+  Kolar: { lat: 13.14, lon: 78.13 }, Koppal: { lat: 15.35, lon: 76.15 },
+  Mandya: { lat: 12.52, lon: 76.9 }, Mangalore: { lat: 12.91, lon: 74.86 },
+  Mysore: { lat: 12.3, lon: 76.65 }, Raichur: { lat: 16.21, lon: 77.36 },
+  Ramanagara: { lat: 12.72, lon: 77.28 }, Shimoga: { lat: 13.93, lon: 75.57 },
+  Tumakuru: { lat: 13.34, lon: 77.1 }, Udupi: { lat: 13.34, lon: 74.75 },
+  Yadgir: { lat: 16.77, lon: 77.13 }
+};
+
+/**
+ * Nearest priced city to a dataset center — the UI never asks the user
+ * which city to price fuel at. Returns null when nothing matches.
+ */
+export function nearestPricedCity(
+  center: { lat: number; lon: number } | null,
+  cities: { city: string }[]
+): string | null {
+  if (!center) return null;
+  let best: string | null = null;
+  let bestD = Infinity;
+  for (const c of cities) {
+    const loc = CITY_COORDS[c.city.trim()];
+    if (!loc) continue;
+    const d = haversineKm(center.lat, center.lon, loc.lat, loc.lon);
+    if (d < bestD) {
+      bestD = d;
+      best = c.city;
+    }
+  }
+  return best;
 }
 
 /** Baseline-vs-optimized metrics table CSV (Phase 4 comparison). */
@@ -57,9 +111,9 @@ export function buildMetricsCsv(result: OptimizationResult): string {
 
 /** Full neighborhood → warehouse assignment CSV. */
 export function buildAssignmentsCsv(result: OptimizationResult): string {
-  const lines = ['neighborhood_id,warehouse_id,distance_km,weighted_distance,cost,within_radius,is_feasible'];
+  const lines = ['neighborhood_id,warehouse_id,distance_km,weighted_distance,cost,fuel_cost,within_radius,is_feasible'];
   result.assignments.forEach((a) =>
-    lines.push(`${a.neighborhood_id},${a.warehouse_id},${a.distance_km},${a.weighted_distance},${a.cost},${a.within_radius},${a.is_feasible}`)
+    lines.push(`${a.neighborhood_id},${a.warehouse_id},${a.distance_km},${a.weighted_distance},${a.cost},${a.fuel_cost ?? 0},${a.within_radius},${a.is_feasible}`)
   );
   return lines.join('\n');
 }

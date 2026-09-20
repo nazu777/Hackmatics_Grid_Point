@@ -28,6 +28,7 @@ export interface Assignment {
   distance_km: number;
   weighted_distance: number;
   cost: number;
+  fuel_cost?: number;
   within_radius: boolean;
   is_feasible: boolean;
   congestion_pct?: number | null;

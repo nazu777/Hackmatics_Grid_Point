@@ -118,6 +118,31 @@ def test_optimize_with_live_fuel(monkeypatch):
     assert res.comparison is not None
 
 
+def test_auto_city_from_data_center(monkeypatch):
+    """No fuel_city configured → nearest priced city to the dataset wins."""
+    monkeypatch.setenv("RAPIDAPI_KEY", "k")
+    monkeypatch.setattr(fuel, "_fetch_state", lambda state: [
+        {"city": "Mysore", "petrol": "110.44", "diesel": "98.39", "cng": "91.5", "autogas": None},
+        {"city": "Bengaluru", "petrol": "110.93", "diesel": "98.8", "cng": "97", "autogas": None},
+    ])
+    # near Mysore → Mysore auto-picked, never asked
+    price, live, city = fuel.price_for("petrol", city=None, state="Karnataka",
+                                       near=(12.31, 76.66))
+    assert live is True and city == "Mysore" and price == 110.44
+    # full run without fuel_city → note names the auto city, per-node fuel set
+    from src.optimization import run_optimization
+    nodes = [
+        {"neighborhood_id": "N1", "latitude": 12.30, "longitude": 76.65, "daily_orders": 10},
+        {"neighborhood_id": "N2", "latitude": 12.32, "longitude": 76.67, "daily_orders": 20},
+    ]
+    cfg = _fleet_cfg(K=1, use_live_fuel=True, fuel_city=None)
+    res = run_optimization(nodes, cfg)
+    assert res.fuel_note and "Mysore" in res.fuel_note
+    assert all(a.fuel_cost > 0 for a in res.assignments)
+    assert res.metrics.total_fuel_cost == pytest.approx(
+        sum(a.fuel_cost for a in res.assignments), abs=0.05)
+
+
 def test_fuel_api_without_key():
     from src.api import app
     client = TestClient(app)

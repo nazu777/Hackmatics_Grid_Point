@@ -21,6 +21,43 @@ FUEL_TTL_S = 12 * 3600  # refresh at most twice daily
 # Fallback ₹/litre used when no key is configured or the API is unreachable.
 FALLBACK_PRICES = {"petrol": 105.0, "diesel": 92.0, "cng": 90.0, "autogas": 40.0}
 
+# Approximate centroids for auto-matching a dataset to its nearest price city.
+# Used so the UI never has to ask which city to price fuel at.
+CITY_COORDS = {
+    "Bagalkot": (16.18, 75.70), "Ballari": (15.14, 76.93), "Belgaum": (15.85, 74.51),
+    "Bengaluru": (12.97, 77.59), "Bidar": (17.91, 77.52), "Chamarajanagar": (11.93, 76.95),
+    "Chickmagaluru": (13.32, 75.77), "Chikkaballapura": (13.43, 77.73),
+    "Chitradurga": (14.23, 76.40), "Davangere": (14.47, 75.92), "Dharwad": (15.46, 75.01),
+    "Gadag": (15.43, 75.63), "Gulbarga": (17.33, 76.83), "Hassan": (13.01, 76.10),
+    "Haveri": (14.80, 75.14), "Karwar": (14.81, 74.13), "Kolar": (13.14, 78.13),
+    "Koppal": (15.35, 76.15), "Mandya": (12.52, 76.90), "Mangalore": (12.91, 74.86),
+    "Mysore": (12.30, 76.65), "Raichur": (16.21, 77.36), "Ramanagara": (12.72, 77.28),
+    "Shimoga": (13.93, 75.57), "Tumakuru": (13.34, 77.10), "Udupi": (13.34, 74.75),
+    "Yadgir": (16.77, 77.13),
+}
+
+
+def _haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    import math
+    dlat = math.radians(lat2 - lat1)
+    dlon = math.radians(lon2 - lon1)
+    s = (math.sin(dlat / 2) ** 2 + math.cos(math.radians(lat1))
+         * math.cos(math.radians(lat2)) * math.sin(dlon / 2) ** 2)
+    return 6371.0088 * 2 * math.asin(min(1.0, math.sqrt(max(0.0, s))))
+
+
+def nearest_city(lat: float, lon: float, cities: List[Dict[str, Any]]) -> Optional[str]:
+    """Closest priced city to a dataset center (by haversine km)."""
+    best, best_d = None, float("inf")
+    for c in cities:
+        loc = CITY_COORDS.get(str(c.get("city", "")).strip())
+        if not loc:
+            continue
+        d = _haversine_km(lat, lon, loc[0], loc[1])
+        if d < best_d:
+            best, best_d = str(c["city"]), d
+    return best
+
 _cache: Dict[str, Any] = {"at": 0.0, "state": None, "cities": None}
 
 
@@ -105,9 +142,12 @@ def clear_cache() -> None:
 
 
 def price_for(fuel_type: str, city: Optional[str] = None,
-              state: str = "Karnataka") -> Tuple[Optional[float], bool, Optional[str]]:
+              state: str = "Karnataka",
+              near: Optional[Tuple[float, float]] = None) -> Tuple[Optional[float], bool, Optional[str]]:
     """
     ₹/litre for a fuel type (petrol|diesel|cng|autogas, case-insensitive).
+    City resolution: explicit city first, else nearest priced city to `near`
+    (dataset center lat/lon) so callers never have to ask the user.
     Returns (price, live, city_used). Unknown fuel types → (None, live, None).
     Falls back to static defaults when offline/keyless.
     """
@@ -121,6 +161,10 @@ def price_for(fuel_type: str, city: Optional[str] = None,
         if city:
             lowered = city.strip().lower()
             match = next((c for c in info["cities"] if c["city"].strip().lower() == lowered), None)
+        if match is None and near is not None:
+            auto = nearest_city(near[0], near[1], info["cities"])
+            if auto:
+                match = next((c for c in info["cities"] if c["city"] == auto), None)
         row = match or info["cities"][0]
         price = row.get(key)
         if price is not None:

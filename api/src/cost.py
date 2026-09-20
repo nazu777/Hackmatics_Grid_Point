@@ -29,11 +29,14 @@ from .schema import (
 from .fuel import FALLBACK_PRICES, price_for
 
 
-def resolve_fuel_prices(config: OptimizationConfig) -> Tuple[Dict[str, float], bool, str]:
+def resolve_fuel_prices(config: OptimizationConfig,
+                          center: Optional[Tuple[float, float]] = None) -> Tuple[Dict[str, float], bool, str]:
     """
     ₹/litre by fuel type for this run + live flag + human note.
     Live lookup happens only when config.use_live_fuel is set; otherwise the
     manual fuel_cost_per_km surcharge alone drives the fuel portion.
+    When config.fuel_city is unset, the city is auto-derived as the nearest
+    priced city to the dataset `center` (lat, lon) — never ask the user.
     """
     if not config.use_live_fuel:
         return {}, False, "Manual fuel surcharge (live prices off)"
@@ -41,7 +44,7 @@ def resolve_fuel_prices(config: OptimizationConfig) -> Tuple[Dict[str, float], b
     live_any = False
     cities: List[str] = []
     for fuel in ("petrol", "diesel", "cng", "autogas"):
-        price, live, city = price_for(fuel, config.fuel_city, config.fuel_state)
+        price, live, city = price_for(fuel, config.fuel_city, config.fuel_state, near=center)
         if price is not None:
             prices[fuel] = price
             live_any = live_any or live

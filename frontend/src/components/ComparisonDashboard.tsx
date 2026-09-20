@@ -75,9 +75,9 @@ export const ComparisonDashboard: React.FC<Props> = ({ result, neighborhoods, zo
   };
 
   const exportAssignments = () => {
-    const lines = ['neighborhood_id,warehouse_id,distance_km,weighted_distance,cost,within_radius,is_feasible'];
+    const lines = ['neighborhood_id,warehouse_id,distance_km,weighted_distance,cost,fuel_cost,within_radius,is_feasible'];
     result.assignments.forEach((a) =>
-      lines.push(`${a.neighborhood_id},${a.warehouse_id},${a.distance_km},${a.weighted_distance},${a.cost},${a.within_radius},${a.is_feasible}`)
+      lines.push(`${a.neighborhood_id},${a.warehouse_id},${a.distance_km},${a.weighted_distance},${a.cost},${a.fuel_cost ?? 0},${a.within_radius},${a.is_feasible}`)
     );
     download('gridpoint_assignments.csv', lines.join('\n'));
   };
@@ -123,6 +123,62 @@ export const ComparisonDashboard: React.FC<Props> = ({ result, neighborhoods, zo
             <p className="text-xs text-ink-soft mt-1">Baseline was {comp.baseline.metrics.avg_distance_per_order_km} km • Feasibility {(result.metrics.feasibility_ratio * 100).toFixed(1)}%</p>
           </div>
         </div>
+
+        {/* Fuel reduction graph: total cost split into fuel vs non-fuel */}
+        {(() => {
+          const b = comp.baseline.metrics;
+          const o = comp.optimized.metrics;
+          const bFuel = b.total_fuel_cost ?? 0;
+          const oFuel = o.total_fuel_cost ?? 0;
+          const bBase = Math.max(0, b.total_cost - bFuel);
+          const oBase = Math.max(0, o.total_cost - oFuel);
+          const max = Math.max(1, b.total_cost, o.total_cost);
+          const fuelSaved = Math.max(0, bFuel - oFuel);
+          const bar = (total: number, fuel: number, base: number) => (
+            <div className="flex-1">
+              <div className="flex h-24 rounded-xl overflow-hidden border border-[#E4E1D2]">
+                <div
+                  className="bg-[#14424E]/85 flex items-end justify-center pb-1"
+                  style={{ width: `${(base / max) * 100}%` }}
+                  title={`Non-fuel: $${base.toLocaleString()}`}
+                />
+                <div
+                  className="bg-amber-400/90 flex items-end justify-center pb-1"
+                  style={{ width: `${(fuel / max) * 100}%` }}
+                  title={`Fuel: $${fuel.toLocaleString()}`}
+                />
+              </div>
+              <div className="text-center mt-1.5">
+                <div className="font-mono font-bold text-sm text-ink">${total.toLocaleString()}</div>
+              </div>
+            </div>
+          );
+          return (
+            <div className="mt-4 rounded-2xl border border-[#E4E1D2] p-4">
+              <div className="flex items-center justify-between mb-1">
+                <span className="text-xs font-bold text-ink uppercase tracking-wider">⛽ Fuel cost reduction</span>
+                <span className="text-[11px] font-mono text-[#14424E] font-bold">
+                  −${fuelSaved.toLocaleString()} fuel ({o.total_fuel_cost != null && b.total_fuel_cost ? `${(((bFuel - oFuel) / Math.max(1, bFuel)) * 100).toFixed(1)}%` : '—'})
+                </span>
+              </div>
+              <div className="flex gap-4">
+                <div className="flex-1">
+                  <div className="text-[10px] font-semibold text-ink-faint mb-1 text-center">BASELINE</div>
+                  {bar(b.total_cost, bFuel, bBase)}
+                </div>
+                <div className="flex-1">
+                  <div className="text-[10px] font-semibold text-ink-faint mb-1 text-center">OPTIMIZED</div>
+                  {bar(o.total_cost, oFuel, oBase)}
+                </div>
+              </div>
+              <div className="flex items-center justify-center gap-4 mt-2 text-[10px] text-ink-faint">
+                <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm bg-[#14424E]/85 inline-block" /> Non-fuel delivery</span>
+                <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm bg-amber-400/90 inline-block" /> Fuel portion</span>
+                <span>Each node repriced at {result.fuel_note || 'configured rates'}</span>
+              </div>
+            </div>
+          );
+        })()}
 
         {/* Fuel provenance line */}
         <p className="text-[11px] text-slate-500 mt-3">

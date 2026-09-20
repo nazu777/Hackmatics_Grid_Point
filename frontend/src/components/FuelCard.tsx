@@ -1,19 +1,22 @@
 import React, { useEffect, useState } from 'react';
-import { Fuel, Wifi, WifiOff } from 'lucide-react';
-import type { FuelRates, OptimizationConfig } from '../types';
+import { Fuel, Wifi, WifiOff, MapPin } from 'lucide-react';
+import type { FuelRates, Neighborhood, OptimizationConfig } from '../types';
 import { fetchFuelRates, fuelPriceFor } from '../services/api';
+import { datasetCenter, nearestPricedCity } from './panelStore';
 
 interface FuelCardProps {
   config: OptimizationConfig;
   onChange: (patch: Partial<OptimizationConfig>) => void;
+  neighborhoods: Neighborhood[];
 }
 
 /**
  * Live fuel price card for the optimizer (Stage: warehouse setup).
- * Toggle pulls daily RapidAPI ₹/litre rates (server key, 12h cache) for the
- * chosen state/city; without a key or offline it badges static fallbacks.
+ * Toggle pulls daily RapidAPI ₹/litre rates (server key, 12h cache); the
+ * price city is auto-derived from the dataset center — never asked.
+ * Without a key or offline it badges static fallbacks.
  */
-export const FuelCard: React.FC<FuelCardProps> = ({ config, onChange }) => {
+export const FuelCard: React.FC<FuelCardProps> = ({ config, onChange, neighborhoods }) => {
   const [rates, setRates] = useState<FuelRates | null>(null);
   const [loading, setLoading] = useState(false);
   const state = config.fuel_state || 'Karnataka';
@@ -38,7 +41,21 @@ export const FuelCard: React.FC<FuelCardProps> = ({ config, onChange }) => {
   }, [config.use_live_fuel, state]);
 
   const cities = rates?.cities ?? [];
-  const city = config.fuel_city || cities[0]?.city || null;
+  // Auto city: nearest priced city to the dataset center (no user prompt).
+  const autoCity = datasetCenter(neighborhoods)
+    ? nearestPricedCity(datasetCenter(neighborhoods), cities)
+    : null;
+  const city = config.fuel_city || autoCity || cities[0]?.city || null;
+
+  // Pin the auto-derived city into config once rates arrive so the backend
+  // prices the exact same city the card displays.
+  useEffect(() => {
+    if (config.use_live_fuel && !config.fuel_city && autoCity) {
+      onChange({ fuel_city: autoCity });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [config.use_live_fuel, autoCity]);
+
   const petrol = rates ? fuelPriceFor(rates, 'petrol', city) : null;
   const diesel = rates ? fuelPriceFor(rates, 'diesel', city) : null;
   const cng = rates ? fuelPriceFor(rates, 'cng', city) : null;
@@ -62,7 +79,7 @@ export const FuelCard: React.FC<FuelCardProps> = ({ config, onChange }) => {
 
       {config.use_live_fuel ? (
         <div className="space-y-2">
-          <div className="flex gap-2">
+          <div className="flex gap-2 items-center">
             <input
               type="text"
               value={state}
@@ -70,18 +87,10 @@ export const FuelCard: React.FC<FuelCardProps> = ({ config, onChange }) => {
               placeholder="State (e.g. Karnataka)"
               className="w-1/2 bg-white border border-slate-200 rounded-lg px-2 py-1 text-xs"
             />
-            <select
-              value={city || ''}
-              onChange={(e) => onChange({ fuel_city: e.target.value || null })}
-              className="w-1/2 bg-white border border-slate-200 rounded-lg px-2 py-1 text-xs"
-            >
-              {cities.length === 0 && <option value="">Default city</option>}
-              {cities.map((c) => (
-                <option key={c.city} value={c.city}>
-                  {c.city}
-                </option>
-              ))}
-            </select>
+            <span className="w-1/2 flex items-center gap-1 bg-white border border-slate-200 rounded-lg px-2 py-1 text-xs text-slate-700">
+              <MapPin className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+              <span className="truncate">Auto: {city || 'nearest city…'}</span>
+            </span>
           </div>
 
           {loading ? (

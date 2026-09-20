@@ -221,7 +221,7 @@ export const OptimizationPanel: React.FC<OptimizationPanelProps> = ({
               </select>
             </div>
 
-            <FuelCard config={config} onChange={(patch) => setConfig({ ...config, ...patch })} />
+            <FuelCard config={config} onChange={(patch) => setConfig({ ...config, ...patch })} neighborhoods={neighborhoods} />
 
             <TrafficCard
               config={config}

@@ -74,6 +74,7 @@ class Assignment(BaseModel):
     distance_km: float
     weighted_distance: float
     cost: float
+    fuel_cost: float = 0.0
     within_radius: bool = True
     is_feasible: bool = True
     congestion_pct: Optional[float] = Field(None, ge=0.0, description="Corridor congestion applied (delay ratio)")
