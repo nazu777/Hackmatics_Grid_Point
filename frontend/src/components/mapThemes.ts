@@ -82,6 +82,43 @@ export function zoneCounts(neighborhoods: Neighborhood[]): Record<string, number
   return counts;
 }
 
+// ---------------------------------------------------------------------------
+// Phase B: coverage heatmap + corridor traffic scales (display only)
+// ---------------------------------------------------------------------------
+
+/** Coverage proximity color: green (near, t=0) → amber → red (far, t=1). */
+export function heatmapColor(t: number): string {
+  const c = Math.max(0, Math.min(1, Number(t) || 0));
+  const lerp = (a: number, b: number, f: number) => Math.round(a + (b - a) * f);
+  let r: number; let g: number; let b: number;
+  if (c < 0.5) {
+    const f = c / 0.5;
+    r = lerp(0x22, 0xf5, f); g = lerp(0xc5, 0x9e, f); b = lerp(0x5e, 0x0b, f);
+  } else {
+    const f = (c - 0.5) / 0.5;
+    r = lerp(0xf5, 0xef, f); g = lerp(0x9e, 0x44, f); b = lerp(0x0b, 0x44, f);
+  }
+  return `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`;
+}
+
+/** Corridor congestion color for traffic overlay segments. */
+export function trafficSegmentColor(congestionPct: number | null | undefined): string {
+  if (congestionPct == null || !Number.isFinite(Number(congestionPct))) return '#94a3b8';
+  const v = Number(congestionPct);
+  if (v < 0.15) return '#22c55e';
+  if (v < 0.4) return '#f59e0b';
+  return '#ef4444';
+}
+
+/** Corridor congestion bucket label for legends and tooltips. */
+export function trafficBucket(congestionPct: number | null | undefined): 'Fluid' | 'Busy' | 'Jammed' | 'Unknown' {
+  if (congestionPct == null || !Number.isFinite(Number(congestionPct))) return 'Unknown';
+  const v = Number(congestionPct);
+  if (v < 0.15) return 'Fluid';
+  if (v < 0.4) return 'Busy';
+  return 'Jammed';
+}
+
 const STORAGE_KEY = 'gridpoint_zone_colors';
 
 /** localStorage-backed custom zone→color map. storageKey is per-account. */

@@ -17,7 +17,10 @@ from .schema import (
     OptimizationResult,
     Assignment,
     Warehouse,
-    VehicleType
+    VehicleType,
+    ActiveSpill,
+    SimulationTickResult,
+    OverviewAggregate,
 )
 from .validation import (validate_neighborhoods, validate_optimization_config,
                          validate_vehicles, validate_warehouses)
@@ -78,6 +81,26 @@ class ConfigValidateRequest(BaseModel):
 
 class MapSummaryRequest(BaseModel):
     neighborhoods: List[Dict[str, Any]]
+    # Phase B: optional active result — when present the response also carries
+    # coverage heatmap cells, corridor traffic buckets, and per-warehouse focus
+    # payloads (read-only; no routing/cost changes).
+    warehouses: Optional[List[Dict[str, Any]]] = None
+    assignments: Optional[List[Dict[str, Any]]] = None
+    grid_n: Optional[int] = 24
+
+
+class MapCoverageRequest(BaseModel):
+    neighborhoods: List[Dict[str, Any]]
+    assignments: List[Dict[str, Any]] = []
+    grid_n: Optional[int] = 24
+    top_k: Optional[int] = 0
+
+
+class WarehouseFocusRequest(BaseModel):
+    warehouse_id: str
+    neighborhoods: List[Dict[str, Any]]
+    warehouses: List[Dict[str, Any]]
+    assignments: List[Dict[str, Any]] = []
 
 
 @app.get("/api/health")
@@ -89,8 +112,45 @@ def health_check():
 def get_map_summary(payload: MapSummaryRequest):
     """
     Computes map bounds, center, zoom, and bubble styling for neighborhood nodes (Phase 2).
+    Phase B: when warehouses+assignments are supplied, also returns coverage
+    heatmap cells, corridor traffic buckets, and per-warehouse focus payloads.
     """
-    return prepare_map_layer_data(payload.neighborhoods)
+    from .mapping import (coverage_heatmap, corridor_traffic_summary,
+                          warehouse_focus_summary)
+    base = prepare_map_layer_data(payload.neighborhoods)
+    if not payload.warehouses and not payload.assignments:
+        return base
+    warehouses = payload.warehouses or []
+    assignments = payload.assignments or []
+    grid_n = max(4, min(48, int(payload.grid_n or 24)))
+    return {
+        **base,
+        "coverage": coverage_heatmap(payload.neighborhoods, assignments, grid_n=grid_n),
+        "traffic": corridor_traffic_summary(assignments),
+        "focus": {
+            str(w.get("warehouse_id")): warehouse_focus_summary(
+                str(w.get("warehouse_id")), payload.neighborhoods, warehouses, assignments)
+            for w in warehouses if w.get("warehouse_id") is not None
+        },
+    }
+
+
+@app.post("/api/map/coverage")
+def get_map_coverage(payload: MapCoverageRequest):
+    """Phase B (#2): proximity heatmap grid recomputed from active assignment distances."""
+    from .mapping import coverage_heatmap
+    grid_n = max(4, min(48, int(payload.grid_n or 24)))
+    top_k = max(0, min(50, int(payload.top_k or 0)))
+    return coverage_heatmap(payload.neighborhoods, payload.assignments,
+                            grid_n=grid_n, top_k=top_k)
+
+
+@app.post("/api/map/warehouse-focus")
+def get_warehouse_focus(payload: WarehouseFocusRequest):
+    """Phase B (#1): isolated zone payload for a clicked warehouse."""
+    from .mapping import warehouse_focus_summary
+    return warehouse_focus_summary(payload.warehouse_id, payload.neighborhoods,
+                                   payload.warehouses, payload.assignments)
 
 
 @app.post("/api/config/validate")
@@ -408,6 +468,199 @@ def traffic_history(lat: float = Query(..., ge=-90.0, le=90.0),
     return {"cell": cell_of(lat, lon), "hour": hour, "factor": factor, "samples": samples}
 
 
+class CorridorTrafficRequest(BaseModel):
+    neighborhoods: List[Dict[str, Any]] = []
+    warehouses: List[Warehouse] = []
+    assignments: List[Assignment] = []
+    hour: Optional[int] = None
+    samples_per_corridor: int = 3
+    use_live: Optional[bool] = None
+
+
+@app.post("/api/traffic/corridors")
+def traffic_corridors(payload: CorridorTrafficRequest):
+    """
+    Phase C (#5 engine): per-corridor congestion aggregated from traced road
+    geometries (node + midpoint + warehouse samples per assigned corridor).
+    Live readings persist into rolling history; offline runs degrade to
+    history + manual floor with live=false. Feeds the map overlay (Phase B
+    reads it) and "optimize on current traffic" (engine reads it).
+    """
+    from .traffic import corridor_traffic_from_assignments
+    if not payload.warehouses:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
+                            detail="No warehouses provided")
+    cfg_hour = payload.hour
+    allow_live = True if payload.use_live is None else bool(payload.use_live)
+    try:
+        corridors = corridor_traffic_from_assignments(
+            payload.neighborhoods,
+            [w.model_dump() for w in payload.warehouses],
+            [a.model_dump() for a in payload.assignments],
+            manual_floor=0.0, hour=cfg_hour, record=True,
+            allow_live=allow_live,
+            samples_per_corridor=max(2, min(7, int(payload.samples_per_corridor or 3))))
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+    factors = {wid: info["factor"] for wid, info in corridors.items()}
+    live_count = sum(1 for info in corridors.values() if info.get("live"))
+    avg_cong = round(sum(factors.values()) / max(1, len(factors)), 4) if factors else 0.0
+    return {
+        "corridors": corridors,
+        "factors": factors,
+        "avg_congestion_pct": avg_cong,
+        "live_corridors": live_count,
+        "total_corridors": len(corridors),
+        "note": ("Live corridor segments" if live_count
+                 else "History + manual floor (live traffic unreachable)"),
+    }
+
+
+class RerouteRequest(BaseModel):
+    neighborhoods: List[Dict[str, Any]]
+    warehouses: List[Warehouse]
+    assignments: List[Assignment]
+    config: Optional[OptimizationConfig] = None
+    alpha: float = 1.0
+    beta_per_min: float = 0.5
+    congestion_overrides: Optional[Dict[str, float]] = None
+
+
+@app.post("/api/routes/reroute")
+def reroute_on_traffic(payload: RerouteRequest):
+    """
+    Phase C (#9): dynamic reroute — re-evaluate assignment as corridor
+    conditions change, minimizing score = alpha * cost + beta * time.
+    Sites stay fixed; only neighborhood→warehouse mapping moves. Surfaces
+    changed assignments + saved minutes/₹ with full re-evaluated metrics.
+    """
+    import numpy as np
+    from .cost import compute_metrics, resolve_fuel_prices
+    from .distance import compute_distance_matrix
+    from .optimization import (
+        estimate_time_min,
+        fleet_avg_speed_kmph,
+        reroute_assignments,
+        resolve_live_traffic,
+    )
+    if not payload.neighborhoods:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
+                            detail="No neighborhoods provided")
+    if not payload.warehouses:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
+                            detail="No warehouses provided — run optimization first")
+    if not payload.assignments:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
+                            detail="No assignments provided — run optimization first")
+    cfg = payload.config or OptimizationConfig()
+    alpha = max(0.0, float(payload.alpha or 0.0)) or 1.0
+    beta = max(0.0, float(payload.beta_per_min or 0.0))
+    if beta == 0.0:
+        beta = 0.5
+
+    wh_ids = [str(w.warehouse_id) for w in payload.warehouses]
+    wh_index = {wid: k for k, wid in enumerate(wh_ids)}
+    try:
+        coords = np.array([[float(n.get("latitude")), float(n.get("longitude"))]
+                           for n in payload.neighborhoods])
+        weights = np.array([float(n.get("daily_orders", 0) or 0)
+                            for n in payload.neighborhoods])
+        wh_coords = np.array([[float(w.latitude), float(w.longitude)]
+                              for w in payload.warehouses])
+    except (TypeError, ValueError) as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
+                            detail=f"Invalid coordinates: {e}")
+
+    # Current labels from the submitted assignment (unknown ids → nearest).
+    cur = np.zeros(len(payload.neighborhoods), dtype=int)
+    nb_ids = [str(n.get("neighborhood_id")) for n in payload.neighborhoods]
+    nb_row = {nid: i for i, nid in enumerate(nb_ids)}
+    fallback_dists = compute_distance_matrix(coords, wh_coords, metric="haversine")
+    for a in payload.assignments:
+        row = nb_row.get(str(a.neighborhood_id))
+        if row is None:
+            continue
+        cur[row] = wh_index.get(str(a.warehouse_id),
+                                int(np.argmin(fallback_dists[row])))
+
+    # Corridor congestion: explicit overrides win, else live/history per site.
+    from .traffic import corridor_factor
+    corridor: Dict[int, float] = {}
+    live_n = 0
+    overrides = dict(payload.congestion_overrides or {})
+    for k, w in enumerate(payload.warehouses):
+        if w.warehouse_id in overrides:
+            corridor[k] = max(0.0, float(overrides[w.warehouse_id]))
+            continue
+        info = corridor_factor(float(w.latitude), float(w.longitude),
+                               manual_floor=float(cfg.traffic_factor or 0.0),
+                               hour=cfg.traffic_hour, record=True,
+                               allow_live=resolve_live_traffic(cfg))
+        corridor[k] = float(info.get("factor", 0.0) or 0.0)
+        live_n += 1 if info.get("live") else 0
+
+    fuel_prices, fuel_live, fuel_note = resolve_fuel_prices(cfg)
+    dur = None
+    if cfg.distance_metric == "road":
+        from .routing import road_matrices
+        dist, dur, road_note = road_matrices(
+            coords, wh_coords, live_traffic=resolve_live_traffic(cfg))
+    else:
+        dist = compute_distance_matrix(coords, wh_coords, metric=cfg.distance_metric)
+        road_note = None
+
+    try:
+        new_labels, summary = reroute_assignments(
+            coords, weights, wh_coords, cur, cfg, corridor=corridor,
+            dist_matrix=dist, dur_matrix=dur, fuel_prices=fuel_prices,
+            alpha=alpha, beta_per_min=beta)
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+
+    from .optimization import evaluate_network_layout
+    notes: List[str] = []
+    if road_note and road_note not in notes:
+        notes.append(road_note)
+    new_wh, new_asg, new_metrics = evaluate_network_layout(
+        payload.neighborhoods, wh_coords, new_labels, cfg,
+        fuel_prices=fuel_prices, fuel_live=fuel_live,
+        corridor=corridor, notes=notes)
+    # Restore caller warehouse ids (evaluate builds W1..WK in order).
+    id_map = {f"W{k+1}": wh_ids[k] for k in range(len(wh_ids))}
+    for a in new_asg:
+        a.warehouse_id = id_map.get(a.warehouse_id, a.warehouse_id)
+    for w_new, wid in zip(new_wh, wh_ids):
+        w_new.warehouse_id = wid
+    for wm, wid in zip(new_metrics.warehouses, wh_ids):
+        wm.warehouse_id = wid
+
+    moved_ids = [nb_ids[i] for i in summary.get("moved_idx", [])
+                 if 0 <= i < len(nb_ids)]
+    speed = fleet_avg_speed_kmph(cfg)
+    # Report time in provider minutes when road durations exist, else estimates.
+    traffic_note = (
+        f"Reroute on {'live' if live_n else 'history/manual'} corridors "
+        f"({live_n}/{len(wh_ids)} live, {speed:.0f} km/h fleet speed)")
+    return {
+        "assignments": [a.model_dump() for a in new_asg],
+        "warehouses": [w.model_dump() for w in new_wh],
+        "metrics": new_metrics.model_dump(),
+        "changed": summary.get("changed", 0),
+        "moved_neighborhood_ids": moved_ids,
+        "saved_cost": summary.get("saved_cost", 0.0),
+        "saved_minutes": summary.get("saved_minutes", 0.0),
+        "old_cost": summary.get("old_cost", 0.0),
+        "new_cost": summary.get("new_cost", 0.0),
+        "old_minutes": summary.get("old_minutes", 0.0),
+        "new_minutes": summary.get("new_minutes", 0.0),
+        "alpha": alpha,
+        "beta_per_min": beta,
+        "traffic_note": traffic_note,
+        "fuel_note": fuel_note,
+        "routing_note": "; ".join(notes) if notes else None,
+    }
+
+
 @app.get("/api/census/cities")
 def census_cities():
     """Seedable US metros with real Census demand (no network, no key needed)."""
@@ -459,14 +712,18 @@ def _parse_route_pair(p: Any, i: int) -> Tuple[float, float, float, float]:
 
     if not isinstance(p, dict):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
-                            detail=f"Pair #{i}: expected {{frm:{{lat,lon}}, to:{{lat,lon}}}}.")
+                            detail=f"Pair #{i}: expected {{frm|from:{{lat,lon}}, to:{{lat,lon}}}}.")
     try:
-        frm, to = p["frm"], p["to"]
+        # Phase B (#3): accept BOTH spellings — legacy {frm} and client {from}.
+        frm = p.get("frm", p.get("from"))
+        to = p.get("to")
+        if frm is None or to is None:
+            raise KeyError("frm/from or to")
         flat, flon = frm["lat"], frm["lon"]
         tlat, tlon = to["lat"], to["lon"]
     except (KeyError, TypeError):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
-                            detail=f"Pair #{i}: expected {{frm:{{lat,lon}}, to:{{lat,lon}}}}.")
+                            detail=f"Pair #{i}: expected {{frm|from:{{lat,lon}}, to:{{lat,lon}}}}.")
     return (num(flat, "frm.lat"), num(flon, "frm.lon"),
             num(tlat, "to.lat"), num(tlon, "to.lon"))
 
@@ -535,6 +792,12 @@ class FleetETARequest(BaseModel):
     assignments: List[Assignment]
     config: OptimizationConfig
     vehicle_type: Optional[str] = None
+    # Phase C (#12 engine half): live-feed ETA needs no manual slider —
+    # pass warehouses so missing per-assignment congestion resolves from
+    # live TomTom + history instead of the manual traffic_factor floor.
+    warehouses: List[Warehouse] = []
+    use_live_feeds: Optional[bool] = None
+    congestion_overrides: Optional[Dict[str, float]] = None
 
 
 class DiagnosticsRequest(BaseModel):
@@ -629,10 +892,15 @@ def apply_demand_shift(payload: DemandShiftRequest):
 def get_fleet_eta(payload: FleetETARequest):
     """
     Computes delivery ETA and fuel consumption under traffic and vehicle specs (Phase 5 Bonus 4/5/6).
+    Phase C (#12 engine half): with warehouses supplied, missing congestion
+    resolves from live feeds — no manual slider required in the engine path.
     """
     from .scenarios import calculate_fleet_eta
     try:
-        return calculate_fleet_eta(payload.assignments, payload.config, payload.vehicle_type)
+        return calculate_fleet_eta(payload.assignments, payload.config, payload.vehicle_type,
+                                   warehouses=payload.warehouses,
+                                   use_live_feeds=payload.use_live_feeds,
+                                   congestion_overrides=payload.congestion_overrides)
     except Exception as e:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
@@ -663,7 +931,6 @@ class ExpandRequest(BaseModel):
     # Owned-fleet rows (Phase-A VehicleType shape) carried as the keep/sell basis.
     owned_vehicles: Optional[List[Dict[str, Any]]] = None
 
-
 @app.post("/api/expand")
 def expand_warehouses(payload: ExpandRequest):
     """
@@ -685,6 +952,165 @@ def expand_warehouses(payload: ExpandRequest):
         )
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+
+
+# ---------------------------------------------------------------------------
+# Phase F — Realtime Automation & Overview (#12, #13, #14)
+# ---------------------------------------------------------------------------
+
+class SimulationTickRequest(BaseModel):
+    neighborhoods: List[Dict[str, Any]]
+    warehouses: List[Warehouse] = []
+    assignments: List[Assignment] = []
+    config: Optional[OptimizationConfig] = None
+    tick: int = 0
+    active_spills: Dict[str, ActiveSpill] = {}
+    congestion_overrides: Optional[Dict[str, float]] = None
+    scale_demand: bool = True
+    demand_amplitude: float = 1.0
+    simulate_surge: bool = True
+
+
+class LiveSnapshotRequest(BaseModel):
+    neighborhoods: List[Dict[str, Any]] = []
+    warehouses: List[Warehouse] = []
+    config: Optional[OptimizationConfig] = None
+
+
+class OverviewRequest(BaseModel):
+    neighborhoods: List[Dict[str, Any]] = []
+    warehouses: List[Warehouse] = []
+    assignments: List[Assignment] = []
+    config: Optional[OptimizationConfig] = None
+    active_spills: Dict[str, ActiveSpill] = {}
+
+
+@app.post("/api/simulation/tick", response_model=SimulationTickResult)
+def simulation_tick(payload: SimulationTickRequest):
+    """
+    One realtime poll tick: scale w_i from the demand signal, read corridor
+    congestion per warehouse, and spill nodes off congested warehouses
+    (threshold + hysteresis + cooldown). Stateless — the client sends tick +
+    active_spills and appends returned events to its log.
+    """
+    from .simulation import (
+        scale_demand_for_tick,
+        spillover_reassign,
+        warehouse_congestion,
+    )
+    from .cost import compute_metrics, resolve_fuel_prices
+    from .schema import Neighborhood as NBModel
+
+    if not payload.neighborhoods:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
+                            detail="No neighborhoods provided")
+    cfg = payload.config or OptimizationConfig()
+    if not payload.warehouses:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
+                            detail="No warehouses provided — run optimization first")
+
+    if cfg.simulation_mode == "realtime" and payload.scale_demand:
+        scaled, demand_note = scale_demand_for_tick(
+            payload.neighborhoods, payload.tick,
+            amplitude=max(0.0, min(2.0, payload.demand_amplitude)))
+    else:
+        scaled, demand_note = payload.neighborhoods, "Simulation off — demand frozen (manual overrides only)"
+
+    congestion, live_flags, traffic_note = warehouse_congestion(
+        payload.warehouses, cfg,
+        congestion_overrides=payload.congestion_overrides,
+        tick=payload.tick, simulate_surge=payload.simulate_surge)
+
+    base_assignments = payload.assignments
+    if not base_assignments:
+        # No assignment yet: fast nearest-by-metric layout on scaled demand.
+        opt = run_optimization(scaled, cfg)
+        base_assignments = opt.assignments
+        fuel_note = opt.fuel_note
+    else:
+        fuel_note = None
+
+    # Demand rescale changes w_i but not geometry: refresh weighted_distance
+    # + cost on the scaled demand before spilling so metrics reconcile.
+    demand_by_id = {str(n.get("neighborhood_id")): int(n.get("daily_orders", 0) or 0)
+                    for n in scaled}
+    if payload.assignments and (cfg.simulation_mode == "realtime" and payload.scale_demand):
+        from .cost import assignment_cost, assignment_fuel_cost
+        from .distance import compute_distance_matrix
+        import numpy as np
+        try:
+            nb_coords = np.array([[float(n.get("latitude")), float(n.get("longitude"))] for n in scaled])
+            wh_coords = np.array([[float(w.latitude), float(w.longitude)] for w in payload.warehouses])
+            wh_ids = [str(w.warehouse_id) for w in payload.warehouses]
+            dist = compute_distance_matrix(nb_coords, wh_coords, metric="haversine" if cfg.distance_metric == "road" else cfg.distance_metric)
+            prices, _, _ = resolve_fuel_prices(cfg)
+            refreshed = []
+            for a in base_assignments:
+                nid = str(a.neighborhood_id)
+                try:
+                    row = [str(n.get("neighborhood_id")) for n in scaled].index(nid)
+                    col = wh_ids.index(str(a.warehouse_id))
+                    d = float(dist[row][col])
+                except (ValueError, IndexError):
+                    d = float(a.distance_km)
+                w_i = demand_by_id.get(nid, 0)
+                cong = congestion.get(str(a.warehouse_id))
+                refreshed.append(Assignment(
+                    neighborhood_id=nid, warehouse_id=str(a.warehouse_id),
+                    distance_km=round(d, 2),
+                    weighted_distance=round(w_i * d, 2),
+                    cost=round(assignment_cost(w_i, d, cfg, prices, cong), 2),
+                    fuel_cost=round(assignment_fuel_cost(w_i, d, cfg, prices, cong), 2),
+                    congestion_pct=cong, travel_time_min=a.travel_time_min,
+                    within_radius=a.within_radius, is_feasible=a.is_feasible))
+            base_assignments = refreshed
+        except Exception:
+            pass
+
+    new_assignments, new_spills, events = spillover_reassign(
+        scaled, payload.warehouses, base_assignments, congestion, cfg,
+        payload.active_spills or {}, payload.tick)
+
+    try:
+        metrics = compute_metrics(scaled, new_assignments, payload.warehouses, cfg)
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+
+    if fuel_note is None:
+        _, _, fuel_note = resolve_fuel_prices(cfg)
+
+    return SimulationTickResult(
+        tick=payload.tick, simulation_mode=cfg.simulation_mode,
+        neighborhoods=[NBModel(**n) for n in scaled],
+        assignments=new_assignments, metrics=metrics,
+        congestion_by_warehouse={k: round(v, 4) for k, v in congestion.items()},
+        congestion_live={k: bool(v) for k, v in live_flags.items()},
+        events=events, active_spills=new_spills,
+        demand_note=demand_note, traffic_note=traffic_note, fuel_note=fuel_note)
+
+
+@app.post("/api/simulation/live")
+def simulation_live(payload: LiveSnapshotRequest):
+    """One poll-tick live snapshot: fuel + corridor traffic + demand totals."""
+    from .simulation import live_snapshot
+    try:
+        return live_snapshot(payload.neighborhoods, payload.warehouses,
+                             payload.config or OptimizationConfig())
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+
+
+@app.post("/api/overview", response_model=OverviewAggregate)
+def get_overview(payload: OverviewRequest):
+    """Overview aggregate for the Overview tab (schema.md §2.9, #14)."""
+    from .simulation import build_overview
+    try:
+        return build_overview(
+            payload.neighborhoods, payload.warehouses, payload.assignments,
+            payload.config or OptimizationConfig(),
+            active_spills=payload.active_spills or {})
     except Exception as e:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 

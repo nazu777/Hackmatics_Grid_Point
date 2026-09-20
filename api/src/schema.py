@@ -62,6 +62,12 @@ class OptimizationConfig(BaseModel):
     fuel_state: str = Field("Karnataka", description="Indian state for live fuel rates")
     fuel_city: Optional[str] = Field(None, description="City for live fuel rates (default: first city)")
     vehicle_fleet: List[VehicleType] = Field(default_factory=list)
+    use_live_traffic_for_routing: bool = Field(False, description="Optimize matrices + assignment on current corridor traffic (#5-opt)")
+    traffic_aware_reroute: bool = Field(False, description="Re-evaluate assignment as corridors change (#9)")
+    simulation_mode: Literal["off", "realtime"] = Field("off", description="Live fuel/traffic/demand loop + congestion spillover (#12, #13)")
+    simulation_congestion_threshold: float = Field(0.5, ge=0.0, description="Delay ratio that triggers spillover")
+    simulation_hysteresis: float = Field(0.15, ge=0.0, description="Recovery gap below threshold to end a spill")
+    simulation_cooldown_ticks: int = Field(2, ge=0, description="Ticks to wait before re-spilling a cleared warehouse")
     random_seed: int = Field(42)
     baseline_mode: Literal["centroid", "mean", "single_center", "custom"] = Field("centroid")
     custom_baseline_warehouses: Optional[List[Warehouse]] = Field(None)
@@ -177,4 +183,52 @@ class OptimizationResult(BaseModel):
     fuel_note: Optional[str] = None
     traffic_note: Optional[str] = None
     routing_note: Optional[str] = None
+
+
+class SpilloverEvent(BaseModel):
+    """One congestion spillover start/end entry (schema.md §2.9, Phase F #13)."""
+    tick: int = 0
+    warehouse_id: str
+    congestion_pct: float = 0.0
+    moved_neighborhood_ids: List[str] = Field(default_factory=list)
+    kind: Literal["spill_start", "spill_end"] = "spill_start"
+    reason: str = ""
+
+
+class ActiveSpill(BaseModel):
+    """In-progress spill state carried between ticks (server is stateless)."""
+    warehouse_id: str
+    since_tick: int = 0
+    last_cleared_tick: Optional[int] = None
+    moved_neighborhood_ids: List[str] = Field(default_factory=list)
+    original_warehouse: Dict[str, str] = Field(default_factory=dict)
+
+
+class SimulationTickResult(BaseModel):
+    """Response of POST /api/simulation/tick (Phase F #13)."""
+    tick: int = 0
+    simulation_mode: Literal["off", "realtime"] = "realtime"
+    neighborhoods: List[Neighborhood] = Field(default_factory=list)
+    assignments: List[Assignment] = Field(default_factory=list)
+    metrics: Optional[Metrics] = None
+    congestion_by_warehouse: Dict[str, float] = Field(default_factory=dict)
+    congestion_live: Dict[str, bool] = Field(default_factory=dict)
+    events: List[SpilloverEvent] = Field(default_factory=list)
+    active_spills: Dict[str, ActiveSpill] = Field(default_factory=dict)
+    demand_note: str = ""
+    traffic_note: Optional[str] = None
+    fuel_note: Optional[str] = None
+
+
+class OverviewAggregate(BaseModel):
+    """Single rollup the Overview tab renders (schema.md §2.9, Phase F #14)."""
+    vehicle_count: int = 0
+    vehicle_mix: Dict[str, int] = Field(default_factory=dict)
+    fuel_price: Dict[str, Any] = Field(default_factory=dict)
+    infra_price: Dict[str, float] = Field(default_factory=dict)
+    warehouse_count: int = 0
+    utilization: List[Optional[float]] = Field(default_factory=list)
+    order_totals: Dict[str, int] = Field(default_factory=dict)
+    distance_cost: Dict[str, Any] = Field(default_factory=dict)
+    alerts: List[str] = Field(default_factory=list)
 

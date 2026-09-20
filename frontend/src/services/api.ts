@@ -17,7 +17,11 @@ import {
   ConstraintDiagnostics,
   FuelRates,
   CensusCity,
-  CensusDemand
+  CensusDemand,
+  SimulationTickResult,
+  ActiveSpill,
+  LiveSnapshot,
+  OverviewAggregate
 } from '../types';
 
 // In production (single Vercel deployment) API is same-origin at /api
@@ -480,23 +484,261 @@ export function apiErrorMessage(err: unknown, fallback: string): string {
   return fallback;
 }
 
+/** Friendly fallback shown whenever road geometry is unavailable (Phase B #3).
+ * The raw backend validator string (`Pair #0: expected {frm…}`) must NEVER
+ * reach the map UI — every geometry failure maps to this notice and the map
+ * falls back to straight displacement lines with a traced/total counter. */
+export const ROAD_FALLBACK_NOTICE = 'Road path unavailable — showing straight line';
+
+/** Map ANY route-geometry failure to the friendly notice (Phase B #3). */
+export function friendlyRouteError(err: unknown, fallback = ROAD_FALLBACK_NOTICE): string {
+  const raw = err instanceof Error ? err.message : typeof err === 'string' ? err : apiErrorMessage(err, fallback);
+  if (
+    /pair\s*#\d*/i.test(raw) ||
+    /\{frm/i.test(raw) ||
+    /expected\s*\{/i.test(raw) ||
+    /\[object\s*object\]/i.test(raw) ||
+    /422|validation|unprocessable/i.test(raw)
+  ) {
+    return fallback;
+  }
+  // Any other geometry failure still gets a friendly, actionable message.
+  if (/failed|shape|network|fetch|timeout|500|502|503/i.test(raw)) return fallback;
+  return raw || fallback;
+}
+
 /** Driving path per origin→destination pair (TomTom → OSRM → straight fallback). */
 export async function fetchRouteGeometries(
   pairs: { from: { lat: number; lon: number }; to: { lat: number; lon: number } }[],
   liveTraffic = false
 ): Promise<RouteGeometry[]> {
-  const res = await fetch(`${API_BASE}/routes/geometry`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ pairs, live_traffic: liveTraffic })
-  });
+  let res: Response;
+  try {
+    res = await fetch(`${API_BASE}/routes/geometry`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ pairs, live_traffic: liveTraffic })
+    });
+  } catch {
+    throw new Error(ROAD_FALLBACK_NOTICE);
+  }
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: 'Route fetch failed' }));
-    throw new Error(apiErrorMessage(err, `Route fetch failed (HTTP ${res.status})`));
+    throw new Error(friendlyRouteError(apiErrorMessage(err, `Route fetch failed (HTTP ${res.status})`)));
   }
-  const body = (await res.json()) as { routes?: unknown };
-  if (!body || !Array.isArray(body.routes)) throw new Error('Route service returned an unexpected shape.');
+  let body: { routes?: unknown };
+  try {
+    body = (await res.json()) as { routes?: unknown };
+  } catch {
+    throw new Error(ROAD_FALLBACK_NOTICE);
+  }
+  if (!body || !Array.isArray(body.routes)) throw new Error(ROAD_FALLBACK_NOTICE);
   return body.routes as RouteGeometry[];
+}
+
+// --------------------------------------------------------------------------
+// Phase B: coverage heatmap + warehouse focus + corridor traffic (display)
+// --------------------------------------------------------------------------
+
+export interface CoverageCell {
+  lat: number;
+  lon: number;
+  distance_km: number;
+  t: number;
+  color: string;
+}
+
+export interface CoverageResult {
+  cells: CoverageCell[];
+  min_km: number;
+  max_km: number;
+  grid_n?: number;
+  hotspots?: { neighborhood_id: string; distance_km: number; t: number; color: string }[];
+}
+
+export interface WarehouseFocusMember {
+  neighborhood_id: string;
+  name?: string;
+  latitude: number;
+  longitude: number;
+  daily_orders: number;
+  zone: string;
+  distance_km: number;
+  within_radius: boolean;
+  is_feasible: boolean;
+}
+
+export interface WarehouseFocus {
+  found: boolean;
+  warehouse_id: string;
+  center?: { lat: number; lon: number };
+  assigned_orders?: number;
+  neighborhood_count?: number;
+  utilization_pct?: number | null;
+  capacity?: number | null;
+  radius_km?: number | null;
+  infra_cost?: number;
+  color?: string;
+  avg_distance_km?: number;
+  max_distance_km?: number;
+  members?: WarehouseFocusMember[];
+}
+
+/** Green (near, t=0) → amber → red (far, t=1), mirroring backend mapping.proximity_color. */
+export function proximityColor(t: number): string {
+  const c = Math.max(0, Math.min(1, Number(t) || 0));
+  const lerp = (a: number, b: number, f: number) => Math.round(a + (b - a) * f);
+  let r: number; let g: number; let b: number;
+  if (c < 0.5) {
+    const f = c / 0.5;
+    r = lerp(0x22, 0xf5, f); g = lerp(0xc5, 0x9e, f); b = lerp(0x5e, 0x0b, f);
+  } else {
+    const f = (c - 0.5) / 0.5;
+    r = lerp(0xf5, 0xef, f); g = lerp(0x9e, 0x44, f); b = lerp(0x0b, 0x44, f);
+  }
+  return `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`;
+}
+
+/** Corridor congestion bucket for the traffic overlay (fluid/busy/jammed). */
+export function corridorBucket(congestionPct: number | null | undefined): 'fluid' | 'busy' | 'jammed' | 'unknown' {
+  if (congestionPct == null || !Number.isFinite(Number(congestionPct))) return 'unknown';
+  const v = Number(congestionPct);
+  if (v < 0.15) return 'fluid';
+  if (v < 0.4) return 'busy';
+  return 'jammed';
+}
+
+/** Local coverage fallback (mirrors backend mapping.coverage_heatmap IDW grid). */
+export function computeCoverageCells(
+  neighborhoods: Neighborhood[],
+  assignments: Assignment[],
+  gridN = 24
+): CoverageResult {
+  const nodes = neighborhoods.filter((n) => Number.isFinite(n.latitude) && Number.isFinite(n.longitude));
+  if (nodes.length === 0) return { cells: [], min_km: 0, max_km: 0 };
+  const distByNb = new Map(assignments.map((a) => [a.neighborhood_id, Number(a.distance_km) || 0]));
+  const dists = nodes.map((n) => distByNb.get(n.neighborhood_id) ?? 0);
+  const lo = Math.min(...dists);
+  const hi = Math.max(...dists);
+  const span = Math.max(1e-9, hi - lo);
+  const lats = nodes.map((n) => n.latitude);
+  const lons = nodes.map((n) => n.longitude);
+  let minLat = Math.min(...lats); let maxLat = Math.max(...lats);
+  let minLon = Math.min(...lons); let maxLon = Math.max(...lons);
+  if (Math.abs(maxLat - minLat) < 1e-6) { minLat -= 0.02; maxLat += 0.02; }
+  if (Math.abs(maxLon - minLon) < 1e-6) { minLon -= 0.02; maxLon += 0.02; }
+  const n = Math.max(4, Math.min(48, Math.round(gridN) || 24));
+  const cells: CoverageCell[] = [];
+  for (let gi = 0; gi < n; gi++) {
+    for (let gj = 0; gj < n; gj++) {
+      const clat = minLat + ((maxLat - minLat) * (gi + 0.5)) / n;
+      const clon = minLon + ((maxLon - minLon) * (gj + 0.5)) / n;
+      let num = 0; let den = 0;
+      nodes.forEach((nd, idx) => {
+        const dlat = (nd.latitude - clat) * 111.0;
+        const dlon = (nd.longitude - clon) * 111.0 * Math.cos((clat * Math.PI) / 180);
+        const dd = Math.hypot(dlat, dlon);
+        const w = 1 / (1 + dd);
+        num += dists[idx] * w;
+        den += w;
+      });
+      const mean = den > 0 ? num / den : 0;
+      const t = Math.max(0, Math.min(1, (mean - lo) / span));
+      cells.push({ lat: Math.round(clat * 1e5) / 1e5, lon: Math.round(clon * 1e5) / 1e5, distance_km: Math.round(mean * 100) / 100, t: Math.round(t * 1000) / 1000, color: proximityColor(t) });
+    }
+  }
+  return { cells, min_km: Math.round(lo * 100) / 100, max_km: Math.round(hi * 100) / 100, grid_n: n };
+}
+
+/** Local focus fallback (mirrors backend mapping.warehouse_focus_summary). */
+export function computeWarehouseFocus(
+  warehouseId: string,
+  neighborhoods: Neighborhood[],
+  warehouses: Warehouse[],
+  assignments: Assignment[]
+): WarehouseFocus {
+  const wh = warehouses.find((w) => w.warehouse_id === warehouseId);
+  if (!wh) return { found: false, warehouse_id: warehouseId };
+  const nbById = new Map(neighborhoods.map((n) => [n.neighborhood_id, n]));
+  const members: WarehouseFocusMember[] = [];
+  let total = 0;
+  const dists: number[] = [];
+  assignments.filter((a) => a.warehouse_id === warehouseId).forEach((a) => {
+    const nb = nbById.get(a.neighborhood_id);
+    const orders = Number(nb?.daily_orders) || 0;
+    const d = Number(a.distance_km) || 0;
+    total += orders;
+    dists.push(d);
+    members.push({
+      neighborhood_id: a.neighborhood_id,
+      name: nb?.name || a.neighborhood_id,
+      latitude: Number(nb?.latitude),
+      longitude: Number(nb?.longitude),
+      daily_orders: orders,
+      zone: (nb?.zone || 'Unzoned').trim() || 'Unzoned',
+      distance_km: Math.round(d * 100) / 100,
+      within_radius: a.within_radius,
+      is_feasible: a.is_feasible
+    });
+  });
+  members.sort((a, b) => a.distance_km - b.distance_km);
+  let util: number | null = null;
+  if (wh.capacity != null && Number(wh.capacity) > 0) util = Math.round((total / Number(wh.capacity)) * 1000) / 10;
+  return {
+    found: true,
+    warehouse_id: warehouseId,
+    center: { lat: wh.latitude, lon: wh.longitude },
+    assigned_orders: total,
+    neighborhood_count: members.length,
+    utilization_pct: util ?? wh.utilization_pct ?? null,
+    capacity: wh.capacity ?? null,
+    radius_km: wh.radius_km ?? null,
+    infra_cost: wh.infra_cost,
+    avg_distance_km: dists.length ? Math.round((dists.reduce((s, v) => s + v, 0) / dists.length) * 100) / 100 : 0,
+    max_distance_km: dists.length ? Math.round(Math.max(...dists) * 100) / 100 : 0,
+    members
+  };
+}
+
+/** Server coverage grid with local fallback (never throws — returns local grid). */
+export async function fetchCoverage(
+  neighborhoods: Neighborhood[],
+  assignments: Assignment[],
+  gridN = 24
+): Promise<CoverageResult> {
+  try {
+    const res = await fetch(`${API_BASE}/map/coverage`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ neighborhoods, assignments, grid_n: gridN })
+    });
+    if (res.ok) {
+      const body = (await res.json()) as CoverageResult;
+      if (body && Array.isArray(body.cells)) return body;
+    }
+  } catch { /* offline → local */ }
+  return computeCoverageCells(neighborhoods, assignments, gridN);
+}
+
+/** Server focus payload with local fallback (never throws). */
+export async function fetchWarehouseFocus(
+  warehouseId: string,
+  neighborhoods: Neighborhood[],
+  warehouses: Warehouse[],
+  assignments: Assignment[]
+): Promise<WarehouseFocus> {
+  try {
+    const res = await fetch(`${API_BASE}/map/warehouse-focus`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ warehouse_id: warehouseId, neighborhoods, warehouses, assignments })
+    });
+    if (res.ok) {
+      const body = (await res.json()) as WarehouseFocus;
+      if (body && body.found) return body;
+    }
+  } catch { /* offline → local */ }
+  return computeWarehouseFocus(warehouseId, neighborhoods, warehouses, assignments);
 }
 
 export interface IsoFeature {
@@ -1123,13 +1365,21 @@ export async function applyDemandShift(
 export async function getFleetETA(
   assignments: Assignment[],
   config: OptimizationConfig,
-  vehicle_type?: string
+  vehicle_type?: string,
+  opts?: { warehouses?: Warehouse[]; useLiveFeeds?: boolean; congestionOverrides?: Record<string, number> | null }
 ): Promise<FleetETAResult> {
   try {
     const res = await fetch(`${API_BASE}/scenarios/eta`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ assignments, config, vehicle_type })
+      body: JSON.stringify({
+        assignments,
+        config,
+        vehicle_type,
+        warehouses: opts?.warehouses ?? [],
+        use_live_feeds: opts?.useLiveFeeds ?? null,
+        congestion_overrides: opts?.congestionOverrides ?? null
+      })
     });
     if (res.ok) {
       return await res.json();
@@ -1234,5 +1484,268 @@ export async function getConstraintDiagnostics(
     radius_violations: radViolations,
     total_violations: capViolations.length + radViolations.length
   };
+}
+
+// --------------------------------------------------------------------------
+// Phase F: Realtime Automation & Overview with Local Fallbacks
+// --------------------------------------------------------------------------
+
+export interface SimulationTickArgs {
+  neighborhoods: Neighborhood[];
+  warehouses: Warehouse[];
+  assignments: Assignment[];
+  config: OptimizationConfig;
+  tick: number;
+  active_spills?: Record<string, ActiveSpill>;
+  congestion_overrides?: Record<string, number> | null;
+  scale_demand?: boolean;
+  demand_amplitude?: number;
+  simulate_surge?: boolean;
+}
+
+function localDemandWave(neighborhoods: Neighborhood[], tick: number): Neighborhood[] {
+  const mult = 1.0 + 0.12 * Math.sin(tick / 2.5);
+  return neighborhoods.map((n) => {
+    const orig = Number(n.daily_orders) || 0;
+    let h = 0;
+    const s = `${n.neighborhood_id}@${tick}`;
+    for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
+    const jitter = ((h % 2000) / 10000) - 0.1;
+    const next = Math.max(0, Math.round(orig * Math.max(0.2, mult + jitter)));
+    return { ...n, daily_orders: orig > 0 && next === 0 ? 1 : next };
+  });
+}
+
+export async function runSimulationTick(args: SimulationTickArgs): Promise<SimulationTickResult> {
+  try {
+    const res = await fetch(`${API_BASE}/simulation/tick`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        neighborhoods: args.neighborhoods,
+        warehouses: args.warehouses,
+        assignments: args.assignments,
+        config: args.config,
+        tick: args.tick,
+        active_spills: args.active_spills || {},
+        congestion_overrides: args.congestion_overrides ?? null,
+        scale_demand: args.scale_demand ?? true,
+        demand_amplitude: args.demand_amplitude ?? 1.0,
+        simulate_surge: args.simulate_surge ?? true
+      })
+    });
+    if (res.ok) return await res.json();
+  } catch (e) {
+    // offline -> local fallback below
+  }
+  // Local fallback: demand wave + threshold spillover on manual floor
+  const live = args.config.simulation_mode === 'realtime' && (args.scale_demand ?? true);
+  const scaled = live ? localDemandWave(args.neighborhoods, args.tick) : args.neighborhoods;
+  const threshold = args.config.simulation_congestion_threshold ?? 0.5;
+  const floor = args.config.traffic_factor || 0;
+  const congestion: Record<string, number> = {};
+  (args.warehouses || []).forEach((w) => {
+    congestion[w.warehouse_id] = args.congestion_overrides?.[w.warehouse_id] ?? floor;
+  });
+  const spills = { ...(args.active_spills || {}) };
+  const events: SimulationTickResult['events'] = [];
+  const next = args.assignments.map((a) => ({ ...a }));
+  Object.keys(congestion).forEach((wid) => {
+    if (!spills[wid] && congestion[wid] >= threshold) {
+      const moved = next.filter((a) => a.warehouse_id === wid).map((a) => a.neighborhood_id);
+      if (moved.length > 0) {
+        const others = args.warehouses.filter((w) => w.warehouse_id !== wid);
+        next.forEach((a) => {
+          if (a.warehouse_id === wid && others.length > 0) a.warehouse_id = others[0].warehouse_id;
+        });
+        spills[wid] = { warehouse_id: wid, since_tick: args.tick, moved_neighborhood_ids: moved, original_warehouse: Object.fromEntries(moved.map((m) => [m, wid])) };
+        events.push({ tick: args.tick, warehouse_id: wid, congestion_pct: congestion[wid], moved_neighborhood_ids: moved, kind: 'spill_start', reason: `Offline fallback: congestion ${(congestion[wid] * 100).toFixed(0)}% >= ${(threshold * 100).toFixed(0)}%` });
+      }
+    }
+  });
+  return {
+    tick: args.tick,
+    simulation_mode: args.config.simulation_mode || 'off',
+    neighborhoods: scaled,
+    assignments: next,
+    metrics: null,
+    congestion_by_warehouse: congestion,
+    congestion_live: Object.fromEntries(Object.keys(congestion).map((k) => [k, false])),
+    events,
+    active_spills: spills,
+    demand_note: live ? `Offline fallback demand wave tick=${args.tick}` : 'Simulation off — demand frozen (manual overrides only)',
+    traffic_note: 'Offline fallback: manual traffic floor (backend unreachable)',
+    fuel_note: 'Offline fallback: static fuel rates'
+  };
+}
+
+export async function fetchLiveSnapshot(
+  neighborhoods: Neighborhood[],
+  warehouses: Warehouse[],
+  config: OptimizationConfig
+): Promise<LiveSnapshot> {
+  try {
+    const res = await fetch(`${API_BASE}/simulation/live`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ neighborhoods, warehouses, config })
+    });
+    if (res.ok) return await res.json();
+  } catch (e) {
+    // offline -> fallback below
+  }
+  const total = neighborhoods.reduce((s, n) => s + (Number(n.daily_orders) || 0), 0);
+  const by: Record<string, number> = {};
+  warehouses.forEach((w) => { by[w.warehouse_id] = config.traffic_factor || 0; });
+  return {
+    at: Date.now() / 1000,
+    fuel: { prices: { petrol: 105, diesel: 92, cng: 90, autogas: 40 }, live: false, note: 'Offline fallback: static fuel rates', city: config.fuel_city ?? null, state: config.fuel_state || 'Karnataka' },
+    traffic: { by_warehouse: by, live: Object.fromEntries(Object.keys(by).map((k) => [k, false])), avg_congestion_pct: config.traffic_factor || 0, note: 'Offline fallback: manual traffic floor' },
+    demand: { nodes: neighborhoods.length, total_orders: total }
+  };
+}
+
+export async function fetchOverview(
+  neighborhoods: Neighborhood[],
+  warehouses: Warehouse[],
+  assignments: Assignment[],
+  config: OptimizationConfig,
+  active_spills?: Record<string, ActiveSpill>
+): Promise<OverviewAggregate> {
+  try {
+    const res = await fetch(`${API_BASE}/overview`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ neighborhoods, warehouses, assignments, config, active_spills: active_spills || {} })
+    });
+    if (res.ok) return await res.json();
+  } catch (e) {
+    // offline -> fallback below
+  }
+  const mix: Record<string, number> = {};
+  (config.vehicle_fleet || []).forEach((v) => {
+    mix[v.vehicle_type] = (mix[v.vehicle_type] || 0) + 1;
+  });
+  const totalOrders = neighborhoods.reduce((s, n) => s + (Number(n.daily_orders) || 0), 0);
+  const perWh = config.infra_cost_per_warehouse || 0;
+  const feas = assignments.length > 0 ? assignments.filter((a) => a.is_feasible).length / assignments.length : 1;
+  return {
+    vehicle_count: (config.vehicle_fleet || []).length,
+    vehicle_mix: mix,
+    fuel_price: { prices: { petrol: 105, diesel: 92, cng: 90, autogas: 40 }, live: false, note: 'Offline fallback: static fuel rates', city: config.fuel_city ?? null, state: config.fuel_state || 'Karnataka' },
+    infra_price: { per_warehouse: perWh, total: perWh * warehouses.length },
+    warehouse_count: warehouses.length,
+    utilization: warehouses.map((w) => w.utilization_pct ?? null),
+    order_totals: { nodes: neighborhoods.length, daily_orders: totalOrders },
+    distance_cost: {
+      total_weighted_distance_km_orders: assignments.reduce((s, a) => s + (a.weighted_distance || 0), 0),
+      total_cost: assignments.reduce((s, a) => s + (a.cost || 0), 0),
+      total_fuel_cost: assignments.reduce((s, a) => s + (a.fuel_cost || 0), 0),
+      avg_congestion_pct: config.traffic_factor || 0,
+      avg_distance_per_order_km: totalOrders > 0 ? assignments.reduce((s, a) => s + (a.weighted_distance || 0), 0) / totalOrders : 0,
+      feasibility_ratio: feas,
+      fuel_live: false
+    },
+    alerts: [],
+    at: Date.now() / 1000
+  };
+}
+
+// --------------------------------------------------------------------------
+// Phase C: traffic-aware routing (corridor traffic + dynamic reroute)
+// --------------------------------------------------------------------------
+
+export interface CorridorInfo {
+  factor: number;
+  live: boolean;
+  samples: number;
+  points: number;
+  avg_delay: number;
+}
+
+export interface CorridorTrafficResult {
+  corridors: Record<string, CorridorInfo>;
+  factors: Record<string, number>;
+  avg_congestion_pct: number;
+  live_corridors: number;
+  total_corridors: number;
+  note: string;
+}
+
+export interface RerouteResult {
+  assignments: Assignment[];
+  warehouses: Warehouse[];
+  metrics: Metrics;
+  changed: number;
+  moved_neighborhood_ids: string[];
+  saved_cost: number;
+  saved_minutes: number;
+  old_cost: number;
+  new_cost: number;
+  old_minutes: number;
+  new_minutes: number;
+  alpha: number;
+  beta_per_min: number;
+  traffic_note: string;
+  fuel_note?: string | null;
+  routing_note?: string | null;
+}
+
+/** Per-corridor congestion from traced road geometries (server + history). */
+export async function fetchCorridorTraffic(
+  neighborhoods: Neighborhood[],
+  warehouses: Warehouse[],
+  assignments: Assignment[],
+  opts?: { hour?: number | null; useLive?: boolean }
+): Promise<CorridorTrafficResult | null> {
+  try {
+    const res = await fetch(`${API_BASE}/traffic/corridors`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        neighborhoods,
+        warehouses,
+        assignments,
+        hour: opts?.hour ?? null,
+        use_live: opts?.useLive ?? true
+      })
+    });
+    if (res.ok) return await res.json();
+  } catch {
+    /* offline → null; callers fall back to assignment congestion */
+  }
+  return null;
+}
+
+export interface RerouteArgs {
+  neighborhoods: Neighborhood[];
+  warehouses: Warehouse[];
+  assignments: Assignment[];
+  config: OptimizationConfig;
+  alpha?: number;
+  beta_per_min?: number;
+  congestion_overrides?: Record<string, number> | null;
+}
+
+/** Re-evaluate assignment on current corridor traffic (α·cost + β·time). */
+export async function rerouteOnTraffic(args: RerouteArgs): Promise<RerouteResult> {
+  const res = await fetch(`${API_BASE}/routes/reroute`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      neighborhoods: args.neighborhoods,
+      warehouses: args.warehouses,
+      assignments: args.assignments,
+      config: args.config,
+      alpha: args.alpha ?? 1.0,
+      beta_per_min: args.beta_per_min ?? 0.5,
+      congestion_overrides: args.congestion_overrides ?? null
+    })
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: 'Reroute failed' }));
+    throw new Error(apiErrorMessage(err, `Reroute failed (HTTP ${res.status})`));
+  }
+  return await res.json();
 }
 

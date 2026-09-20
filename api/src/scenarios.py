@@ -126,10 +126,20 @@ def calculate_fleet_eta(
     assignments: List[Assignment],
     config: OptimizationConfig,
     vehicle_type: Optional[str] = None,
+    warehouses: Optional[List[Any]] = None,
+    use_live_feeds: Optional[bool] = None,
+    congestion_overrides: Optional[Dict[str, float]] = None,
 ) -> Dict[str, Any]:
     """
     Computes ETA and fleet metrics:
     time_min = (d_eff / avg_speed_kmph) * 60
+
+    Phase C (#12 engine half): the engine path reads live fuel + traffic
+    feeds with no manual slider required. Per-assignment congestion_pct wins
+    when present (it already carries live corridor readings from
+    optimization); when absent and live feeds are enabled, corridor factors
+    are resolved per warehouse (overrides > live TomTom > history > manual
+    floor). The manual traffic_factor survives only as an offline floor.
     """
     if not assignments:
         return {
@@ -154,6 +164,55 @@ def calculate_fleet_eta(
 
     traffic = float(config.traffic_factor or 0.0)
 
+    # Phase C live-feed resolution for assignments missing congestion.
+    live_mode = (bool(getattr(config, "use_live_traffic", False)
+                      or getattr(config, "use_live_traffic_for_routing", False))
+                 if use_live_feeds is None else bool(use_live_feeds))
+    overrides = dict(congestion_overrides or {})
+    wh_factor: Dict[str, float] = {}
+    traffic_live_any = False
+    congestion_source = "manual"
+    needs_live = live_mode and any(
+        getattr(a, "congestion_pct", None) is None for a in assignments)
+    if needs_live:
+        try:
+            from .traffic import corridor_factor
+            wh_list = list(warehouses or [])
+            # When no warehouse list is given, derive one site per assignment
+            # warehouse_id from the assignment's own distance (history-only).
+            if wh_list:
+                for w in wh_list:
+                    wid = str(getattr(w, "warehouse_id", "") if not isinstance(w, dict)
+                              else w.get("warehouse_id", ""))
+                    if not wid:
+                        continue
+                    if wid in overrides:
+                        wh_factor[wid] = max(0.0, float(overrides[wid]))
+                        continue
+                    try:
+                        lat = float(getattr(w, "latitude") if not isinstance(w, dict)
+                                    else w.get("latitude"))
+                        lon = float(getattr(w, "longitude") if not isinstance(w, dict)
+                                    else w.get("longitude"))
+                    except (TypeError, ValueError):
+                        continue
+                    info = corridor_factor(lat, lon, manual_floor=traffic,
+                                           hour=config.traffic_hour, record=True,
+                                           allow_live=True)
+                    wh_factor[wid] = float(info.get("factor", traffic) or traffic)
+                    traffic_live_any = traffic_live_any or bool(info.get("live", False))
+                congestion_source = ("live" if traffic_live_any
+                                     else ("history" if wh_factor else "manual"))
+            else:
+                for a in assignments:
+                    wid = str(getattr(a, "warehouse_id", ""))
+                    if wid in overrides and wid not in wh_factor:
+                        wh_factor[wid] = max(0.0, float(overrides[wid]))
+                congestion_source = "manual" if not wh_factor else "override"
+        except Exception:
+            wh_factor = {}
+            congestion_source = "manual"
+
     etas: List[float] = []
     total_trips = 0
     total_effective_km = 0.0
@@ -161,7 +220,12 @@ def calculate_fleet_eta(
     from .cost import corridor_congestion
     applied_congs: List[float] = []
     for a in assignments:
-        cong = corridor_congestion(config, getattr(a, "congestion_pct", None))
+        base_cong = getattr(a, "congestion_pct", None)
+        if base_cong is None and str(getattr(a, "warehouse_id", "")) in wh_factor:
+            base_cong = wh_factor[str(getattr(a, "warehouse_id", ""))]
+            if congestion_source == "manual":
+                congestion_source = "history"
+        cong = corridor_congestion(config, base_cong)
         applied_congs.append(cong)
         d_eff = float(a.distance_km) * (1.0 + cong)
         total_effective_km += d_eff
@@ -209,6 +273,8 @@ def calculate_fleet_eta(
         "vehicle_used": v_name,
         "avg_speed_kmph": speed_kmph,
         "traffic_congestion_pct": round(traffic * 100.0, 1),
+        "congestion_source": congestion_source,
+        "traffic_live": traffic_live_any,
         "effective_congestion_pct": round(
             (sum(applied_congs) / len(applied_congs) * 100.0) if applied_congs else 0.0, 1),
     }

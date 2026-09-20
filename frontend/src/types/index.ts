@@ -186,6 +186,12 @@ export interface OptimizationConfig {
   fuel_city?: string | null;
   use_live_traffic?: boolean;
   traffic_hour?: number | null;
+  use_live_traffic_for_routing?: boolean;
+  traffic_aware_reroute?: boolean;
+  simulation_mode?: 'off' | 'realtime';
+  simulation_congestion_threshold?: number;
+  simulation_hysteresis?: number;
+  simulation_cooldown_ticks?: number;
   vehicle_fleet: VehicleType[];
   random_seed: number;
   baseline_mode: 'centroid' | 'mean' | 'single_center' | 'custom';
@@ -245,6 +251,8 @@ export interface FleetETAResult {
   avg_speed_kmph: number;
   traffic_congestion_pct: number;
   effective_congestion_pct?: number;
+  congestion_source?: string;
+  traffic_live?: boolean;
 }
 
 export interface FuelCityRate {
@@ -284,6 +292,66 @@ export interface ConstraintDiagnostics {
     severity: 'WARNING' | 'CRITICAL';
   }>;
   total_violations: number;
+}
+
+export interface SpilloverEvent {
+  tick: number;
+  warehouse_id: string;
+  congestion_pct: number;
+  moved_neighborhood_ids: string[];
+  kind: 'spill_start' | 'spill_end';
+  reason: string;
+}
+
+export interface ActiveSpill {
+  warehouse_id: string;
+  since_tick: number;
+  last_cleared_tick?: number | null;
+  moved_neighborhood_ids: string[];
+  original_warehouse: Record<string, string>;
+}
+
+export interface SimulationTickResult {
+  tick: number;
+  simulation_mode: 'off' | 'realtime';
+  neighborhoods: Neighborhood[];
+  assignments: Assignment[];
+  metrics?: Metrics | null;
+  congestion_by_warehouse: Record<string, number>;
+  congestion_live: Record<string, boolean>;
+  events: SpilloverEvent[];
+  active_spills: Record<string, ActiveSpill>;
+  demand_note: string;
+  traffic_note?: string | null;
+  fuel_note?: string | null;
+}
+
+export interface LiveSnapshot {
+  at: number;
+  fuel: { prices: Record<string, number>; live: boolean; note: string; city?: string | null; state?: string };
+  traffic: { by_warehouse: Record<string, number>; live: Record<string, boolean>; avg_congestion_pct: number; note: string };
+  demand: { nodes: number; total_orders: number };
+}
+
+export interface OverviewAggregate {
+  vehicle_count: number;
+  vehicle_mix: Record<string, number>;
+  fuel_price: { prices: Record<string, number>; live: boolean; note: string; city?: string | null; state?: string };
+  infra_price: { per_warehouse: number; total: number };
+  warehouse_count: number;
+  utilization: Array<number | null>;
+  order_totals: { nodes: number; daily_orders: number };
+  distance_cost: {
+    total_weighted_distance_km_orders: number;
+    total_cost: number;
+    total_fuel_cost: number;
+    avg_congestion_pct: number;
+    avg_distance_per_order_km: number;
+    feasibility_ratio: number;
+    fuel_live?: boolean;
+  };
+  alerts: string[];
+  at?: number;
 }
 
 

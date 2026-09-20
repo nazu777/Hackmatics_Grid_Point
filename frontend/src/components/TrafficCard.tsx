@@ -17,6 +17,11 @@ const HOURS = Array.from({ length: 24 }, (_, h) => h);
  * Toggle pulls real-time TomTom corridor speeds (server key, 5-min cache);
  * every reading is recorded into rolling history that steers the next
  * optimization's placement (MILP) and evaluation. History works keyless.
+ *
+ * Phase C: "Optimize on current traffic" (use_live_traffic_for_routing)
+ * samples live speeds along the assigned road corridors so matrices +
+ * assignment react to current conditions; "Dynamic reroute"
+ * (traffic_aware_reroute) refines assignment for α·cost + β·time.
  */
 export const TrafficCard: React.FC<TrafficCardProps> = ({ config, onChange, lastAvgCongestion, lastNote }) => {
   const [nowHour, setNowHour] = useState<number>(new Date().getHours());
@@ -73,6 +78,32 @@ export const TrafficCard: React.FC<TrafficCardProps> = ({ config, onChange, last
           </select>
         </div>
       </div>
+
+      {/* Phase C: optimize-on-traffic + dynamic reroute toggles */}
+      <label className="flex items-start gap-2 cursor-pointer text-[11px] text-slate-700 bg-white/70 border border-violet-100 rounded-xl px-2.5 py-2">
+        <input
+          type="checkbox"
+          checked={!!config.use_live_traffic_for_routing}
+          onChange={(e) => onChange({ use_live_traffic_for_routing: e.target.checked })}
+          className="rounded text-violet-600 focus:ring-violet-500 mt-0.5"
+        />
+        <span>
+          <span className="font-bold">Optimize on current traffic</span>
+          <span className="block text-slate-500">Corridor speeds from road geometries feed matrices + assignment.</span>
+        </span>
+      </label>
+      <label className="flex items-start gap-2 cursor-pointer text-[11px] text-slate-700 bg-white/70 border border-violet-100 rounded-xl px-2.5 py-2">
+        <input
+          type="checkbox"
+          checked={!!config.traffic_aware_reroute}
+          onChange={(e) => onChange({ traffic_aware_reroute: e.target.checked })}
+          className="rounded text-violet-600 focus:ring-violet-500 mt-0.5"
+        />
+        <span>
+          <span className="font-bold">Dynamic reroute (α·cost + β·time)</span>
+          <span className="block text-slate-500">Re-evaluates assignment as corridors change; reports moved nodes + saved min/₹.</span>
+        </span>
+      </label>
 
       {lastAvgCongestion != null && lastAvgCongestion > 0 ? (
         <p className="text-[11px] text-slate-600 flex items-center gap-1">

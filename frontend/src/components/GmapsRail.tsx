@@ -7,6 +7,7 @@ import {
   Package,
   FlaskConical,
   FileDown,
+  LayoutDashboard,
   Settings,
   LifeBuoy,
   Sun,
@@ -21,12 +22,13 @@ export type RailTab =
   | 'compare'
   | 'data'
   | 'lab'
+  | 'overview'
   | 'export'
   | 'settings'
   | 'help';
 
 export const VALID_TABS: RailTab[] = [
-  'ask', 'saved', 'optimize', 'compare', 'data', 'lab', 'export', 'settings', 'help'
+  'ask', 'saved', 'optimize', 'compare', 'data', 'lab', 'overview', 'export', 'settings', 'help'
 ];
 
 export function isRailTab(v: string | undefined): v is RailTab {
@@ -49,6 +51,7 @@ const ITEMS: { id: RailTab; label: string; icon: React.ElementType }[] = [
   { id: 'compare', label: 'Compare', icon: Scale },
   { id: 'data', label: 'Demand data', icon: Package },
   { id: 'lab', label: 'Scenario lab', icon: FlaskConical },
+  { id: 'overview', label: 'Overview', icon: LayoutDashboard },
   { id: 'export', label: 'Export', icon: FileDown }
 ];
 

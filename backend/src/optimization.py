@@ -49,6 +49,157 @@ def nearest_labels_for_metric(
         compute_distance_matrix(coords, centers, metric=metric), axis=1)
 
 
+def resolve_live_traffic(config: OptimizationConfig) -> bool:
+    """
+    Phase C (#5-opt): effective live-traffic switch.
+
+    `use_live_traffic` (corridor speeds) OR `use_live_traffic_for_routing`
+    (explicit "optimize on current traffic" toggle) enables live reads in
+    matrices, assignment, and corridor resolution. Offline/keyless runs
+    degrade to history + manual floor with live=false provenance.
+    """
+    return bool(getattr(config, "use_live_traffic", False)
+                or getattr(config, "use_live_traffic_for_routing", False))
+
+
+def fleet_avg_speed_kmph(config: OptimizationConfig, default: float = 35.0) -> float:
+    """Capacity-weighted fleet speed, or default when no fleet is configured."""
+    try:
+        fleet = list(getattr(config, "vehicle_fleet", None) or [])
+    except TypeError:
+        return default
+    if not fleet:
+        return default
+    total = 0
+    weighted = 0.0
+    for v in fleet:
+        try:
+            cap = max(1, int(getattr(v, "capacity", 1) or 1))
+            spd = float(getattr(v, "avg_speed_kmph", 0) or 0)
+        except (TypeError, ValueError):
+            continue
+        if spd <= 0:
+            continue
+        total += cap
+        weighted += spd * cap
+    return (weighted / total) if total > 0 else default
+
+
+def estimate_time_min(d_km: float, congestion: float, speed_kmph: float) -> float:
+    """Free-flow drive time inflated by corridor congestion."""
+    return float(d_km) / max(5.0, float(speed_kmph)) * 60.0 * (1.0 + max(0.0, float(congestion or 0.0)))
+
+
+def reroute_assignments(
+    coords: np.ndarray,
+    weights: np.ndarray,
+    warehouse_coords: np.ndarray,
+    current_labels: np.ndarray,
+    config: OptimizationConfig,
+    corridor: Optional[Dict[int, float]] = None,
+    dist_matrix: Optional[np.ndarray] = None,
+    dur_matrix: Optional[np.ndarray] = None,
+    fuel_prices: Optional[Dict[str, float]] = None,
+    alpha: float = 1.0,
+    beta_per_min: float = 0.5,
+) -> Tuple[np.ndarray, Dict[str, Any]]:
+    """
+    Phase C (#9): dynamic reroute — re-evaluate assignment as corridor
+    conditions change, minimizing score = alpha * cost + beta * time.
+
+    Cost is the full delivery cost (w_i * d_eff * rate_eff, congestion-aware);
+    time is provider duration when a road duration matrix is available, else
+    estimated from distance/speed inflated by the same corridor congestion.
+    Capacity/radius constraints are NOT re-solved here (assignment-only
+    refinement); infeasible picks fall back to the nearest feasible center.
+
+    Returns (new_labels, summary {changed, moved_ids, saved_cost, saved_minutes}).
+    """
+    from .cost import assignment_cost
+
+    N = len(coords)
+    K = len(warehouse_coords)
+    if N == 0 or K == 0:
+        return np.array(current_labels, dtype=int), {
+            "changed": 0, "moved_ids": [], "saved_cost": 0.0, "saved_minutes": 0.0,
+        }
+    if dist_matrix is None:
+        if (config.distance_metric or "haversine").lower().strip() == "road":
+            from .routing import road_matrices
+            dist_matrix, dur_matrix, _ = road_matrices(
+                coords, warehouse_coords, live_traffic=resolve_live_traffic(config))
+        else:
+            dist_matrix = compute_distance_matrix(coords, warehouse_coords, metric=config.distance_metric)
+    else:
+        dist_matrix = np.asarray(dist_matrix, dtype=float)
+    if dur_matrix is not None:
+        dur_matrix = np.asarray(dur_matrix, dtype=float)
+
+    speed = fleet_avg_speed_kmph(config)
+    corridor = corridor or {}
+    old_cost = 0.0
+    old_time = 0.0
+    new_labels = np.zeros(N, dtype=int)
+    for i in range(N):
+        w_i = float(weights[i]) if i < len(weights) else 0.0
+        best_k = int(current_labels[i]) if i < len(current_labels) else 0
+        best_k = max(0, min(K - 1, best_k))
+        best_score = None
+        for k in range(K):
+            d = float(dist_matrix[i, k])
+            cong = float(corridor.get(k, 0.0) or 0.0)
+            cost_ik = assignment_cost(int(round(w_i)), d, config, fuel_prices, cong)
+            if dur_matrix is not None:
+                try:
+                    t_ik = float(dur_matrix[i, k]) * (1.0 + max(0.0, cong)) \
+                        if float(dur_matrix[i, k]) > 0 else estimate_time_min(d, cong, speed)
+                except (IndexError, TypeError, ValueError):
+                    t_ik = estimate_time_min(d, cong, speed)
+            else:
+                t_ik = estimate_time_min(d, cong, speed)
+            score = float(alpha) * cost_ik + float(beta_per_min) * t_ik
+            if best_score is None or score < best_score:
+                best_score = score
+                best_k = k
+        new_labels[i] = best_k
+        # Accumulate old vs new totals for the savings report.
+        ck_old = max(0, min(K - 1, int(current_labels[i]) if i < len(current_labels) else 0))
+        ck_new = int(new_labels[i])
+        for ck, acc in ((ck_old, "old"), (ck_new, "new")):
+            d = float(dist_matrix[i, ck])
+            cong = float(corridor.get(ck, 0.0) or 0.0)
+            c = assignment_cost(int(round(w_i)), d, config, fuel_prices, cong)
+            t = (float(dur_matrix[i, ck]) * (1.0 + max(0.0, cong))
+                 if dur_matrix is not None else estimate_time_min(d, cong, speed))
+            if acc == "old":
+                old_cost += c
+                old_time += t
+            else:
+                pass
+        # (new totals accumulated below in a second pass for clarity)
+    new_cost = 0.0
+    new_time = 0.0
+    for i in range(N):
+        w_i = float(weights[i]) if i < len(weights) else 0.0
+        ck = int(new_labels[i])
+        d = float(dist_matrix[i, ck])
+        cong = float(corridor.get(ck, 0.0) or 0.0)
+        new_cost += assignment_cost(int(round(w_i)), d, config, fuel_prices, cong)
+        new_time += (float(dur_matrix[i, ck]) * (1.0 + max(0.0, cong))
+                     if dur_matrix is not None else estimate_time_min(d, cong, speed))
+    changed_idx = [i for i in range(N) if int(new_labels[i]) != int(current_labels[i])]
+    return new_labels, {
+        "changed": len(changed_idx),
+        "moved_idx": changed_idx,
+        "saved_cost": round(old_cost - new_cost, 2),
+        "saved_minutes": round(old_time - new_time, 1),
+        "old_cost": round(old_cost, 2),
+        "new_cost": round(new_cost, 2),
+        "old_minutes": round(old_time, 1),
+        "new_minutes": round(new_time, 1),
+    }
+
+
 def weiszfeld_geometric_median(
     coords: np.ndarray,
     weights: np.ndarray,
@@ -304,7 +455,7 @@ def evaluate_network_layout(
     if config.distance_metric == "road":
         from .routing import road_matrices
         dist_matrix, dur_matrix, road_note = road_matrices(
-            coords, warehouse_coords, live_traffic=config.use_live_traffic)
+            coords, warehouse_coords, live_traffic=resolve_live_traffic(config))
         if notes is not None and road_note not in notes:
             notes.append(road_note)
     else:
@@ -463,7 +614,7 @@ def compute_baseline_layout(
     # metric == "road" so labels match the evaluated road distances).
     labels = nearest_labels_for_metric(
         coords, base_centers, config.distance_metric,
-        live_traffic=config.use_live_traffic, notes=notes)
+        live_traffic=resolve_live_traffic(config), notes=notes)
 
     base_corridor: Optional[Dict[int, float]] = None
     if apply_history:
@@ -544,7 +695,7 @@ def run_optimization(
         if config.distance_metric == "road":
             from .routing import road_matrices
             milp_dist, _, milp_note = road_matrices(
-                coords, candidate_pool, live_traffic=config.use_live_traffic)
+                coords, candidate_pool, live_traffic=resolve_live_traffic(config))
             milp_notes.append(milp_note)
         milp_feas, chosen_centers, labels, reason = solve_cflp_milp(
             coords=coords,
@@ -555,7 +706,7 @@ def run_optimization(
             R_max_km=config.R_max_km if config.radius_enabled else None,
             infra_cost=config.infra_cost_per_warehouse,
             metric=config.distance_metric,
-            col_multipliers=(1.0 + hist_corr) if hist_samples > 0 or manual_traffic > 0 else None,
+            col_multipliers=(1.0 + hist_corr + manual_traffic) if (hist_samples > 0 or manual_traffic > 0) else None,
             dist_matrix=milp_dist,
         )
 
@@ -572,7 +723,7 @@ def run_optimization(
             if config.distance_metric == "road" and len(opt_centers) > 1:
                 opt_labels = nearest_labels_for_metric(
                     coords, opt_centers, "road",
-                    live_traffic=config.use_live_traffic, notes=milp_notes,
+                    live_traffic=resolve_live_traffic(config), notes=milp_notes,
                 )
 
     else:
@@ -586,22 +737,63 @@ def run_optimization(
         if config.distance_metric == "road" and len(opt_centers) > 1:
             opt_labels = nearest_labels_for_metric(
                 coords, opt_centers, "road",
-                live_traffic=config.use_live_traffic, notes=milp_notes,
+                live_traffic=resolve_live_traffic(config), notes=milp_notes,
             )
 
-    # Resolve live corridor congestion at the final warehouse sites (K cached
-    # TomTom calls at most; each reading is recorded into rolling history).
+    # Resolve corridor congestion for the final warehouse sites.
+    # Default: one cached TomTom point-read per site (K calls at most).
+    # Phase C (#5-opt): with use_live_traffic_for_routing, corridors are
+    # sampled along the assigned road segments (node + midpoint + warehouse
+    # per corridor, bounded to the heaviest corridors) so live segment
+    # speeds feed matrices + assignment; readings persist to history.
     from .traffic import corridor_factor
+    effective_live = resolve_live_traffic(config)
     corridor: Dict[int, float] = {}
     live_corridors = 0
     corridor_samples = 0
-    for k in range(len(opt_centers)):
-        cf = corridor_factor(float(opt_centers[k, 0]), float(opt_centers[k, 1]),
-                             manual_floor=manual_traffic, hour=hour,
-                             allow_live=config.use_live_traffic)
-        corridor[k] = float(cf["factor"])
-        live_corridors += 1 if cf["live"] else 0
-        corridor_samples += int(cf["samples"])
+    corridor_live_detail: Dict[int, bool] = {}
+    if config.use_live_traffic_for_routing:
+        from .traffic import corridor_traffic_from_assignments
+        prov_wh = [{"warehouse_id": f"W{k+1}",
+                    "latitude": float(opt_centers[k, 0]),
+                    "longitude": float(opt_centers[k, 1])} for k in range(len(opt_centers))]
+        order = sorted(range(N), key=lambda i: -float(weights[i]))
+        cap_n = min(N, 60)
+        prov_asg = [{"neighborhood_id": str(neighborhoods[i].get("neighborhood_id", f"N{i}")),
+                     "warehouse_id": f"W{int(opt_labels[i])+1}"} for i in order[:cap_n]]
+        try:
+            agg = corridor_traffic_from_assignments(
+                [neighborhoods[i] for i in order[:cap_n]], prov_wh, prov_asg,
+                manual_floor=manual_traffic, hour=hour,
+                allow_live=effective_live, samples_per_corridor=3)
+            for k in range(len(opt_centers)):
+                info = agg.get(f"W{k+1}")
+                if info is not None:
+                    corridor[k] = float(info["factor"])
+                    corridor_live_detail[k] = bool(info["live"])
+                    live_corridors += 1 if info["live"] else 0
+                    corridor_samples += int(info["samples"])
+                else:
+                    cf = corridor_factor(float(opt_centers[k, 0]), float(opt_centers[k, 1]),
+                                         manual_floor=manual_traffic, hour=hour,
+                                         allow_live=effective_live)
+                    corridor[k] = float(cf["factor"])
+                    corridor_live_detail[k] = bool(cf["live"])
+                    live_corridors += 1 if cf["live"] else 0
+                    corridor_samples += int(cf["samples"])
+        except Exception:
+            corridor = {}
+            live_corridors = 0
+            corridor_samples = 0
+    if not corridor:
+        for k in range(len(opt_centers)):
+            cf = corridor_factor(float(opt_centers[k, 0]), float(opt_centers[k, 1]),
+                                 manual_floor=manual_traffic, hour=hour,
+                                 allow_live=effective_live)
+            corridor[k] = float(cf["factor"])
+            corridor_live_detail[k] = bool(cf["live"])
+            live_corridors += 1 if cf["live"] else 0
+            corridor_samples += int(cf["samples"])
 
     # Evaluate optimized layout (road distances + travel times when metric=road)
     routing_notes: List[str] = list(milp_notes)
@@ -616,6 +808,30 @@ def run_optimization(
         notes=routing_notes,
     )
 
+    # Phase C (#9): traffic-aware reroute refinement — re-evaluate assignment
+    # as corridor conditions change, minimizing alpha * cost + beta * time.
+    # Runs on fixed sites (no relocation); applied only when the toggle is on
+    # and more than one warehouse exists.
+    if config.traffic_aware_reroute and len(opt_centers) > 1:
+        try:
+            new_labels, reroute_summary = reroute_assignments(
+                coords, weights, opt_centers, opt_labels, config,
+                corridor=corridor, fuel_prices=fuel_prices,
+                alpha=1.0, beta_per_min=0.5)
+            if reroute_summary.get("changed", 0) > 0:
+                opt_labels = new_labels
+                warehouses, assignments, metrics = evaluate_network_layout(
+                    neighborhoods, opt_centers, opt_labels, config,
+                    fuel_prices=fuel_prices, fuel_live=fuel_live,
+                    corridor=corridor, notes=routing_notes)
+                routing_notes.append(
+                    f"Traffic-aware reroute (1.0*cost + 0.5/min): "
+                    f"{reroute_summary['changed']} nodes moved, "
+                    f"saved Rs.{reroute_summary['saved_cost']:.2f} and "
+                    f"{reroute_summary['saved_minutes']:.1f} min")
+        except Exception:
+            pass
+
     # Compute baseline comparison (Phase 4 cost engine, history-steered too)
     baseline_eval = compute_baseline_layout(neighborhoods, config,
                                             fuel_prices=fuel_prices, fuel_live=fuel_live,
@@ -624,14 +840,25 @@ def run_optimization(
     comparison = compute_comparison(baseline_eval, opt_eval)
     routing_note = "; ".join(routing_notes) if routing_notes else None
 
-    if config.use_live_traffic and live_corridors > 0:
-        traffic_note = (f"Live TomTom corridors ({live_corridors}/{len(opt_centers)} sites, "
+    if effective_live and live_corridors > 0:
+        src = ("road-corridor segments" if config.use_live_traffic_for_routing
+               else "warehouse sites")
+        traffic_note = (f"Live TomTom corridors ({live_corridors}/{len(opt_centers)} {src}, "
                         f"avg +{metrics.avg_congestion_pct * 100:.0f}%) + {corridor_samples} history samples")
+        if config.use_live_traffic_for_routing:
+            traffic_note = "Optimize on current traffic: " + traffic_note
     elif corridor_samples > 0 or hist_samples > 0:
         traffic_note = (f"History-based congestion ({corridor_samples} samples this run); "
                         "enable live traffic for real-time speeds")
+        if config.use_live_traffic_for_routing:
+            traffic_note = "Optimize on current traffic (" + traffic_note[0].lower() + traffic_note[1:] + ")"
     elif manual_traffic > 0:
         traffic_note = f"Manual congestion floor +{manual_traffic * 100:.0f}% (no history yet)"
+        if config.use_live_traffic_for_routing:
+            traffic_note = "Optimize on current traffic: " + traffic_note[0].lower() + traffic_note[1:]
+    elif config.use_live_traffic_for_routing:
+        traffic_note = ("Optimize on current traffic requested but no live/history data yet "
+                        "(free-flow; add a TOMTOM_KEY or record corridor history)")
     else:
         traffic_note = "Free-flow (no congestion data yet)"
 

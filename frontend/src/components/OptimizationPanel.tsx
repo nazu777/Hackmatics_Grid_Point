@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
-import { CheckCircle2, AlertTriangle, Zap, TrendingDown, DollarSign, ArrowRight } from 'lucide-react';
+import { CheckCircle2, AlertTriangle, Zap, TrendingDown, DollarSign, ArrowRight, Route } from 'lucide-react';
 import { Neighborhood, OptimizationConfig, OptimizationResult } from '../types';
-import { optimizeNetwork } from '../services/api';
+import { optimizeNetwork, rerouteOnTraffic, type RerouteResult } from '../services/api';
 import { FuelCard } from './FuelCard';
 import { TrafficCard } from './TrafficCard';
 import { WarehouseExpansion } from './WarehouseExpansion';
@@ -36,6 +36,8 @@ export const OptimizationPanel: React.FC<OptimizationPanelProps> = ({
     fuel_city: null,
     use_live_traffic: false,
     traffic_hour: null,
+    use_live_traffic_for_routing: false,
+    traffic_aware_reroute: false,
     vehicle_fleet: [],
     random_seed: 42,
     baseline_mode: 'centroid',
@@ -46,6 +48,9 @@ export const OptimizationPanel: React.FC<OptimizationPanelProps> = ({
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [rerouting, setRerouting] = useState(false);
+  const [reroute, setReroute] = useState<RerouteResult | null>(null);
+  const [rerouteError, setRerouteError] = useState<string | null>(null);
 
   const totalDemand = neighborhoods.reduce((sum, n) => sum + (Number(n.daily_orders) || 0), 0);
 
@@ -56,6 +61,8 @@ export const OptimizationPanel: React.FC<OptimizationPanelProps> = ({
     }
     setLoading(true);
     setError(null);
+    setReroute(null);
+    setRerouteError(null);
     try {
       const result = await optimizeNetwork(neighborhoods, config);
       onOptimizationComplete(result);
@@ -63,6 +70,27 @@ export const OptimizationPanel: React.FC<OptimizationPanelProps> = ({
       setError(err.message || 'Optimization failed');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleReroute = async () => {
+    if (!lastResult || lastResult.warehouses.length < 2) return;
+    setRerouting(true);
+    setRerouteError(null);
+    try {
+      const res = await rerouteOnTraffic({
+        neighborhoods,
+        warehouses: lastResult.warehouses,
+        assignments: lastResult.assignments,
+        config,
+        alpha: 1.0,
+        beta_per_min: 0.5
+      });
+      setReroute(res);
+    } catch (err: any) {
+      setRerouteError(err.message || 'Reroute failed');
+    } finally {
+      setRerouting(false);
     }
   };
 
@@ -332,6 +360,57 @@ export const OptimizationPanel: React.FC<OptimizationPanelProps> = ({
                 <span className="font-bold text-slate-800">Road distances: </span>
                 <span className="text-slate-600">{lastResult.routing_note} — assignments carry per-route travel times.</span>
               </div>
+            </div>
+          )}
+
+          {/* Phase C: dynamic reroute on current traffic (α·cost + β·time) */}
+          {lastResult.warehouses.length > 1 && (
+            <div className="p-4 bg-violet-50/60 border border-violet-200/70 rounded-2xl space-y-2">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
+                  <Route className="w-3.5 h-3.5 text-violet-600" />
+                  Dynamic reroute (α·cost + β·time)
+                </span>
+                <button
+                  onClick={handleReroute}
+                  disabled={rerouting}
+                  className="px-4 py-1.5 bg-[#14424E] hover:bg-[#0d333d] disabled:opacity-50 text-white rounded-full text-[11px] font-bold transition cursor-pointer"
+                >
+                  {rerouting ? 'Re-evaluating…' : 'Re-evaluate on current traffic'}
+                </button>
+              </div>
+              <p className="text-[11px] text-slate-500">
+                Sites stay fixed — only the neighborhood→warehouse mapping moves to the
+                time-and-money optimum under current corridor congestion.
+              </p>
+              {rerouteError && (
+                <p className="text-[11px] text-rose-600 flex items-center gap-1">
+                  <AlertTriangle className="w-3 h-3" /> {rerouteError}
+                </p>
+              )}
+              {reroute && (
+                <div className="text-xs text-slate-700 bg-white/80 border border-violet-100 rounded-xl px-3 py-2 space-y-1">
+                  {reroute.changed === 0 ? (
+                    <span>Current assignment is already optimal — no nodes moved.</span>
+                  ) : (
+                    <>
+                      <span className="font-bold">
+                        {reroute.changed} node{reroute.changed === 1 ? '' : 's'} moved
+                      </span>
+                      <span>
+                        {' '}— saved ₹{reroute.saved_cost.toLocaleString()} and {reroute.saved_minutes.toLocaleString()} min
+                        ({reroute.moved_neighborhood_ids.slice(0, 8).join(', ')}
+                        {reroute.moved_neighborhood_ids.length > 8
+                          ? ` +${reroute.moved_neighborhood_ids.length - 8} more`
+                          : ''}).
+                      </span>
+                    </>
+                  )}
+                  {reroute.traffic_note && (
+                    <span className="block text-[11px] text-slate-500">{reroute.traffic_note}</span>
+                  )}
+                </div>
+              )}
             </div>
           )}
 

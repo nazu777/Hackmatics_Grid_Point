@@ -293,6 +293,201 @@ def map_points(neighborhoods: List[Dict[str, Any]],
     return pts
 
 
+def proximity_color(t: float) -> str:
+    """Coverage heatmap color: green (near, t=0) → amber → red (far, t=1)."""
+    t = max(0.0, min(1.0, float(t)))
+    if t < 0.5:
+        # green (#22c55e) → amber (#f59e0b)
+        f = t / 0.5
+        r = round(0x22 + (0xF5 - 0x22) * f)
+        g = round(0xC5 + (0x9E - 0xC5) * f)
+        b = round(0x5E + (0x0B - 0x5E) * f)
+    else:
+        # amber (#f59e0b) → red (#ef4444)
+        f = (t - 0.5) / 0.5
+        r = round(0xF5 + (0xEF - 0xF5) * f)
+        g = round(0x9E + (0x44 - 0x9E) * f)
+        b = round(0x0B + (0x44 - 0x0B) * f)
+    return f"#{r:02x}{g:02x}{b:02x}"
+
+
+def warehouse_focus_summary(
+    warehouse_id: str,
+    neighborhoods: List[Dict[str, Any]],
+    warehouses: List[Dict[str, Any]],
+    assignments: List[Dict[str, Any]],
+) -> Dict[str, Any]:
+    """Phase B (#1): isolated zone payload for a clicked warehouse.
+
+    Returns center, derived load (assigned_orders = Σ daily_orders),
+    utilization, capacity/radius/infra, plus the full assigned-node list
+    with per-node daily_orders + distance. Unknown ids yield
+    {"found": False}.
+    """
+    wid = str(warehouse_id)
+    wh = next((w for w in warehouses if str(w.get("warehouse_id")) == wid), None)
+    if wh is None:
+        return {"found": False, "warehouse_id": wid}
+    nb_by_id = {str(n.get("neighborhood_id")): n for n in neighborhoods}
+    members: List[Dict[str, Any]] = []
+    total_orders = 0
+    dists: List[float] = []
+    for a in assignments:
+        if str(a.get("warehouse_id")) != wid:
+            continue
+        nid = str(a.get("neighborhood_id"))
+        nb = nb_by_id.get(nid, {})
+        orders = int(nb.get("daily_orders", 0) or 0)
+        d = float(a.get("distance_km", 0.0) or 0.0)
+        total_orders += orders
+        dists.append(d)
+        members.append({
+            "neighborhood_id": nid,
+            "name": nb.get("name") or nid,
+            "latitude": nb.get("latitude"),
+            "longitude": nb.get("longitude"),
+            "daily_orders": orders,
+            "zone": normalize_zone(nb.get("zone")),
+            "distance_km": round(d, 2),
+            "within_radius": bool(a.get("within_radius", True)),
+            "is_feasible": bool(a.get("is_feasible", True)),
+        })
+    members.sort(key=lambda m: m["distance_km"])
+    cap = wh.get("capacity")
+    util = None
+    try:
+        if cap is not None and float(cap) > 0:
+            util = round(total_orders / float(cap) * 100.0, 1)
+    except (TypeError, ValueError):
+        util = None
+    return {
+        "found": True,
+        "warehouse_id": wid,
+        "center": {"lat": float(wh.get("latitude")), "lon": float(wh.get("longitude"))},
+        "assigned_orders": total_orders,
+        "neighborhood_count": len(members),
+        "utilization_pct": util if util is not None else wh.get("utilization_pct"),
+        "capacity": cap,
+        "radius_km": wh.get("radius_km"),
+        "infra_cost": wh.get("infra_cost"),
+        "color": warehouse_color(wid),
+        "avg_distance_km": round(sum(dists) / len(dists), 2) if dists else 0.0,
+        "max_distance_km": round(max(dists), 2) if dists else 0.0,
+        "members": members,
+    }
+
+
+def coverage_heatmap(
+    neighborhoods: List[Dict[str, Any]],
+    assignments: List[Dict[str, Any]],
+    grid_n: int = 24,
+    top_k: int = 0,
+) -> Dict[str, Any]:
+    """Phase B (#2): green (near warehouse) → red (far) proximity gradient.
+
+    Recomputed from ACTIVE assignment distances: each node contributes its
+    assigned distance_km; grid cells interpolate nearby nodes (inverse-distance
+    weighting) and carry a normalized t + hex color. Blended UNDER
+    bubbles/routes on the client. When top_k > 0 only the top_k farthest
+    nodes are also returned as a hotspot list.
+    """
+    nodes = [n for n in neighborhoods
+             if n.get("latitude") is not None and n.get("longitude") is not None]
+    if not nodes:
+        return {"cells": [], "min_km": 0.0, "max_km": 0.0, "hotspots": []}
+    dist_by_nb = {str(a.get("neighborhood_id")): float(a.get("distance_km", 0.0) or 0.0)
+                  for a in (assignments or [])}
+    dists = [dist_by_nb.get(str(n.get("neighborhood_id")), 0.0) for n in nodes]
+    lo, hi = min(dists), max(dists)
+    span = max(1e-9, hi - lo)
+    lats = [float(n["latitude"]) for n in nodes]
+    lons = [float(n["longitude"]) for n in nodes]
+    min_lat, max_lat = min(lats), max(lats)
+    min_lon, max_lon = min(lons), max(lons)
+    if abs(max_lat - min_lat) < 1e-6:
+        min_lat -= 0.02
+        max_lat += 0.02
+    if abs(max_lon - min_lon) < 1e-6:
+        min_lon -= 0.02
+        max_lon += 0.02
+    n = max(4, min(48, int(grid_n)))
+    cells: List[Dict[str, Any]] = []
+    for gi in range(n):
+        for gj in range(n):
+            clat = min_lat + (max_lat - min_lat) * (gi + 0.5) / n
+            clon = min_lon + (max_lon - min_lon) * (gj + 0.5) / n
+            num = 0.0
+            den = 0.0
+            for idx, nd in enumerate(nodes):
+                dlat = (float(nd["latitude"]) - clat) * 111.0
+                dlon = (float(nd["longitude"]) - clon) * 111.0 * math.cos(math.radians(clat))
+                dd = math.hypot(dlat, dlon)
+                w = 1.0 / (1.0 + dd)
+                num += dists[idx] * w
+                den += w
+            mean_d = num / den if den > 0 else 0.0
+            t = (mean_d - lo) / span
+            cells.append({
+                "lat": round(clat, 5),
+                "lon": round(clon, 5),
+                "distance_km": round(mean_d, 2),
+                "t": round(max(0.0, min(1.0, t)), 3),
+                "color": proximity_color(t),
+            })
+    hotspots: List[Dict[str, Any]] = []
+    if top_k and top_k > 0:
+        ranked = sorted(nodes,
+                        key=lambda x: dist_by_nb.get(str(x.get("neighborhood_id")), 0.0),
+                        reverse=True)[:top_k]
+        for nd in ranked:
+            nid = str(nd.get("neighborhood_id"))
+            d = dist_by_nb.get(nid, 0.0)
+            t = (d - lo) / span
+            hotspots.append({
+                "neighborhood_id": nid,
+                "distance_km": round(d, 2),
+                "t": round(max(0.0, min(1.0, t)), 3),
+                "color": proximity_color(t),
+            })
+    return {"cells": cells, "min_km": round(lo, 2), "max_km": round(hi, 2),
+            "grid_n": n, "hotspots": hotspots}
+
+
+def corridor_traffic_summary(assignments: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Phase B (#5 display): per-corridor congestion buckets for the traffic overlay.
+
+    Reads assignment.congestion_pct + travel_time_min outputs only (no engine
+    changes). Buckets: fluid (<0.15) / busy (<0.4) / jammed (>=0.4).
+    """
+    buckets = {"fluid": 0, "busy": 0, "jammed": 0, "unknown": 0}
+    by_warehouse: Dict[str, Dict[str, Any]] = {}
+    for a in (assignments or []):
+        c = a.get("congestion_pct")
+        wid = str(a.get("warehouse_id"))
+        slot = by_warehouse.setdefault(wid, {"fluid": 0, "busy": 0, "jammed": 0, "unknown": 0})
+        if c is None:
+            buckets["unknown"] += 1
+            slot["unknown"] += 1
+            continue
+        try:
+            v = float(c)
+        except (TypeError, ValueError):
+            buckets["unknown"] += 1
+            slot["unknown"] += 1
+            continue
+        label = "fluid" if v < 0.15 else ("busy" if v < 0.4 else "jammed")
+        buckets[label] += 1
+        slot[label] += 1
+    congs = [float(a["congestion_pct"]) for a in (assignments or [])
+             if a.get("congestion_pct") is not None]
+    return {
+        "buckets": buckets,
+        "by_warehouse": by_warehouse,
+        "avg_congestion_pct": round(sum(congs) / len(congs), 4) if congs else 0.0,
+        "total": len(assignments or []),
+    }
+
+
 def to_geojson(neighborhoods: List[Dict[str, Any]],
                warehouses: List[Dict[str, Any]],
                assignments: List[Dict[str, Any]]) -> Dict[str, Any]:

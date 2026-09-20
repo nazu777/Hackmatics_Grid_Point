@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import {
   TrendingUp,
   Truck,
@@ -10,7 +10,9 @@ import {
   CheckCircle2,
   Sparkles,
   Layers,
-  ArrowRight
+  ArrowRight,
+  Activity,
+  Satellite
 } from 'lucide-react';
 import {
   Neighborhood,
@@ -18,14 +20,19 @@ import {
   OptimizationResult,
   TradeoffResult,
   FleetETAResult,
-  ConstraintDiagnostics
+  ConstraintDiagnostics,
+  LiveSnapshot,
+  SpilloverEvent,
+  ActiveSpill
 } from '../types';
 import {
   getTradeoffCurve,
   applyDemandShift,
   getFleetETA,
   getConstraintDiagnostics,
-  optimizeNetwork
+  optimizeNetwork,
+  runSimulationTick,
+  fetchLiveSnapshot
 } from '../services/api';
 
 interface ScenariosPanelProps {
@@ -68,6 +75,93 @@ export const ScenariosPanel: React.FC<ScenariosPanelProps> = ({
   // Scenario 4: Diagnostics State
   const [diagnostics, setDiagnostics] = useState<ConstraintDiagnostics | null>(null);
 
+  // Phase F: Realtime automation state (simulation_mode + poll tick + spillover log)
+  const [simMode, setSimMode] = useState<'off' | 'realtime'>(config.simulation_mode || 'off');
+  const [autoPoll, setAutoPoll] = useState<boolean>(false);
+  const [tick, setTick] = useState<number>(0);
+  const [ticking, setTicking] = useState<boolean>(false);
+  const [spills, setSpills] = useState<Record<string, ActiveSpill>>({});
+  const [eventLog, setEventLog] = useState<SpilloverEvent[]>([]);
+  const [live, setLive] = useState<LiveSnapshot | null>(null);
+  const [liveLoading, setLiveLoading] = useState<boolean>(false);
+  const tickRef = useRef(0);
+
+  const refreshLive = useCallback(async () => {
+    if (!lastResult || neighborhoods.length === 0) return;
+    setLiveLoading(true);
+    try {
+      const snap = await fetchLiveSnapshot(neighborhoods, lastResult.warehouses, config);
+      setLive(snap);
+    } finally {
+      setLiveLoading(false);
+    }
+  }, [neighborhoods, lastResult, config]);
+
+  const runTick = useCallback(async (overrides?: Record<string, number>) => {
+    if (!lastResult || ticking) return;
+    setTicking(true);
+    try {
+      const next = tickRef.current + 1;
+      const res = await runSimulationTick({
+        neighborhoods,
+        warehouses: lastResult.warehouses,
+        assignments: lastResult.assignments,
+        config: { ...config, simulation_mode: simMode },
+        tick: next,
+        active_spills: spills,
+        congestion_overrides: overrides ?? null,
+        scale_demand: true,
+        demand_amplitude: 1.0,
+        simulate_surge: !overrides
+      });
+      tickRef.current = next;
+      setTick(next);
+      setSpills(res.active_spills || {});
+      if (res.events && res.events.length > 0) {
+        setEventLog((prev) => [...res.events, ...prev].slice(0, 50));
+      }
+      // Apply the tick to the live network: scaled demand + spilled assignments.
+      onUpdateNeighborhoods(res.neighborhoods);
+      if (res.assignments && res.assignments.length > 0) {
+        onOptimizationComplete({
+          ...lastResult,
+          assignments: res.assignments,
+          metrics: res.metrics || lastResult.metrics,
+          traffic_note: res.traffic_note || lastResult.traffic_note,
+          fuel_note: res.fuel_note || lastResult.fuel_note
+        });
+      }
+      await refreshLive();
+    } catch (e) {
+      console.error('Simulation tick failed', e);
+    } finally {
+      setTicking(false);
+    }
+  }, [lastResult, ticking, neighborhoods, config, simMode, spills, onUpdateNeighborhoods, onOptimizationComplete, refreshLive]);
+
+  const handleSimMode = (m: 'off' | 'realtime') => {
+    setSimMode(m);
+    onUpdateConfig({ ...config, simulation_mode: m });
+    if (m === 'off') setAutoPoll(false);
+  };
+
+  // Auto poll tick every 15s while realtime + auto is on.
+  useEffect(() => {
+    if (simMode !== 'realtime' || !autoPoll || !lastResult) return;
+    const id = window.setInterval(() => { runTick(); }, 15000);
+    return () => window.clearInterval(id);
+  }, [simMode, autoPoll, lastResult, runTick]);
+
+  // Keep the live snapshot fresh whenever the result changes.
+  useEffect(() => {
+    refreshLive();
+  }, [lastResult, refreshLive]);
+
+  // Effective traffic for ETA: live feed wins in realtime mode, manual slider otherwise.
+  const effectiveTrafficPct = simMode === 'realtime' && live
+    ? Math.round((live.traffic.avg_congestion_pct || 0) * 100)
+    : trafficPct;
+
   // Compute Trade-off Curve
   const runTradeoffAnalysis = async (costVal: number, kVal: number) => {
     setIsTradeoffLoading(true);
@@ -89,21 +183,23 @@ export const ScenariosPanel: React.FC<ScenariosPanelProps> = ({
     runTradeoffAnalysis(infraCost, maxKEval);
   }, [infraCost, maxKEval, neighborhoods]);
 
-  // Compute Fleet ETA whenever assignments, vehicle, or traffic changes
+  // Compute Fleet ETA whenever assignments, vehicle, or traffic changes.
+  // In realtime mode the ETA reads the live feed tick (no sliders in the path).
   useEffect(() => {
     if (!lastResult || !lastResult.assignments) return;
 
+    const liveTraffic = simMode === 'realtime' && live ? live.traffic.avg_congestion_pct : trafficPct / 100.0;
     const currentConfig: OptimizationConfig = {
       ...config,
-      traffic_factor: trafficPct / 100.0,
+      traffic_factor: liveTraffic,
       fuel_cost_per_km: fuelCost,
-      use_live_fuel: liveFuel,
+      use_live_fuel: simMode === 'realtime' ? true : liveFuel,
       fuel_state: 'Karnataka',
       fuel_city: fuelCity || null
     };
 
     getFleetETA(lastResult.assignments, currentConfig, selectedVehicle).then(setFleetETA);
-  }, [lastResult, trafficPct, selectedVehicle, fuelCost, liveFuel, fuelCity]);
+  }, [lastResult, trafficPct, selectedVehicle, fuelCost, liveFuel, fuelCity, simMode, live]);
 
   // Compute Diagnostics whenever result changes
   useEffect(() => {
@@ -159,7 +255,117 @@ export const ScenariosPanel: React.FC<ScenariosPanelProps> = ({
         <p className="text-ink-faint text-[13px] mt-1.5 leading-relaxed">
           Trade infrastructure cost against route mileage, simulate demand shifts,
           estimate traffic-impacted ETAs, and audit constraint violations.
+          Flip realtime ON and the lab drives itself from live fuel, traffic and demand feeds.
         </p>
+      </div>
+
+      {/* Phase F: Realtime automation — live feeds + spillover, sliders demoted */}
+      <div className="card p-4">
+        <div className="flex items-center justify-between pb-4 border-b border-[#E4E1D2]">
+          <div className="flex items-center space-x-3">
+            <div className={`w-10 h-10 rounded-xl flex items-center justify-center font-bold ${simMode === 'realtime' ? 'bg-cream-deep text-ink' : 'bg-cream-deep text-ink-faint'}`}>
+              <Satellite className="w-5 h-5" />
+            </div>
+            <div>
+              <h3 className="text-base font-bold text-ink">Realtime Automation</h3>
+              <p className="text-xs text-ink-faint">Live fuel + traffic + demand tick · congestion spillover with event log</p>
+            </div>
+          </div>
+          <div className="flex items-center bg-cream-deep border border-[#E4E1D2] rounded-full p-1 text-[12px]">
+            {(['off', 'realtime'] as const).map((m) => (
+              <button
+                key={m}
+                onClick={() => handleSimMode(m)}
+                className={`px-3 py-1.5 rounded-full font-bold capitalize transition cursor-pointer ${simMode === m ? 'bg-[#14424E] text-white' : 'text-ink-faint hover:text-ink'}`}
+              >
+                {m === 'off' ? 'Manual' : 'Realtime'}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="my-4 bg-cream-deep p-4 rounded-2xl border border-[#E4E1D2] space-y-3">
+          <div className="flex items-center justify-between text-[12px]">
+            <span className="font-semibold text-ink-soft flex items-center gap-1.5">
+              <Activity className="w-3.5 h-3.5" />
+              Tick {tick} · {Object.keys(spills).length > 0 ? `${Object.keys(spills).length} warehouse(s) spilling` : 'no active spillover'}
+            </span>
+            <label className="flex items-center gap-1.5 font-semibold text-ink-soft cursor-pointer">
+              <input type="checkbox" checked={autoPoll} onChange={(e) => setAutoPoll(e.target.checked)} disabled={simMode !== 'realtime'} className="rounded" />
+              Auto every 15s
+            </label>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <button
+              onClick={() => runTick()}
+              disabled={ticking || !lastResult}
+              className="px-3 py-1.5 bg-[#14424E] hover:bg-[#0d333d] text-white rounded-full text-xs font-bold transition cursor-pointer disabled:opacity-50 flex items-center gap-1.5"
+            >
+              <RefreshCw className={`w-3 h-3 ${ticking ? 'animate-spin' : ''}`} />
+              <span>{ticking ? 'Ticking…' : 'Run tick now'}</span>
+            </button>
+            <button
+              onClick={() => lastResult && runTick({ [lastResult.warehouses[0]?.warehouse_id || 'W1']: 0.9 })}
+              disabled={ticking || !lastResult || !lastResult.warehouses.length}
+              title="Force 90% congestion on the first warehouse to demo spillover"
+              className="px-3 py-1.5 bg-white border border-[#E4E1D2] hover:bg-cream-deep text-ink rounded-full text-xs font-bold transition cursor-pointer disabled:opacity-50"
+            >
+              Simulate W1 surge
+            </button>
+            <button
+              onClick={refreshLive}
+              disabled={liveLoading || !lastResult}
+              className="px-3 py-1.5 bg-white border border-[#E4E1D2] hover:bg-cream-deep text-ink rounded-full text-xs font-bold transition cursor-pointer disabled:opacity-50"
+            >
+              {liveLoading ? 'Reading feeds…' : 'Refresh live feeds'}
+            </button>
+          </div>
+          {live && (
+            <div className="grid grid-cols-1 gap-2 text-[11px]">
+              <div className="bg-white rounded-xl border border-[#E4E1D2] px-3 py-2">
+                <span className="font-bold text-ink">Fuel:</span>{' '}
+                <span className="text-ink-soft">{live.fuel.note}</span>{' '}
+                {live.fuel.live && <span className="font-extrabold text-emerald-700 bg-emerald-100 px-1.5 py-0.5 rounded-full text-[10px]">LIVE</span>}
+              </div>
+              <div className="bg-white rounded-xl border border-[#E4E1D2] px-3 py-2">
+                <span className="font-bold text-ink">Traffic:</span>{' '}
+                <span className="text-ink-soft">{live.traffic.note} · avg +{(live.traffic.avg_congestion_pct * 100).toFixed(0)}%</span>{' '}
+                {Object.values(live.traffic.live || {}).some(Boolean) && <span className="font-extrabold text-emerald-700 bg-emerald-100 px-1.5 py-0.5 rounded-full text-[10px]">LIVE</span>}
+                <span className="block mt-1 text-ink-faint">
+                  {Object.entries(live.traffic.by_warehouse || {}).map(([w, f]) => `${w} +${(Number(f) * 100).toFixed(0)}%`).join(' · ') || 'No warehouses yet'}
+                </span>
+              </div>
+              <div className="bg-white rounded-xl border border-[#E4E1D2] px-3 py-2">
+                <span className="font-bold text-ink">Demand:</span>{' '}
+                <span className="text-ink-soft">{live.demand.total_orders.toLocaleString()} orders across {live.demand.nodes} nodes</span>
+              </div>
+            </div>
+          )}
+          {!lastResult && (
+            <p className="text-[11px] text-ink-faint">Run Optimize first — ticks need warehouses + assignments.</p>
+          )}
+        </div>
+
+        <div>
+          <span className="text-xs font-semibold text-ink-soft block mb-2">Spillover event log {eventLog.length > 0 && `(${eventLog.length})`}</span>
+          {eventLog.length === 0 ? (
+            <p className="text-[11px] text-ink-faint bg-cream-deep rounded-xl px-3 py-2 border border-[#E4E1D2]">
+              No spillover yet. Congestion past {(config.simulation_congestion_threshold ?? 0.5) * 100}% moves nodes to the next-best warehouse until it clears — try “Simulate W1 surge”, then tick again to watch them come home.
+            </p>
+          ) : (
+            <div className="max-h-36 overflow-y-auto space-y-1.5 pr-1">
+              {eventLog.map((e, i) => (
+                <div key={`${e.tick}-${e.warehouse_id}-${e.kind}-${i}`} className={`text-[11px] rounded-xl px-3 py-2 border ${e.kind === 'spill_start' ? 'bg-rose-50 border-rose-200 text-rose-900' : 'bg-emerald-50 border-emerald-200 text-emerald-900'}`}>
+                  <span className="font-bold">Tick {e.tick} · {e.warehouse_id} · {e.kind === 'spill_start' ? 'spill start' : 'recovered'}</span>
+                  <span className="block font-medium">{e.reason}</span>
+                  {e.moved_neighborhood_ids.length > 0 && (
+                    <span className="block text-[10px] opacity-80">Nodes: {e.moved_neighborhood_ids.slice(0, 8).join(', ')}{e.moved_neighborhood_ids.length > 8 ? ` +${e.moved_neighborhood_ids.length - 8} more` : ''}</span>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Stack of Scenarios (single column — sidebar width) */}
@@ -336,8 +542,15 @@ export const ScenariosPanel: React.FC<ScenariosPanelProps> = ({
               </div>
             </div>
 
-            {/* Slider */}
-            <div className="my-5 bg-cream-deep p-4 rounded-2xl border border-[#E4E1D2]">
+            {/* Manual multiplier — offline override (realtime tick drives the default path) */}
+            <details className="my-5 bg-cream-deep rounded-2xl border border-[#E4E1D2]" open={simMode === 'off'}>
+              <summary className="px-4 py-3 text-xs font-bold text-ink-soft cursor-pointer list-none flex items-center justify-between">
+                <span>Manual demand multiplier (offline override)</span>
+                <span className="text-[10px] font-extrabold text-ink-faint bg-white border border-[#E4E1D2] px-2 py-0.5 rounded-full">
+                  {simMode === 'realtime' ? 'BYPASSED · TICK DRIVES DEMAND' : 'ACTIVE'}
+                </span>
+              </summary>
+              <div className="px-4 pb-4">
               <div className="flex items-center justify-between mb-2">
                 <span className="text-xs font-semibold text-ink-soft">Demand Multiplier (Δ%):</span>
                 <span className={`text-sm font-extrabold ${demandShiftPct >= 0 ? 'text-ink' : 'text-rose-600'}`}>
@@ -370,7 +583,8 @@ export const ScenariosPanel: React.FC<ScenariosPanelProps> = ({
                   </button>
                 ))}
               </div>
-            </div>
+              </div>
+            </details>
 
             {/* Demand Impact Overview */}
             <div className="grid grid-cols-1 gap-3 mb-4">
@@ -416,8 +630,19 @@ export const ScenariosPanel: React.FC<ScenariosPanelProps> = ({
                   <Truck className="w-5 h-5" />
                 </div>
                 <div>
-                  <h3 className="text-base font-bold text-ink">Traffic Congestion &amp; Fleet ETA</h3>
-                  <p className="text-xs text-ink-faint">Calculate delivery duration, vehicle trips, and fuel burn under congestion</p>
+                  <h3 className="text-base font-bold text-ink">
+                    Traffic Congestion &amp; Fleet ETA{' '}
+                    {simMode === 'realtime' ? (
+                      <span className="text-[10px] font-extrabold text-emerald-700 bg-emerald-100 px-1.5 py-0.5 rounded-full">LIVE AUTO</span>
+                    ) : (
+                      <span className="text-[10px] font-extrabold text-ink-faint bg-cream-deep border border-[#E4E1D2] px-1.5 py-0.5 rounded-full">MANUAL</span>
+                    )}
+                  </h3>
+                  <p className="text-xs text-ink-faint">
+                    {simMode === 'realtime'
+                      ? `Live tick drives ETA (corridors +${effectiveTrafficPct}%) — sliders below are offline overrides`
+                      : 'Calculate delivery duration, vehicle trips, and fuel burn under congestion'}
+                  </p>
                 </div>
               </div>
             </div>
@@ -444,8 +669,15 @@ export const ScenariosPanel: React.FC<ScenariosPanelProps> = ({
               ))}
             </div>
 
-            {/* Traffic Slider */}
-            <div className="bg-cream-deep p-4 rounded-2xl border border-[#E4E1D2] mb-4 space-y-3">
+            {/* Manual traffic + fuel sliders — offline overrides (live tick drives the default path) */}
+            <details className="bg-cream-deep rounded-2xl border border-[#E4E1D2] mb-4" open={simMode === 'off'}>
+              <summary className="px-4 py-3 text-xs font-bold text-ink-soft cursor-pointer list-none flex items-center justify-between">
+                <span>Manual congestion &amp; fuel sliders (offline overrides)</span>
+                <span className="text-[10px] font-extrabold text-ink-faint bg-white border border-[#E4E1D2] px-2 py-0.5 rounded-full">
+                  {simMode === 'realtime' ? 'BYPASSED · TICK DRIVES ETA' : 'ACTIVE'}
+                </span>
+              </summary>
+              <div className="px-4 pb-4 space-y-3">
               <div>
                 <div className="flex items-center justify-between mb-1">
                   <span className="text-xs font-semibold text-ink-soft flex items-center space-x-1">
@@ -509,7 +741,8 @@ export const ScenariosPanel: React.FC<ScenariosPanelProps> = ({
                   />
                 )}
               </div>
-            </div>
+              </div>
+            </details>
 
             {/* ETA & Fuel Metrics */}
             {fleetETA && (
@@ -544,13 +777,13 @@ export const ScenariosPanel: React.FC<ScenariosPanelProps> = ({
 
           <div className="mt-5 pt-4 border-t border-[#E4E1D2] flex items-center justify-between">
             <span className="text-xs text-ink-faint">
-              Save traffic factor <strong>{(trafficPct / 100).toFixed(2)}</strong> to main config:
+              Save traffic factor <strong>{(effectiveTrafficPct / 100).toFixed(2)}</strong>{simMode === 'realtime' ? ' (live tick)' : ''} to main config:
             </span>
             <button
               onClick={() => {
                 onUpdateConfig({
                   ...config,
-                  traffic_factor: trafficPct / 100.0,
+                  traffic_factor: effectiveTrafficPct / 100.0,
                   fuel_cost_per_km: fuelCost,
                   use_live_fuel: liveFuel,
                   fuel_state: 'Karnataka',

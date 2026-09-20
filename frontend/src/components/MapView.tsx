@@ -3,7 +3,7 @@ import mapboxgl from 'mapbox-gl';
 import 'mapbox-gl/dist/mapbox-gl.css';
 import { Neighborhood, Warehouse, Assignment, BasemapStyle, ColorByMode, ZoneColorMap } from '../types';
 import { BASEMAPS, getMapboxToken, colorForZone, zoneCounts } from './mapThemes';
-import type { IsoFeature } from '../services/api';
+import type { CoverageCell, IsoFeature } from '../services/api';
 
 const PALETTE = ['#0ea5e9', '#3b82f6', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4', '#f97316', '#84cc16', '#ec4899', '#6366f1'];
 
@@ -90,6 +90,16 @@ interface MapViewProps {
   isochrones?: Record<string, IsoFeature[]>;
   /** Click a route line to trace its road path (roads mode, large datasets). */
   onRouteClick?: (neighborhoodId: string) => void;
+  /** Phase B (#1): click a warehouse pin to isolate its zone. */
+  onWarehouseClick?: (warehouseId: string) => void;
+  /** Phase B (#1): isolated warehouse zone — other zones dim/hide. */
+  focusedWarehouseId?: string | null;
+  /** Phase B (#2): proximity heatmap cells (green near → red far). */
+  coverageCells?: CoverageCell[];
+  /** Phase B (#2): heatmap layer visibility. */
+  showHeatmap?: boolean;
+  /** Heatmap range labels (km) for the legend. */
+  coverageRange?: { minKm: number; maxKm: number } | null;
   /** 'light' | 'dark' website theme — adjusts pin chrome. */
   theme?: 'light' | 'dark';
   /** Hide the built-in header/legend chrome (shell provides its own). */
@@ -107,6 +117,7 @@ const COLOR_MODES: { id: ColorByMode; label: string }[] = [
 const ROUTES_OK = 'gp-routes-ok';
 const ROUTES_BAD = 'gp-routes-bad';
 const RADIUS_SRC = 'gp-radius';
+const HEATMAP_SRC = 'gp-coverage-heat';
 const BUILDINGS_LAYER = 'gp-3d-buildings';
 
 /** Default camera: India-wide view for empty accounts (no city assumed). */
@@ -178,6 +189,11 @@ export const MapView: React.FC<MapViewProps> = ({
   roadGeometries = {},
   isochrones = {},
   onRouteClick,
+  onWarehouseClick,
+  focusedWarehouseId = null,
+  coverageCells = [],
+  showHeatmap = false,
+  coverageRange = null,
   theme = 'light',
   minimal = false,
   highlightId = null
@@ -187,6 +203,8 @@ export const MapView: React.FC<MapViewProps> = ({
   const markersRef = useRef<mapboxgl.Marker[]>([]);
   const routeClickRef = useRef<((id: string) => void) | undefined>(undefined);
   routeClickRef.current = onRouteClick;
+  const warehouseClickRef = useRef<((id: string) => void) | undefined>(undefined);
+  warehouseClickRef.current = onWarehouseClick;
   const styleRef = useRef<string>('');
   const threeDRef = useRef(false);
   const threeDBtnRef = useRef<HTMLButtonElement | null>(null);
@@ -333,6 +351,7 @@ export const MapView: React.FC<MapViewProps> = ({
     markersRef.current = [];
     removeLayerAndSource(map, ROUTES_OK, ROUTES_OK);
     removeLayerAndSource(map, ROUTES_BAD, ROUTES_BAD);
+    removeLayerAndSource(map, `${HEATMAP_SRC}-circles`, HEATMAP_SRC);
     removeLayerAndSource(map, `${RADIUS_SRC}-fill`, RADIUS_SRC);
     // (fill + line share one source; remove both layers first)
     try {
@@ -370,12 +389,43 @@ export const MapView: React.FC<MapViewProps> = ({
     const routePaint = (a: { congestion_pct?: number | null; warehouse_id: string }) =>
       colorRoutesByTraffic && a.congestion_pct != null ? congestionColor(a.congestion_pct) : lineColor(a.warehouse_id);
 
+    // Phase B (#1): focus membership — non-selected zones dim for clarity.
+    const focusMembers = focusedWarehouseId
+      ? new Set(assignments.filter((a) => a.warehouse_id === focusedWarehouseId).map((a) => a.neighborhood_id))
+      : null;
+    const inFocus = (nid: string) => !focusMembers || focusMembers.has(nid);
+
+    // Phase B (#2 + #5 display): heatmap UNDER bubbles/routes — insert first
+    // so route lines and demand bubbles paint over it.
+    if (showHeatmap && coverageCells.length > 0) {
+      const feats = coverageCells.map((c) => ({
+        type: 'Feature' as const,
+        properties: { color: c.color },
+        geometry: { type: 'Point' as const, coordinates: [c.lon, c.lat] }
+      }));
+      try {
+        map.addSource(HEATMAP_SRC, { type: 'geojson', data: { type: 'FeatureCollection', features: feats } });
+        map.addLayer({
+          id: `${HEATMAP_SRC}-circles`,
+          type: 'circle',
+          source: HEATMAP_SRC,
+          paint: {
+            'circle-color': ['get', 'color'],
+            'circle-radius': ['interpolate', ['linear'], ['zoom'], 4, 6, 10, 14, 14, 26],
+            'circle-opacity': 0.32,
+            'circle-blur': 0.65
+          }
+        });
+      } catch { /* style race — next render retries */ }
+    }
+
     if (showDemand) {
       neighborhoods.forEach((n) => {
         const a = asgByNb.get(n.neighborhood_id);
         const { color, tag } = resolveColor(n);
         const frac = Math.sqrt((Number(n.daily_orders) || 0) / Math.max(1, maxOrders));
         const isHi = highlightId === n.neighborhood_id;
+        const dimmed = !inFocus(n.neighborhood_id);
         const r = (4 + frac * 18) * (isHi ? 1.35 : 1);
         extend(n.latitude, n.longitude);
         const el = document.createElement('div');
@@ -386,6 +436,8 @@ export const MapView: React.FC<MapViewProps> = ({
         el.style.border = `2px solid ${isHi ? '#F0A0EA' : color}`;
         el.style.boxShadow = isHi ? '0 0 0 3px rgba(240,160,234,.5)' : 'none';
         el.style.cursor = 'pointer';
+        el.style.opacity = dimmed ? '0.22' : '1';
+        el.style.display = focusMembers && dimmed && neighborhoods.length > 40 ? 'none' : 'block';
         const popup = new mapboxgl.Popup({ offset: 12, closeButton: false }).setHTML(
           `<b>${n.neighborhood_id}</b> ${n.name || ''}<br/>${n.daily_orders} orders • ${n.zone || 'Unzoned'}<br/>${Number(n.latitude).toFixed(4)}, ${Number(n.longitude).toFixed(4)}<br/>Color: ${tag}${a ? `<br/>→ ${a.warehouse_id} (${a.distance_km} km)` : ''}`
         );
@@ -400,21 +452,30 @@ export const MapView: React.FC<MapViewProps> = ({
     if (showWarehouses) {
       warehouses.forEach((w) => {
         extend(w.latitude, w.longitude);
+        const isFocused = focusedWarehouseId === w.warehouse_id;
+        const dimmed = !!focusedWarehouseId && !isFocused;
         const color = whColor(w.warehouse_id);
         const el = document.createElement('div');
         el.style.background = color;
         el.style.color = '#fff';
         el.style.fontWeight = '800';
-        el.style.fontSize = '11px';
+        el.style.fontSize = isFocused ? '13px' : '11px';
         el.style.borderRadius = '10px';
-        el.style.padding = '3px 9px';
-        el.style.border = `2px solid ${pinBorder}`;
-        el.style.boxShadow = '0 2px 6px rgba(0,0,0,.3)';
+        el.style.padding = isFocused ? '5px 12px' : '3px 9px';
+        el.style.border = isFocused ? `3px solid #111827` : `2px solid ${pinBorder}`;
+        el.style.boxShadow = isFocused ? '0 0 0 4px rgba(17,24,39,.25), 0 2px 8px rgba(0,0,0,.35)' : '0 2px 6px rgba(0,0,0,.3)';
         el.style.cursor = 'pointer';
         el.style.whiteSpace = 'nowrap';
+        el.style.opacity = dimmed ? '0.35' : '1';
+        el.title = `Click to ${isFocused ? 'clear focus on' : 'focus'} ${w.warehouse_id}`;
         el.textContent = w.warehouse_id;
+        el.addEventListener('click', (ev) => {
+          ev.stopPropagation();
+          if (warehouseClickRef.current) warehouseClickRef.current(w.warehouse_id);
+        });
+        const memberCount = focusMembers && isFocused ? focusMembers.size : undefined;
         const popup = new mapboxgl.Popup({ offset: 14, closeButton: false }).setHTML(
-          `<b>${w.warehouse_id}</b><br/>${Number(w.latitude).toFixed(4)}, ${Number(w.longitude).toFixed(4)}<br/>${w.assigned_orders || 0} orders`
+          `<b>${w.warehouse_id}</b> — click to ${isFocused ? 'clear focus' : 'isolate zone'}<br/>${Number(w.latitude).toFixed(4)}, ${Number(w.longitude).toFixed(4)}<br/>${w.assigned_orders || 0} orders${memberCount != null ? ` • ${memberCount} nodes` : ''}`
         );
         const marker = new mapboxgl.Marker({ element: el }).setLngLat([w.longitude, w.latitude]).setPopup(popup).addTo(map);
         markersRef.current.push(marker);
@@ -426,8 +487,12 @@ export const MapView: React.FC<MapViewProps> = ({
     // heat gradient); anywhere else — or when isochrones are unavailable —
     // straight-line geodesic circles.
     if (showRadius && showWarehouses && radiusKm && radiusKm > 0 && warehouses.length > 0) {
+      // Phase B (#1): focus isolates the zone — only the selected boundary stays.
+      const radiusWarehouses = focusedWarehouseId
+        ? warehouses.filter((w) => w.warehouse_id === focusedWarehouseId)
+        : warehouses;
       const isoEntries = linesMode === 'roads'
-        ? warehouses.flatMap((w) => {
+        ? radiusWarehouses.flatMap((w) => {
             const feats = isochrones[w.warehouse_id] || [];
             if (feats.length === 0) return [];
             const contours = feats
@@ -439,7 +504,7 @@ export const MapView: React.FC<MapViewProps> = ({
               const inner = Number.isFinite(c) && contours.length > 1 && c < maxC;
               return {
                 type: 'Feature' as const,
-                properties: { color: whColor(w.warehouse_id), opacity: inner ? 0.22 : 0.09 },
+                properties: { color: whColor(w.warehouse_id), opacity: inner ? (focusedWarehouseId ? 0.32 : 0.22) : (focusedWarehouseId ? 0.16 : 0.09) },
                 geometry: f.geometry as { type: 'Polygon'; coordinates: number[][][] }
               };
             });
@@ -447,9 +512,12 @@ export const MapView: React.FC<MapViewProps> = ({
         : [];
       const features = isoEntries.length > 0
         ? isoEntries
-        : warehouses.map((w) => ({
+        : radiusWarehouses.map((w) => ({
           type: 'Feature' as const,
-          properties: { color: whColor(w.warehouse_id), opacity: 0.06 },
+          properties: {
+            color: whColor(w.warehouse_id),
+            opacity: focusedWarehouseId ? 0.14 : 0.06
+          },
           geometry: { type: 'Polygon' as const, coordinates: circlePolygon(w.latitude, w.longitude, radiusKm) }
         }));
       try {
@@ -471,6 +539,8 @@ export const MapView: React.FC<MapViewProps> = ({
 
     // Assignment lines neighborhood → warehouse (must match assignment table).
     // Roads mode draws traced driving paths where available, straight lines otherwise.
+    // Phase B (#1 focus): non-selected zones dim to 0.08; (#5 display): traffic
+    // mode colors each corridor segment green→amber→red via congestion_pct.
     if (showRoutes && assignments.length > 0) {
       const okFeatures: unknown[] = [];
       const badFeatures: unknown[] = [];
@@ -486,12 +556,14 @@ export const MapView: React.FC<MapViewProps> = ({
         const fallback: number[][] = [[nb.longitude, nb.latitude], [wh.longitude, wh.latitude]];
         if (!validRing(fallback)) return;
         const coords = validRing(traced) ? (traced as number[][]) : fallback;
+        const dimmed = focusMembers != null && !focusMembers.has(a.neighborhood_id);
         const feat = {
           type: 'Feature',
           properties: {
             color: routePaint(a),
             neighborhood_id: a.neighborhood_id,
-            traced: traced && traced.length >= 2 ? 1 : 0
+            traced: traced && traced.length >= 2 ? 1 : 0,
+            opacity: dimmed ? 0.08 : 0.85
           },
           geometry: {
             type: 'LineString',
@@ -507,7 +579,11 @@ export const MapView: React.FC<MapViewProps> = ({
             id: ROUTES_OK,
             type: 'line',
             source: ROUTES_OK,
-            paint: { 'line-color': ['get', 'color'], 'line-width': routeColor || colorRoutesByTraffic ? 2.5 : 1, 'line-opacity': 0.8 }
+            paint: {
+              'line-color': ['get', 'color'],
+              'line-width': routeColor || colorRoutesByTraffic ? 2.5 : 1,
+              'line-opacity': ['get', 'opacity'] as unknown as number
+            }
           });
         }
         if (badFeatures.length > 0) {
@@ -516,7 +592,12 @@ export const MapView: React.FC<MapViewProps> = ({
             id: ROUTES_BAD,
             type: 'line',
             source: ROUTES_BAD,
-            paint: { 'line-color': ['get', 'color'], 'line-width': 1.5, 'line-opacity': 0.9, 'line-dasharray': [2, 2] }
+            paint: {
+              'line-color': ['get', 'color'],
+              'line-width': 1.5,
+              'line-opacity': ['get', 'opacity'] as unknown as number,
+              'line-dasharray': [2, 2]
+            }
           });
         }
       } catch { /* style race — next render retries */ }
@@ -538,7 +619,7 @@ export const MapView: React.FC<MapViewProps> = ({
     try {
       map.resize();
     } catch { /* ignore */ }
-  }, [neighborhoods, warehouses, assignments, radiusKm, basemap, styleReady, token, colorBy, zoneColors, showWarehouses, showRoutes, showDemand, showRadius, routeColor, colorRoutesByTraffic, linesMode, roadGeometries, isochrones, theme, highlightId, focus]);
+  }, [neighborhoods, warehouses, assignments, radiusKm, basemap, styleReady, token, colorBy, zoneColors, showWarehouses, showRoutes, showDemand, showRadius, routeColor, colorRoutesByTraffic, linesMode, roadGeometries, isochrones, theme, highlightId, focus, focusedWarehouseId, coverageCells, showHeatmap, onWarehouseClick]);
 
   // Fly-to on focus requests (gmaps "Center" action)
   useEffect(() => {
@@ -579,13 +660,40 @@ export const MapView: React.FC<MapViewProps> = ({
     return (
       <div className="relative h-full w-full">
         <div ref={divRef} style={fill ? { height: '100%' } : { height }} className="z-0 h-full w-full" />
-        {colorRoutesByTraffic && assignments.length > 0 && (
-          <div className="absolute bottom-4 left-4 z-10 bg-white/95 backdrop-blur-sm border border-slate-200/80 rounded-2xl px-3 py-2 shadow-lg flex items-center gap-3 text-[10px] font-semibold text-slate-600">
-            <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full bg-[#22c55e]" /> Fluid</span>
-            <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full bg-[#f59e0b]" /> Busy</span>
-            <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full bg-[#ef4444]" /> Jammed</span>
-          </div>
-        )}
+        <div className="absolute bottom-4 left-4 z-10 flex flex-col gap-2 max-w-[calc(100%-2rem)]">
+          {colorRoutesByTraffic && assignments.length > 0 && (
+            <div className="bg-white/95 backdrop-blur-sm border border-slate-200/80 rounded-2xl px-3 py-2 shadow-lg flex items-center gap-3 text-[10px] font-semibold text-slate-600">
+              <span className="uppercase tracking-wide text-slate-400">Traffic</span>
+              <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full bg-[#22c55e]" /> Fluid</span>
+              <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full bg-[#f59e0b]" /> Busy</span>
+              <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full bg-[#ef4444]" /> Jammed</span>
+            </div>
+          )}
+          {showHeatmap && coverageCells.length > 0 && (
+            <div className="bg-white/95 backdrop-blur-sm border border-slate-200/80 rounded-2xl px-3 py-2 shadow-lg text-[10px] font-semibold text-slate-600">
+              <div className="flex items-center justify-between gap-3">
+                <span className="uppercase tracking-wide text-slate-400">Coverage</span>
+                {coverageRange && (
+                  <span className="font-mono text-slate-500">{coverageRange.minKm} km → {coverageRange.maxKm} km</span>
+                )}
+              </div>
+              <div
+                className="mt-1.5 h-2 w-44 rounded-full"
+                style={{ background: 'linear-gradient(90deg,#22c55e,#f59e0b,#ef4444)' }}
+              />
+              <div className="mt-1 flex items-center justify-between text-slate-500">
+                <span>Near warehouse</span>
+                <span>Far</span>
+              </div>
+            </div>
+          )}
+          {focusedWarehouseId && (
+            <div className="bg-slate-900/95 backdrop-blur-sm border border-slate-800 rounded-2xl px-3 py-2 shadow-lg flex items-center gap-2 text-[11px] font-bold text-white">
+              <span className="w-2.5 h-2.5 rounded-full bg-white/80" />
+              Zone {focusedWarehouseId} isolated — other zones dimmed
+            </div>
+          )}
+        </div>
       </div>
     );
   }

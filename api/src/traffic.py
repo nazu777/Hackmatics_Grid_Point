@@ -234,3 +234,192 @@ def historical_corridors(coords: "np.ndarray", hour: Optional[int] = None):
         factors.append(hist)
         samples += n
     return np.array(factors, dtype=float), samples
+
+
+# ---------------- Phase C: corridor traffic from road geometries ----------------
+# Backlog #5 (engine half): traced road polylines feed live routing decisions.
+# A corridor is the set of road segments between a neighborhood and its
+# warehouse. We sample points along each corridor (node + midpoint +
+# warehouse, or vertices of a traced geometry line), read live flow per
+# sample, and average into a per-warehouse congestion factor that is
+# recorded into rolling history — the same history the MILP placement and
+# evaluation path already consume.
+
+def sample_route_points(frm: Tuple[float, float], to: Tuple[float, float],
+                        max_samples: int = 3) -> List[Tuple[float, float]]:
+    """Evenly spaced (lat, lon) samples along a straight corridor segment."""
+    n = max(2, min(7, int(max_samples or 3)))
+    lat1, lon1 = float(frm[0]), float(frm[1])
+    lat2, lon2 = float(to[0]), float(to[1])
+    if n == 2:
+        return [(lat1, lon1), (lat2, lon2)]
+    return [(lat1 + (lat2 - lat1) * i / (n - 1),
+             lon1 + (lon2 - lon1) * i / (n - 1)) for i in range(n)]
+
+
+def sample_geometry_line(line: List[List[float]],
+                         max_samples: int = 5) -> List[Tuple[float, float]]:
+    """
+    Sample (lat, lon) points from a traced route line ([[lon, lat], ...]).
+    Evenly decimates vertices so long polylines cost a bounded number of
+    (cached) flow lookups.
+    """
+    if not line:
+        return []
+    pts: List[Tuple[float, float]] = []
+    for p in line:
+        try:
+            pts.append((float(p[1]), float(p[0])))
+        except (TypeError, ValueError, IndexError):
+            continue
+    if not pts:
+        return []
+    n = max(1, min(max(1, len(pts)), int(max_samples or 5)))
+    if n >= len(pts):
+        return pts
+    idx = [round(i * (len(pts) - 1) / (n - 1)) for i in range(n)]
+    return [pts[i] for i in sorted(set(idx))]
+
+
+def aggregate_corridor_congestion(
+    points_by_warehouse: Dict[str, List[Tuple[float, float]]],
+    manual_floor: float = 0.0,
+    hour: Optional[int] = None,
+    record: bool = True,
+    allow_live: bool = True,
+) -> Dict[str, Dict[str, Any]]:
+    """
+    Per-warehouse congestion from sampled corridor points.
+
+    Each point contributes its live delay_ratio (or 0 when offline); the
+    warehouse factor is max(manual_floor, mean delay). Live readings are
+    recorded into rolling history per point so future history-only runs
+    learn the corridor. Deduplicates points at cell granularity so shared
+    segments are fetched once (flow cache is cell-keyed anyway).
+
+    Returns {warehouse_id: {factor, live, samples, points, avg_delay}}.
+    """
+    out: Dict[str, Dict[str, Any]] = {}
+    for wid, pts in (points_by_warehouse or {}).items():
+        delays: List[float] = []
+        live_any = False
+        seen_cells = set()
+        for lat, lon in pts or []:
+            try:
+                cell = cell_of(float(lat), float(lon))
+            except (TypeError, ValueError):
+                continue
+            if cell in seen_cells:
+                continue
+            seen_cells.add(cell)
+            flow = get_flow(float(lat), float(lon)) if allow_live else {"live": False}
+            hist, _ = historical_factor(float(lat), float(lon), hour)
+            if flow.get("live"):
+                d = max(0.0, float(flow.get("delay_ratio", 0.0) or 0.0))
+                live_any = True
+                if record:
+                    record_observation(float(lat), float(lon), d, hour)
+            else:
+                d = max(0.0, float(hist or 0.0))
+            delays.append(d)
+        hist_samples = 0
+        for lat, lon in pts or []:
+            try:
+                _, n = historical_factor(float(lat), float(lon), hour)
+                hist_samples += int(n)
+            except (TypeError, ValueError):
+                continue
+        avg = sum(delays) / len(delays) if delays else 0.0
+        out[str(wid)] = {
+            "factor": max(float(manual_floor or 0.0), float(avg)),
+            "live": live_any,
+            "samples": hist_samples,
+            "points": len(seen_cells),
+            "avg_delay": round(float(avg), 4),
+        }
+    return out
+
+
+def corridor_points_from_assignments(
+    neighborhoods: List[Dict[str, Any]],
+    warehouses: List[Any],
+    assignments: List[Any],
+    samples_per_corridor: int = 3,
+    geometry_by_pair: Optional[Dict[Tuple[str, str], List[List[float]]]] = None,
+    max_samples_geometry: int = 5,
+) -> Dict[str, List[Tuple[float, float]]]:
+    """
+    Build sampled corridor points per warehouse from an assignment.
+
+    When traced geometry lines are supplied (keyed by
+    (neighborhood_id, warehouse_id)), samples come from the real road
+    polyline; otherwise each corridor contributes node + midpoint +
+    warehouse samples along the straight segment. Accepts both dict and
+    pydantic Warehouse/Assignment shapes (read-only).
+    """
+    def _get(obj: Any, key: str, default: Any = None) -> Any:
+        if isinstance(obj, dict):
+            return obj.get(key, default)
+        return getattr(obj, key, default)
+
+    nb_by_id = {str(_get(n, "neighborhood_id")): n for n in (neighborhoods or [])}
+    wh_by_id = {str(_get(w, "warehouse_id")): w for w in (warehouses or [])}
+    points: Dict[str, List[Tuple[float, float]]] = {}
+    for a in assignments or []:
+        nid = str(_get(a, "neighborhood_id"))
+        wid = str(_get(a, "warehouse_id"))
+        nb = nb_by_id.get(nid)
+        wh = wh_by_id.get(wid)
+        if nb is None or wh is None:
+            continue
+        try:
+            nlat, nlon = float(_get(nb, "latitude")), float(_get(nb, "longitude"))
+            wlat, wlon = float(_get(wh, "latitude")), float(_get(wh, "longitude"))
+        except (TypeError, ValueError):
+            continue
+        geom = (geometry_by_pair or {}).get((nid, wid))
+        if geom:
+            sampled = sample_geometry_line(geom, max_samples=max_samples_geometry)
+        else:
+            sampled = sample_route_points((nlat, nlon), (wlat, wlon),
+                                          max_samples=samples_per_corridor)
+        points.setdefault(wid, []).extend(sampled)
+    return points
+
+
+def corridor_traffic_from_assignments(
+    neighborhoods: List[Dict[str, Any]],
+    warehouses: List[Any],
+    assignments: List[Any],
+    manual_floor: float = 0.0,
+    hour: Optional[int] = None,
+    record: bool = True,
+    allow_live: bool = True,
+    samples_per_corridor: int = 3,
+    geometry_by_pair: Optional[Dict[Tuple[str, str], List[List[float]]]] = None,
+) -> Dict[str, Dict[str, Any]]:
+    """
+    One-call corridor traffic: sample each assigned road corridor, aggregate
+    per-warehouse congestion, and persist live readings to rolling history.
+    This is the engine-half feed behind "optimize on current traffic".
+    """
+    pts = corridor_points_from_assignments(
+        neighborhoods, warehouses, assignments,
+        samples_per_corridor=samples_per_corridor,
+        geometry_by_pair=geometry_by_pair)
+    if not pts and warehouses:
+        # No assignments yet (e.g. pre-optimization): fall back to one
+        # warehouse-center sample per site so corridors still report.
+        def _get(obj: Any, key: str, default: Any = None) -> Any:
+            if isinstance(obj, dict):
+                return obj.get(key, default)
+            return getattr(obj, key, default)
+        for w in warehouses:
+            try:
+                pts.setdefault(str(_get(w, "warehouse_id")), []).append(
+                    (float(_get(w, "latitude")), float(_get(w, "longitude"))))
+            except (TypeError, ValueError):
+                continue
+    return aggregate_corridor_congestion(
+        pts, manual_floor=manual_floor, hour=hour,
+        record=record, allow_live=allow_live)

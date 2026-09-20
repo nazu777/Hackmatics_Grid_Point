@@ -19,6 +19,7 @@ import { FileUploader } from './components/FileUploader';
 import { SyntheticModal } from './components/SyntheticModal';
 import { ErrorDrawer } from './components/ErrorDrawer';
 import { ScenariosPanel } from './components/ScenariosPanel';
+import { OverviewTab } from './components/OverviewTab';
 import { ZoneLegendEditor } from './components/ZoneLegendEditor';
 import { ExportView } from './components/ExportView';
 import { SettingsView } from './components/SettingsView';
@@ -34,8 +35,9 @@ import {
   smartDefaults
 } from './components/panelStore';
 import { HYDERABAD_SAMPLE } from './data/sample';
-import { Neighborhood, ValidationResult, DatasetSummary, OptimizationConfig, OptimizationResult, MapLayerOptions, BasemapStyle } from './types';
-import { validateData, localValidate, optimizeNetwork, exportCsv, fetchRouteGeometries, fetchIsochrones, type IsoFeature } from './services/api';
+import { Neighborhood, ValidationResult, DatasetSummary, OptimizationConfig, OptimizationResult, MapLayerOptions, BasemapStyle, OverviewAggregate } from './types';
+import { validateData, localValidate, optimizeNetwork, exportCsv, fetchRouteGeometries, fetchIsochrones, fetchCoverage as fetchCoverageGrid, fetchWarehouseFocus, friendlyRouteError, fetchOverview, type IsoFeature, type CoverageCell, type WarehouseFocus } from './services/api';
+import { WarehouseFocusCard } from './components/WarehouseFocusCard';
 
 const DEFAULT_CONFIG: OptimizationConfig = {
   K: 2,
@@ -48,6 +50,7 @@ const DEFAULT_CONFIG: OptimizationConfig = {
   fuel_cost_per_km: 0.0,
   infra_cost_per_warehouse: 0.0,
   traffic_factor: 0.0,
+  simulation_mode: 'off',
   vehicle_fleet: [],
   random_seed: 42,
   baseline_mode: 'centroid'
@@ -122,12 +125,23 @@ const AppShell: React.FC = () => {
   const [focus, setFocus] = useState<MapFocus | null>(null);
   const [highlightId, setHighlightId] = useState<string | null>(null);
 
-  // Map layer chips
-  const [layers, setLayers] = useState<LayerFlags>({ warehouses: true, routes: true, demand: true, radius: true, traffic: false });
+  // Map layer chips (Phase B adds heatmap)
+  const [layers, setLayers] = useState<LayerFlags>({ warehouses: true, routes: true, demand: true, radius: true, traffic: false, heatmap: true });
+  // Phase B (#1): clicked warehouse zone isolation.
+  const [focusedWarehouseId, setFocusedWarehouseId] = useState<string | null>(null);
+  const [warehouseFocus, setWarehouseFocus] = useState<WarehouseFocus | null>(null);
+  // Phase B (#2): proximity heatmap cells (server grid w/ local fallback).
+  const [coverageCells, setCoverageCells] = useState<CoverageCell[]>([]);
+  const [coverageRange, setCoverageRange] = useState<{ minKm: number; maxKm: number } | null>(null);
 
   // Route line rendering: straight displacement (default) or traced road paths
   const [linesMode, setLinesMode] = useState<'displacement' | 'roads'>('displacement');
   const [roadGeometries, setRoadGeometries] = useState<Record<string, number[][]>>({});
+  // Live mirror so async tracing can reconcile traced/total without stale closures.
+  const roadGeometriesRef = useRef<Record<string, number[][]>>({});
+  useEffect(() => {
+    roadGeometriesRef.current = roadGeometries;
+  }, [roadGeometries]);
   const [tracing, setTracing] = useState(false);
   const [routeNotice, setRouteNotice] = useState<string | null>(null);
   // Full re-optimization in flight (roads toggle switches distance metric).
@@ -166,31 +180,36 @@ const AppShell: React.FC = () => {
           !!res.config.use_live_traffic
         );
         if (!Array.isArray(routes)) throw new Error('Route service returned an unexpected shape.');
-        setRoadGeometries((prev) => {
-          const next = { ...prev };
-          routes.forEach((r, i) => {
-            const line = r && Array.isArray(r.line) ? r.line : null;
-            if (line && line.length >= 2 && slice[i]) {
-              next[slice[i].id] = line;
-              stored += 1;
-            }
-          });
-          return next;
+        // Count valid lines BEFORE setState (updaters must stay pure).
+        const good: Record<string, number[][]> = {};
+        routes.forEach((r, i) => {
+          const line = r && Array.isArray(r.line) ? r.line : null;
+          if (line && line.length >= 2 && slice[i]) good[slice[i].id] = line;
         });
+        stored += Object.keys(good).length;
+        if (Object.keys(good).length > 0) {
+          roadGeometriesRef.current = { ...roadGeometriesRef.current, ...good };
+          setRoadGeometries(roadGeometriesRef.current);
+        }
         routes.forEach((r) => seenProviders.add(String(r?.provider ?? 'unknown').replace(' (cached)', '')));
       }
-      const total = Object.keys(roadGeometries).length + stored;
+      // Traced/total counter (Phase B #3): missing entries fall back to
+      // straight lines — the notice always shows traced/total, never raw errors.
+      const tracedTotal = Object.keys(roadGeometriesRef.current).length;
+      const provider = [...seenProviders].join(' + ') || 'road network';
       setRouteNotice(
         stored > 0
-          ? `Road paths via ${[...seenProviders].join(' + ')} (${total}/${res.assignments.length} traced)`
-          : 'No road paths returned — showing displacement lines.'
+          ? `Road paths via ${provider} (${tracedTotal}/${res.assignments.length} traced, rest straight lines)`
+          : 'Road path unavailable — showing straight line'
       );
     } catch (e: any) {
-      setRouteNotice(e instanceof Error ? e.message : 'Road tracing failed — showing displacement lines.');
+      // Phase B (#3): ANY geometry failure maps to the friendly notice —
+      // the raw `Pair #0…` validator string must never reach the map UI.
+      setRouteNotice(friendlyRouteError(e));
     } finally {
       setTracing(false);
     }
-  }, [optimizationResult, neighborhoods, roadGeometries]);
+  }, [optimizationResult, neighborhoods]);
 
   /**
    * Road-network service-area polygons for each warehouse (roads-mode radius
@@ -247,7 +266,8 @@ const AppShell: React.FC = () => {
           setRouteNotice((prev) => prev ?? `Road-network optimization complete (${res.assignments.length} routes).`);
         } catch (e: any) {
           setLinesMode('displacement');
-          setRouteNotice(e instanceof Error ? e.message : 'Road re-optimization failed.');
+          // Sanitize: road-path validator strings never reach the map UI.
+          setRouteNotice(friendlyRouteError(e, e instanceof Error ? e.message : 'Road re-optimization failed.'));
         } finally {
           setReopting(false);
         }
@@ -397,6 +417,27 @@ const AppShell: React.FC = () => {
     localStorage.setItem(optConfigKey, JSON.stringify(updated));
   };
 
+  // Phase F: Overview aggregate (refreshed on demand + when the panel opens)
+  const [overview, setOverview] = useState<OverviewAggregate | null>(null);
+  const [overviewLoading, setOverviewLoading] = useState(false);
+  const refreshOverview = useCallback(async () => {
+    setOverviewLoading(true);
+    try {
+      const ov = await fetchOverview(
+        neighborhoods,
+        optimizationResult?.warehouses ?? [],
+        optimizationResult?.assignments ?? [],
+        optimizationConfig
+      );
+      setOverview(ov);
+    } finally {
+      setOverviewLoading(false);
+    }
+  }, [neighborhoods, optimizationResult, optimizationConfig]);
+  useEffect(() => {
+    if (panel === 'overview') refreshOverview();
+  }, [panel, refreshOverview]);
+
   function computeSummary(nodes: Neighborhood[]): DatasetSummary {
     if (!nodes || nodes.length === 0) {
       return {
@@ -529,14 +570,71 @@ const AppShell: React.FC = () => {
 
   // Traced road paths + coverage polygons belong to a specific result/dataset — drop them on change.
   // A fresh non-road result also drops the roads toggle back to displacement.
+  // Phase B: warehouse focus belongs to a result too — clear it here.
   useEffect(() => {
     setRoadGeometries({});
+    roadGeometriesRef.current = {};
     setIsoGeometries({});
     setRouteNotice(null);
+    setFocusedWarehouseId(null);
+    setWarehouseFocus(null);
     if (optimizationResult && optimizationResult.config.distance_metric !== 'road') {
       setLinesMode('displacement');
     }
   }, [optimizationResult, neighborhoods]);
+
+  // Phase B (#2): proximity heatmap grid — server cells with local fallback,
+  // recomputed from the ACTIVE assignment distances whenever they change.
+  useEffect(() => {
+    if (!optimizationResult || !layers.heatmap || neighborhoods.length === 0) {
+      setCoverageCells([]);
+      setCoverageRange(null);
+      return;
+    }
+    let cancelled = false;
+    const dists = optimizationResult.assignments.map((a) => Number(a.distance_km) || 0);
+    const range = dists.length
+      ? { minKm: Math.round(Math.min(...dists) * 100) / 100, maxKm: Math.round(Math.max(...dists) * 100) / 100 }
+      : null;
+    setCoverageRange(range);
+    fetchCoverageGrid(neighborhoods, optimizationResult.assignments, 24).then((grid) => {
+      if (!cancelled && grid && Array.isArray(grid.cells)) {
+        setCoverageCells(grid.cells);
+        if (typeof grid.min_km === 'number' && typeof grid.max_km === 'number') {
+          setCoverageRange({ minKm: grid.min_km, maxKm: grid.max_km });
+        }
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [optimizationResult, neighborhoods, layers.heatmap]);
+
+  // Phase B (#1): resolve the isolated zone payload (server w/ local fallback).
+  useEffect(() => {
+    if (!focusedWarehouseId || !optimizationResult) {
+      setWarehouseFocus(null);
+      return;
+    }
+    let cancelled = false;
+    fetchWarehouseFocus(
+      focusedWarehouseId,
+      neighborhoods,
+      optimizationResult.warehouses,
+      optimizationResult.assignments
+    ).then((f) => {
+      if (!cancelled) setWarehouseFocus(f);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [focusedWarehouseId, optimizationResult, neighborhoods]);
+
+  /** Phase B (#1): warehouse pin click → isolate zone (click again to clear). */
+  const handleWarehouseClick = useCallback((warehouseId: string) => {
+    setFocusedWarehouseId((prev) => (prev === warehouseId ? null : warehouseId));
+    setHighlightId(null);
+  }, []);
 
   // Service-radius overlay: enforced R_max from the result when present,
   // otherwise an adjustable preview (clearly labeled, not enforced).
@@ -778,6 +876,26 @@ const AppShell: React.FC = () => {
           </SidePanel>
         )}
 
+        {panel === 'overview' && (
+          <SidePanel
+            title="Overview"
+            meta={
+              overview
+                ? `${overview.warehouse_count} warehouses • ${overview.order_totals.daily_orders.toLocaleString()} orders • $${overview.distance_cost.total_cost.toLocaleString()}`
+                : 'Network rollup'
+            }
+          >
+            <OverviewTab
+              overview={overview}
+              loading={overviewLoading}
+              result={optimizationResult}
+              nodeCount={neighborhoods.length}
+              onRefresh={refreshOverview}
+              onGoTo={goTab}
+            />
+          </SidePanel>
+        )}
+
         {panel === 'export' && (
           <SidePanel title="Export" meta="Datasets, comparisons and map snapshots">
             <ExportView neighborhoods={neighborhoods} result={optimizationResult} />
@@ -804,7 +922,7 @@ const AppShell: React.FC = () => {
               { t: 'Ask anything', d: 'Type "optimize for 3 warehouses", "how much will I save?", or a place name. Suggestions and recents appear in Ask.' },
               { t: 'Search places', d: 'Use the map search bar — matching neighborhoods open as detail cards with Overview, Assignment and Nearby.' },
               { t: 'Save lists & runs', d: 'Saved → snapshot datasets as lists and optimization runs for later. Zones tab shows every category.' },
-              { t: 'Map layers', d: 'Chips above the map toggle warehouses, routes, demand bubbles and service-radius circles.' }
+              { t: 'Map layers', d: 'Chips above the map toggle warehouses, routes, traffic, heatmap, demand bubbles and service-radius circles. Click a warehouse pin to isolate its zone.' }
             ].map((s) => (
               <div key={s.t} className="card p-4">
                 <h3 className="font-bold text-sm text-ink">{s.t}</h3>
@@ -852,10 +970,28 @@ const AppShell: React.FC = () => {
             roadGeometries={roadGeometries}
             isochrones={isoGeometries}
             onRouteClick={(id) => traceRoutes([id])}
+            onWarehouseClick={handleWarehouseClick}
+            focusedWarehouseId={focusedWarehouseId}
+            coverageCells={coverageCells}
+            showHeatmap={layers.heatmap}
+            coverageRange={coverageRange}
             theme={theme}
             highlightId={highlightId}
           />
         </div>
+
+        {/* Phase B (#1): isolated warehouse zone card + (#2/#5) layer legends live in MapView. */}
+        {warehouseFocus && warehouseFocus.found && (
+          <WarehouseFocusCard
+            focus={warehouseFocus}
+            onClear={() => setFocusedWarehouseId(null)}
+            onCenter={(lat, lon) => setFocus({ lat, lon, zoom: 13, key: Date.now() })}
+            onOpenNode={(nid) => {
+              const node = neighborhoods.find((n) => n.neighborhood_id === nid);
+              if (node) openDetail(node, 'ask');
+            }}
+          />
+        )}
 
         {/* Floating top bar: search + planning actions (starts right of the panel) */}
         <div
