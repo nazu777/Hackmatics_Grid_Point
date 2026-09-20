@@ -81,6 +81,21 @@ export function nearestPricedCity(
   }
   return best;
 }
+/**
+ * Per-account scoping for recents / saved lists / saved runs.
+ * AppShell calls setStoreUser(user.id) on mount (before children read the
+ * store), so a fresh account starts with empty saved data.
+ */
+let storeUserId: string | null = null;
+
+export function setStoreUser(userId: string | null) {
+  storeUserId = userId;
+}
+
+function nsKey(key: string): string {
+  return storeUserId ? `${key}_${storeUserId}` : key;
+}
+}
 
 /** Baseline-vs-optimized metrics table CSV (Phase 4 comparison). */
 export function buildMetricsCsv(result: OptimizationResult): string {
@@ -166,7 +181,7 @@ const RECENTS_KEY = 'gridpoint_recents';
 /** Recently asked / opened items (max 8, most recent first). */
 export function getRecents(): string[] {
   try {
-    const raw = localStorage.getItem(RECENTS_KEY);
+    const raw = localStorage.getItem(nsKey(RECENTS_KEY));
     const arr = raw ? (JSON.parse(raw) as string[]) : [];
     return Array.isArray(arr) ? arr.slice(0, 8) : [];
   } catch {
@@ -179,7 +194,7 @@ export function pushRecent(q: string) {
   if (!term) return;
   try {
     const next = [term, ...getRecents().filter((r) => r.toLowerCase() !== term.toLowerCase())].slice(0, 8);
-    localStorage.setItem(RECENTS_KEY, JSON.stringify(next));
+    localStorage.setItem(nsKey(RECENTS_KEY), JSON.stringify(next));
   } catch {
     /* ignore */
   }
@@ -207,7 +222,7 @@ const RESULTS_KEY = 'gridpoint_saved_results';
 
 function read<T>(key: string): T[] {
   try {
-    const raw = localStorage.getItem(key);
+    const raw = localStorage.getItem(nsKey(key));
     const arr = raw ? (JSON.parse(raw) as T[]) : [];
     return Array.isArray(arr) ? arr : [];
   } catch {
@@ -217,7 +232,7 @@ function read<T>(key: string): T[] {
 
 function write(key: string, arr: unknown[]) {
   try {
-    localStorage.setItem(key, JSON.stringify(arr));
+    localStorage.setItem(nsKey(key), JSON.stringify(arr));
   } catch {
     /* ignore */
   }

@@ -638,6 +638,9 @@ function localOptimizeNetwork(
   neighborhoods: Neighborhood[],
   config: OptimizationConfig
 ): OptimizationResult {
+  if (!neighborhoods || neighborhoods.length === 0) {
+    throw new Error('No neighborhoods loaded — upload data, generate a synthetic set, or load the sample first.');
+  }
   const N = neighborhoods.length;
   const K = Math.min(config.K, N);
 

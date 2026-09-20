@@ -104,6 +104,10 @@ const ROUTES_BAD = 'gp-routes-bad';
 const RADIUS_SRC = 'gp-radius';
 const BUILDINGS_LAYER = 'gp-3d-buildings';
 
+/** Default camera: India-wide view for empty accounts (no city assumed). */
+const INDIA_CENTER: [number, number] = [78.5, 22.0];
+const INDIA_ZOOM = 4;
+
 /** Add (or remove) the 3D building-extrusion layer. Safe to call on any style. */
 function sync3DBuildings(map: mapboxgl.Map, enabled: boolean) {
   try {
@@ -188,6 +192,9 @@ export const MapView: React.FC<MapViewProps> = ({
     w: null,
     a: null
   });
+  // Tracks whether the last overlay render had data — used to glide back to
+  // the India-wide view when the dataset transitions to empty.
+  const wasEmptyRef = useRef(true);
   const [styleReady, setStyleReady] = useState(false);
   const token = getMapboxToken();
 
@@ -198,8 +205,8 @@ export const MapView: React.FC<MapViewProps> = ({
     const map = new mapboxgl.Map({
       container: divRef.current,
       style: BASEMAPS[basemap].style,
-      center: [78.486, 17.385],
-      zoom: 11,
+      center: INDIA_CENTER,
+      zoom: INDIA_ZOOM,
       maxPitch: 75,
       // Attribution must stay on the map (Mapbox ToS + ODbL) — it is added
       // back below as a compact "(i)" toggle to keep it compliant but subtle.
@@ -300,6 +307,20 @@ export const MapView: React.FC<MapViewProps> = ({
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !token || !styleReady) return;
+
+    // Empty dataset → glide back to the India-wide view, but only on the
+    // transition into empty (never fight the user's pan/zoom while empty).
+    const isEmpty = neighborhoods.length === 0 && warehouses.length === 0;
+    if (isEmpty) {
+      if (!wasEmptyRef.current) {
+        wasEmptyRef.current = true;
+        try {
+          map.easeTo({ center: INDIA_CENTER, zoom: INDIA_ZOOM, duration: 800 });
+        } catch { /* ignore */ }
+      }
+    } else {
+      wasEmptyRef.current = false;
+    }
 
     // Clear previous markers
     markersRef.current.forEach((m) => m.remove());

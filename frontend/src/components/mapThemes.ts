@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import type { BasemapStyle, Neighborhood, ZoneColorMap } from '../types';
 
 /** Mapbox public token (Vite env). Required even for local dev — free tier covers it. */
@@ -84,11 +84,11 @@ export function zoneCounts(neighborhoods: Neighborhood[]): Record<string, number
 
 const STORAGE_KEY = 'gridpoint_zone_colors';
 
-/** localStorage-backed custom zone→color map. */
-export function useZoneColors() {
+/** localStorage-backed custom zone→color map. storageKey is per-account. */
+export function useZoneColors(storageKey: string = STORAGE_KEY) {
   const [zoneColors, setZoneColorsState] = useState<ZoneColorMap>(() => {
     try {
-      const saved = localStorage.getItem(STORAGE_KEY);
+      const saved = localStorage.getItem(storageKey);
       if (saved) return JSON.parse(saved) as ZoneColorMap;
     } catch {
       /* ignore */
@@ -96,26 +96,36 @@ export function useZoneColors() {
     return {};
   });
 
+  // Reload if the account (and therefore the key) changes.
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(storageKey);
+      setZoneColorsState(saved ? (JSON.parse(saved) as ZoneColorMap) : {});
+    } catch {
+      setZoneColorsState({});
+    }
+  }, [storageKey]);
+
   const setZoneColor = useCallback((zone: string, color: string) => {
     setZoneColorsState((prev) => {
       const next = { ...prev, [zone]: color };
       try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+        localStorage.setItem(storageKey, JSON.stringify(next));
       } catch {
         /* ignore */
       }
       return next;
     });
-  }, []);
+  }, [storageKey]);
 
   const resetZoneColors = useCallback(() => {
     setZoneColorsState({});
     try {
-      localStorage.removeItem(STORAGE_KEY);
+      localStorage.removeItem(storageKey);
     } catch {
       /* ignore */
     }
-  }, []);
+  }, [storageKey]);
 
   return { zoneColors, setZoneColor, resetZoneColors };
 }

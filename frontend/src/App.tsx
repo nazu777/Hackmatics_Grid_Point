@@ -30,24 +30,12 @@ import {
   downloadFile,
   pushRecent,
   searchNeighborhoods,
+  setStoreUser,
   smartDefaults
 } from './components/panelStore';
+import { HYDERABAD_SAMPLE } from './data/sample';
 import { Neighborhood, ValidationResult, DatasetSummary, OptimizationConfig, OptimizationResult, MapLayerOptions, BasemapStyle } from './types';
 import { validateData, localValidate, optimizeNetwork, exportCsv, fetchRouteGeometries } from './services/api';
-
-// Initial Hyderabad seed dataset per schema.md
-const INITIAL_DATASET: Neighborhood[] = [
-  { neighborhood_id: 'N001', name: 'Charminar / Old City', latitude: 17.361564, longitude: 78.474665, daily_orders: 240, zone: 'South' },
-  { neighborhood_id: 'N002', name: 'Banjara Hills', latitude: 17.415560, longitude: 78.435740, daily_orders: 185, zone: 'Central' },
-  { neighborhood_id: 'N003', name: 'Jubilee Hills', latitude: 17.431940, longitude: 78.407470, daily_orders: 210, zone: 'West' },
-  { neighborhood_id: 'N004', name: 'Hitec City', latitude: 17.443500, longitude: 78.377200, daily_orders: 320, zone: 'West' },
-  { neighborhood_id: 'N005', name: 'Gachibowli', latitude: 17.440080, longitude: 78.348910, daily_orders: 290, zone: 'West' },
-  { neighborhood_id: 'N006', name: 'Madhapur', latitude: 17.448290, longitude: 78.391490, daily_orders: 260, zone: 'West' },
-  { neighborhood_id: 'N007', name: 'Secunderabad', latitude: 17.439930, longitude: 78.498270, daily_orders: 170, zone: 'North' },
-  { neighborhood_id: 'N008', name: 'Kukatpally', latitude: 17.494790, longitude: 78.399640, daily_orders: 225, zone: 'North-West' },
-  { neighborhood_id: 'N009', name: 'Begumpet', latitude: 17.444060, longitude: 78.465480, daily_orders: 140, zone: 'Central' },
-  { neighborhood_id: 'N010', name: 'Ameerpet', latitude: 17.437460, longitude: 78.448290, daily_orders: 195, zone: 'Central' }
-];
 
 const DEFAULT_CONFIG: OptimizationConfig = {
   K: 2,
@@ -91,13 +79,27 @@ const AppShell: React.FC = () => {
   const urlTab: RailTab = isRailTab(tab) ? tab : 'ask';
   const [panel, setPanel] = useState<PanelMode>(urlTab);
 
+  // Per-account storage: every account starts EMPTY — demand data, configs,
+  // saved lists and zone colors are namespaced by user id so a fresh account
+  // never sees another account's (or the old demo seed's) data.
+  const ns = useCallback(
+    (base: string) => (user && user.id ? `${base}_${user.id}` : base),
+    [user]
+  );
+  const neighborhoodsKey = ns('gridpoint_neighborhoods');
+  const optConfigKey = ns('gridpoint_opt_config');
+  // Saved lists / recents live in a module store — scope it before children read it.
+  setStoreUser(user?.id ?? null);
 
   const [neighborhoods, setNeighborhoods] = useState<Neighborhood[]>(() => {
-    const saved = localStorage.getItem('gridpoint_neighborhoods');
+    const saved = localStorage.getItem(neighborhoodsKey);
     if (saved) {
-      try { return JSON.parse(saved); } catch (e) { /* ignore */ }
+      try {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) return parsed;
+      } catch (e) { /* ignore */ }
     }
-    return INITIAL_DATASET;
+    return [];
   });
 
   const [validation, setValidation] = useState<ValidationResult>(() => localValidate(neighborhoods));
@@ -263,7 +265,7 @@ const AppShell: React.FC = () => {
   }, []);
 
   const [optimizationConfig, setOptimizationConfig] = useState<OptimizationConfig>(() => {
-    const saved = localStorage.getItem('gridpoint_opt_config');
+    const saved = localStorage.getItem(optConfigKey);
     if (saved) {
       try { return JSON.parse(saved); } catch (e) { /* ignore */ }
     }
@@ -279,7 +281,7 @@ const AppShell: React.FC = () => {
     colorBy: 'warehouse'
   });
 
-  const { zoneColors, setZoneColor, resetZoneColors } = useZoneColors();
+  const { zoneColors, setZoneColor, resetZoneColors } = useZoneColors(ns('gridpoint_zone_colors'));
 
   useEffect(() => {
     document.documentElement.classList.toggle('dark', theme === 'dark');
@@ -300,7 +302,7 @@ const AppShell: React.FC = () => {
 
   const handleConfigChange = (updated: OptimizationConfig) => {
     setOptimizationConfig(updated);
-    localStorage.setItem('gridpoint_opt_config', JSON.stringify(updated));
+    localStorage.setItem(optConfigKey, JSON.stringify(updated));
   };
 
   function computeSummary(nodes: Neighborhood[]): DatasetSummary {
@@ -341,10 +343,10 @@ const AppShell: React.FC = () => {
 
   const triggerValidation = useCallback(async (data: Neighborhood[]) => {
     setSummary(computeSummary(data));
-    localStorage.setItem('gridpoint_neighborhoods', JSON.stringify(data));
+    localStorage.setItem(neighborhoodsKey, JSON.stringify(data));
     const res = await validateData(data);
     setValidation(res);
-  }, []);
+  }, [neighborhoodsKey]);
 
   useEffect(() => {
     triggerValidation(neighborhoods);
@@ -354,7 +356,12 @@ const AppShell: React.FC = () => {
     setNeighborhoods(newNodes);
     setValidation(valResult);
     setSummary(newSummary);
-    localStorage.setItem('gridpoint_neighborhoods', JSON.stringify(newNodes));
+    localStorage.setItem(neighborhoodsKey, JSON.stringify(newNodes));
+  };
+
+  const handleLoadSample = () => {
+    setNeighborhoods(HYDERABAD_SAMPLE);
+    triggerValidation(HYDERABAD_SAMPLE);
   };
 
   const handleSyntheticGenerated = (newNodes: Neighborhood[]) => {
@@ -369,11 +376,11 @@ const AppShell: React.FC = () => {
 
   const clearLocalData = () => {
     if (!window.confirm('Reset all saved app data (demand, config, themes)?')) return;
-    ['gridpoint_neighborhoods', 'gridpoint_opt_config', 'gridpoint_zone_colors'].forEach((k) => {
+    [neighborhoodsKey, optConfigKey, ns('gridpoint_zone_colors')].forEach((k) => {
       try { localStorage.removeItem(k); } catch { /* ignore */ }
     });
-    setNeighborhoods(INITIAL_DATASET);
-    setOptimizationConfig({ ...DEFAULT_CONFIG, ...smartDefaults(INITIAL_DATASET, DEFAULT_CONFIG.K) });
+    setNeighborhoods([]);
+    setOptimizationConfig(DEFAULT_CONFIG);
     setOptimizationResult(null);
     resetZoneColors();
   };
@@ -621,6 +628,28 @@ const AppShell: React.FC = () => {
               onOpenSyntheticModal={() => setIsSyntheticModalOpen(true)}
               onOpenCensusModal={() => setIsCensusModalOpen(true)}
             />
+            {neighborhoods.length === 0 && (
+              <div className="card p-5 text-center border-dashed">
+                <p className="font-bold text-sm text-ink">No demand data yet</p>
+                <p className="text-[12.5px] text-ink-soft mt-1">
+                  Upload a CSV above, generate a synthetic city, or start from the Hyderabad sample.
+                </p>
+                <div className="flex items-center justify-center gap-2 mt-3 flex-wrap">
+                  <button
+                    onClick={() => setIsSyntheticModalOpen(true)}
+                    className="px-4 py-2 rounded-full bg-[#14424E] text-white text-xs font-bold hover:opacity-90 transition cursor-pointer"
+                  >
+                    Generate synthetic data
+                  </button>
+                  <button
+                    onClick={handleLoadSample}
+                    className="px-4 py-2 rounded-full bg-cream-deep text-ink text-xs font-bold hover:bg-gold-100 transition cursor-pointer"
+                  >
+                    Load Hyderabad sample
+                  </button>
+                </div>
+              </div>
+            )}
             <DataTable neighborhoods={neighborhoods} errors={validation.errors} onChange={setNeighborhoods} externalQuery="" />
             <ZoneLegendEditor
               neighborhoods={neighborhoods}
@@ -641,7 +670,7 @@ const AppShell: React.FC = () => {
               lastResult={optimizationResult}
               onUpdateNeighborhoods={(updated) => {
                 setNeighborhoods(updated);
-                localStorage.setItem('gridpoint_neighborhoods', JSON.stringify(updated));
+                localStorage.setItem(neighborhoodsKey, JSON.stringify(updated));
                 setSummary(computeSummary(updated));
               }}
               onUpdateConfig={handleConfigChange}
