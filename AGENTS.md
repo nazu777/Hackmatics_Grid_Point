@@ -53,6 +53,7 @@ Hackmatics_Grid_Point/
 │   │   ├── census.py         # US Census ACS seeder (tract pop → daily_orders, data/census_cache/)
 │   │   ├── expansion.py      # Incremental expansion (MAX_WAREHOUSES=10)
 │   │   ├── auth.py           # JWT (PBKDF2 + HS256, 24h TTL, file-backed JSON store; Neon TODO)
+│   │   ├── userdata.py       # Per-user workspace (warehouses/vehicles/demand/config), file-backed; `GET`+`PUT /api/user/data`
 │   │   └── api.py            # FastAPI app `app` (schema.md §6) — 39 routes (optimize, expand, scenarios, fuel, traffic, census, routes, simulation, overview, auth…)
 │   ├── tests/                # 159 tests in 25 files: schema, validation, ingestion, synthetic, distance, optimization, cost, mapping, scenarios, expansion, routing, fuel, traffic, census, auth, api, acceptance phase1/2/3/5 + onboarding/cost-truth/expansion-policy + phase-B/phase-C/simulation + perf (N=1000 <5s)
 │   ├── requirements.txt      # Floating deps (FastAPI/Uvicorn/Pydantic/Pandas/NumPy/SciPy/sklearn/PuLP/Geopy/pytest + httpx)
@@ -159,6 +160,7 @@ Client fallback `frontend/src/services/api.ts:88 localValidate()` must stay in s
 | `/api/auth/signup` | POST | PBKDF2 signup → JWT (24h TTL) |
 | `/api/auth/login` | POST | Login → JWT |
 | `/api/auth/me` | GET | Current user via `Authorization: Bearer` |
+| `/api/user/data` | GET / PUT | Per-user workspace (warehouses/vehicles/demand/config), JWT required; pull on login, debounced push; file-backed (`GRIDPOINT_DATA_FILE`) |
 
 Always keep CORS `allow_origins=["*"]` (`backend/src/api.py:35`) for Vercel proxy.
 

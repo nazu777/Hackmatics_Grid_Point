@@ -49,7 +49,7 @@ const ITEMS: { id: RailTab; label: string; icon: React.ElementType }[] = [
   { id: 'saved', label: 'Saved', icon: Bookmark },
   { id: 'optimize', label: 'Optimize', icon: Warehouse },
   { id: 'compare', label: 'Compare', icon: Scale },
-  { id: 'data', label: 'Demand data', icon: Package },
+  { id: 'data', label: 'Data', icon: Package },
   { id: 'lab', label: 'Scenario lab', icon: FlaskConical },
   { id: 'overview', label: 'Overview', icon: LayoutDashboard },
   { id: 'export', label: 'Export', icon: FileDown }

@@ -375,12 +375,17 @@ Phase F realtime loop (shipped — #12–#14): one poll tick scales `w_i` from t
 
 PBKDF2-HMAC-SHA256 passwords, HS256 JWTs. FIXED Sept 20 2026 (login persistence): users are file-backed (`GRIDPOINT_USERS_FILE`, default `backend/data/users.json`, git-ignored; Vercel: `/tmp/gridpoint_users.json`) so accounts survive backend restarts/reloads/cold starts — previously the pure in-memory `_USERS` dict wiped every account and logins failed with "Invalid email or password". Long-term production path is still a Neon `users` table (see `backend/src/auth.py` TODO).
 
+### `GET /api/user/data` · `PUT /api/user/data` (auth required)
+
+Server-side per-user workspace: `{updated_at, neighborhoods[], vehicles[], warehouses[], config{}}`. PUT merges partial payloads (sanity caps: 5000 nodes / 500 / 64; rows must be objects, config an object). The frontend pulls on login (last-write-wins by `updated_at`, empty side yields) and pushes debounced on every change; localStorage stays as offline cache. Store: `GRIDPOINT_DATA_FILE` (default `backend/data/user_data.json`, git-ignored; Vercel: `/tmp/gridpoint_user_data.json`); Neon workspace table is the production path (see `backend/src/userdata.py`).
+
 ---
 
 ## 7. Storage (Session / Persistence)
 
 - **React**: per-user namespaced `localStorage` (`gridpoint_neighborhoods_<uid>`, `gridpoint_opt_config_<uid>`, zone colors, recents). Every account starts EMPTY — the Hyderabad sample is opt-in only and never auto-loaded.
 - **Auth**: JWT in `localStorage` (`gridpoint_auth_token`, 24h TTL); `AuthContext` resolves the user via `GET /api/auth/me`. Backend store is file-backed JSON (`GRIDPOINT_USERS_FILE`); Neon Postgres `users` table is the documented production path.
+- **Workspace**: per-user warehouses/vehicles/demand/config persist server-side (`GET`+`PUT /api/user/data`, `GRIDPOINT_DATA_FILE`) across sessions/devices/restarts; the app pulls on login and pushes debounced, with namespaced localStorage as offline cache.
 - **Optional DB (Postgres/SQLite)** — demand tables (auth `users` table still TODO in `backend/src/auth.py`):
 
 ```sql

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, useParams, useNavigate } from 'react-router-dom';
-import { Search, X, Plus, Download, GripVertical } from 'lucide-react';
+import { Search, X, Plus, Download, GripVertical, MoveHorizontal } from 'lucide-react';
 import { GmapsRail, type RailTab, isRailTab } from './components/GmapsRail';
 import { LandingPage } from './components/LandingPage';
 import { LoginPage, SignupPage } from './components/AuthPages';
@@ -14,13 +14,10 @@ import { MapChips, ResultRows, type LayerFlags } from './components/MapChrome';
 import { MapView, type MapFocus } from './components/MapView';
 import { OptimizationPanel } from './components/OptimizationPanel';
 import { ComparisonDashboard } from './components/ComparisonDashboard';
-import { DataTable } from './components/DataTable';
-import { FileUploader } from './components/FileUploader';
-import { SyntheticModal } from './components/SyntheticModal';
+import { DataTab } from './components/DataTab';
 import { ErrorDrawer } from './components/ErrorDrawer';
 import { ScenariosPanel } from './components/ScenariosPanel';
 import { OverviewTab } from './components/OverviewTab';
-import { ZoneLegendEditor } from './components/ZoneLegendEditor';
 import { ExportView } from './components/ExportView';
 import { SettingsView } from './components/SettingsView';
 import { useZoneColors, getMapboxToken } from './components/mapThemes';
@@ -28,15 +25,23 @@ import type { ThemeMode } from './components/Topbar';
 import {
   buildAssignmentsCsv,
   buildMetricsCsv,
+  datasetCenter,
   downloadFile,
   pushRecent,
   searchNeighborhoods,
   setStoreUser,
-  smartDefaults
+  smartDefaults,
+  getStoredVehicles,
+  getStoredWarehouses,
+  setStoredVehicles,
+  setStoredWarehouses,
+  getWorkspaceUpdatedAt,
+  setWorkspaceUpdatedAt,
+  WORKSPACE_CHANGED_EVENT
 } from './components/panelStore';
 import { HYDERABAD_SAMPLE } from './data/sample';
-import { Neighborhood, ValidationResult, DatasetSummary, OptimizationConfig, OptimizationResult, MapLayerOptions, BasemapStyle, OverviewAggregate } from './types';
-import { validateData, localValidate, optimizeNetwork, exportCsv, fetchRouteGeometries, fetchIsochrones, fetchCoverage as fetchCoverageGrid, fetchWarehouseFocus, fetchOverview, type IsoFeature, type CoverageBounds, type CoverageCell, type WarehouseFocus } from './services/api';
+import { Neighborhood, ValidationResult, DatasetSummary, OptimizationConfig, OptimizationResult, MapLayerOptions, BasemapStyle, OverviewAggregate, VehicleType, Warehouse } from './types';
+import { validateData, localValidate, optimizeNetwork, exportCsv, validateVehicles, validateWarehouses, localValidateVehicles, localValidateWarehouses, fetchRouteGeometries, fetchIsochrones, fetchCoverage as fetchCoverageGrid, fetchWarehouseFocus, fetchOverview, fetchUserWorkspace, saveUserWorkspace, isWorkspaceEmpty, type IsoFeature, type CoverageBounds, type CoverageCell, type WarehouseFocus } from './services/api';
 import { WarehouseFocusCard } from './components/WarehouseFocusCard';
 
 const DEFAULT_CONFIG: OptimizationConfig = {
@@ -107,8 +112,13 @@ const AppShell: React.FC = () => {
 
   const [validation, setValidation] = useState<ValidationResult>(() => localValidate(neighborhoods));
   const [summary, setSummary] = useState<DatasetSummary>(() => computeSummary(neighborhoods));
+  // Onboarding trio: owned fleet + existing sites live beside orders in the
+  // Data tab (per-account store, synced server-side by the workspace effect).
+  const [vehicles, setVehiclesState] = useState<VehicleType[]>(() => getStoredVehicles());
+  const [warehouses, setWarehousesState] = useState<Warehouse[]>(() => getStoredWarehouses());
+  const [vehiclesValidation, setVehiclesValidation] = useState<ValidationResult>(() => localValidateVehicles(getStoredVehicles()));
+  const [warehousesValidation, setWarehousesValidation] = useState<ValidationResult>(() => localValidateWarehouses(getStoredWarehouses()));
   const [optimizationResult, setOptimizationResult] = useState<OptimizationResult | null>(null);
-  const [isSyntheticModalOpen, setIsSyntheticModalOpen] = useState(false);
   const [isCensusModalOpen, setIsCensusModalOpen] = useState(false);
   const [isErrorDrawerOpen, setIsErrorDrawerOpen] = useState(false);
   const [theme, setTheme] = useState<ThemeMode>(() => {
@@ -292,10 +302,16 @@ const AppShell: React.FC = () => {
     }
   };
 
-  // Resizable sidebar (drag the right edge; width persisted)
+  // Resizable sidebar (drag the right edge; width persisted). Wide max so
+  // the Data tab's orders/vehicles/warehouses tables fit without scrolling.
   const SIDEBAR_MIN = 280;
-  const SIDEBAR_MAX = 640;
+  const SIDEBAR_MAX = 1100;
   const SIDEBAR_DEFAULT = 400;
+  const SIDEBAR_WIDE = 920;
+  const clampSidebarWidth = (w: number) => {
+    const max = Math.min(SIDEBAR_MAX, Math.max(SIDEBAR_MIN + 40, window.innerWidth - 120));
+    return Math.min(max, Math.max(SIDEBAR_MIN, w));
+  };
   const [sidebarWidth, setSidebarWidth] = useState<number>(() => {
     try {
       const v = parseInt(localStorage.getItem('gridpoint_sidebar_width') || '', 10);
@@ -314,8 +330,7 @@ const AppShell: React.FC = () => {
     document.body.style.cursor = 'col-resize';
     document.body.style.userSelect = 'none';
     const onMove = (ev: MouseEvent | PointerEvent) => {
-      const max = Math.min(SIDEBAR_MAX, Math.max(SIDEBAR_MIN + 40, window.innerWidth - 320));
-      const w = Math.min(max, Math.max(SIDEBAR_MIN, startW + ev.clientX - startX));
+      const w = clampSidebarWidth(startW + ev.clientX - startX);
       sidebarWidthRef.current = w;
       setSidebarWidth(w);
     };
@@ -465,6 +480,128 @@ const AppShell: React.FC = () => {
     triggerValidation(neighborhoods);
   }, [neighborhoods, triggerValidation]);
 
+  // Fleet + sites: validate (server with offline fallback) and persist to the
+  // per-account store on every change (store writes also notify the server
+  // workspace sync). Fleet mirrors into the optimizer config.
+  const setVehicles = useCallback((rows: VehicleType[]) => {
+    setVehiclesState(rows);
+    setStoredVehicles(rows);
+    validateVehicles(rows).then(setVehiclesValidation);
+  }, []);
+  const setWarehouses = useCallback((rows: Warehouse[]) => {
+    setWarehousesState(rows);
+    setStoredWarehouses(rows);
+    validateWarehouses(rows).then(setWarehousesValidation);
+  }, []);
+  useEffect(() => {
+    validateVehicles(vehicles).then(setVehiclesValidation);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  useEffect(() => {
+    validateWarehouses(warehouses).then(setWarehousesValidation);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  useEffect(() => {
+    setOptimizationConfig((prev) => {
+      const cur = prev.vehicle_fleet ?? [];
+      if (cur.length === vehicles.length && cur.every((v, i) => v === vehicles[i])) return prev;
+      const next = { ...prev, vehicle_fleet: vehicles };
+      try { localStorage.setItem(optConfigKey, JSON.stringify(next)); } catch { /* ignore */ }
+      return next;
+    });
+  }, [vehicles, optConfigKey]);
+
+  // ---- Server-side workspace sync (warehouses, vehicles, demand, config) ----
+  // Pull on login (last-write-wins by updated_at; empty side yields), push
+  // debounced on every local change. LocalStorage stays as offline cache.
+  const pullingRef = useRef(false);
+  const [wsBump, setWsBump] = useState(0);
+  useEffect(() => {
+    const onChange = () => setWsBump((v) => v + 1);
+    window.addEventListener(WORKSPACE_CHANGED_EVENT, onChange);
+    return () => window.removeEventListener(WORKSPACE_CHANGED_EVENT, onChange);
+  }, []);
+
+  useEffect(() => {
+    if (!user) return;
+    let cancelled = false;
+    pullingRef.current = true;
+    fetchUserWorkspace().then((server) => {
+      if (cancelled) return;
+      const finish = () => { pullingRef.current = false; };
+      if (!server) return finish();
+      const localTs = getWorkspaceUpdatedAt();
+      const local = {
+        neighborhoods,
+        vehicles: getStoredVehicles(),
+        warehouses: getStoredWarehouses(),
+        config: optimizationConfig as OptimizationConfig
+      };
+      const localEmpty = isWorkspaceEmpty({ ...local, updated_at: localTs });
+      const serverEmpty = isWorkspaceEmpty(server);
+      if (serverEmpty && !localEmpty) {
+        // Fresh server copy: push this device's data up.
+        saveUserWorkspace({ ...local, updated_at: localTs || Date.now() / 1000 }).then((saved) => {
+          if (!cancelled && saved) setWorkspaceUpdatedAt(saved.updated_at);
+          finish();
+        });
+        return;
+      }
+      if (!serverEmpty && (localEmpty || server.updated_at > localTs)) {
+        // Adopt server (newer, or local empty): write offline cache + state.
+        try {
+          localStorage.setItem(neighborhoodsKey, JSON.stringify(server.neighborhoods));
+          localStorage.setItem(optConfigKey, JSON.stringify(server.config ?? optimizationConfig));
+        } catch { /* ignore */ }
+        setStoredVehicles(server.vehicles);
+        setStoredWarehouses(server.warehouses);
+        setWorkspaceUpdatedAt(server.updated_at);
+        setNeighborhoods(server.neighborhoods);
+        // Data-tab trio state follows the adopted server copy.
+        setVehiclesState(server.vehicles);
+        setWarehousesState(server.warehouses);
+        validateVehicles(server.vehicles).then(setVehiclesValidation);
+        validateWarehouses(server.warehouses).then(setWarehousesValidation);
+        triggerValidation(server.neighborhoods);
+        if (server.config) setOptimizationConfig(server.config);
+        finish();
+        return;
+      }
+      if (!localEmpty && localTs > server.updated_at) {
+        // This device is newer: push local up.
+        saveUserWorkspace({ ...local, updated_at: localTs }).then((saved) => {
+          if (!cancelled && saved) setWorkspaceUpdatedAt(saved.updated_at);
+          finish();
+        });
+        return;
+      }
+      finish();
+    });
+    return () => { cancelled = true; };
+    // Pull once per login; push effect below handles ongoing changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user]);
+
+  useEffect(() => {
+    if (!user || pullingRef.current) return;
+    const t = setTimeout(() => {
+      if (!user || pullingRef.current) return;
+      const localTs = getWorkspaceUpdatedAt();
+      const payload = {
+        neighborhoods,
+        vehicles: getStoredVehicles(),
+        warehouses: getStoredWarehouses(),
+        config: optimizationConfig as OptimizationConfig,
+        updated_at: localTs || Date.now() / 1000
+      };
+      if (isWorkspaceEmpty({ ...payload }) && !localTs) return; // fresh account, nothing to save
+      saveUserWorkspace(payload).then((saved) => {
+        if (saved) setWorkspaceUpdatedAt(saved.updated_at);
+      });
+    }, 1500);
+    return () => clearTimeout(t);
+  }, [neighborhoods, optimizationConfig, user, wsBump]);
+
   const handleDataLoaded = (newNodes: Neighborhood[], valResult: ValidationResult, newSummary: DatasetSummary) => {
     setNeighborhoods(newNodes);
     setValidation(valResult);
@@ -482,6 +619,18 @@ const AppShell: React.FC = () => {
     triggerValidation(newNodes);
   };
 
+  const handleVehiclesLoaded = (rows: VehicleType[], valResult: ValidationResult) => {
+    setVehiclesState(rows);
+    setStoredVehicles(rows);
+    setVehiclesValidation(valResult);
+  };
+
+  const handleWarehousesLoaded = (rows: Warehouse[], valResult: ValidationResult) => {
+    setWarehousesState(rows);
+    setStoredWarehouses(rows);
+    setWarehousesValidation(valResult);
+  };
+
   const handleApplyZones = (updated: Neighborhood[]) => {
     setNeighborhoods(updated);
     triggerValidation(updated);
@@ -493,6 +642,8 @@ const AppShell: React.FC = () => {
       try { localStorage.removeItem(k); } catch { /* ignore */ }
     });
     setNeighborhoods([]);
+    setVehicles([]);
+    setWarehouses([]);
     setOptimizationConfig(DEFAULT_CONFIG);
     setOptimizationResult(null);
     resetZoneColors();
@@ -686,8 +837,25 @@ const AppShell: React.FC = () => {
         }}
         className="absolute z-20 bg-white border border-[#E4E1D2] rounded-3xl shadow-xl shadow-black/10 overflow-hidden pr-5"
       >
-        {/* Close button — pinned top-right above all tab content */}
-        <div className="absolute top-3 right-3 z-30 pointer-events-none">
+        {/* Close + width buttons — pinned top-right above all tab content */}
+        <div className="absolute top-3 right-3 z-30 pointer-events-none flex items-center gap-1.5">
+          <button
+            onClick={() => {
+              const target = sidebarWidthRef.current >= SIDEBAR_WIDE - 20 ? SIDEBAR_DEFAULT : SIDEBAR_WIDE;
+              const w = clampSidebarWidth(target);
+              sidebarWidthRef.current = w;
+              setSidebarWidth(w);
+              try {
+                localStorage.setItem('gridpoint_sidebar_width', String(Math.round(w)));
+              } catch { /* ignore */ }
+            }}
+            title={sidebarWidth >= SIDEBAR_WIDE - 20 ? 'Narrow panel' : 'Widen panel for tables'}
+            aria-label="Toggle panel width"
+            className="pointer-events-auto h-8 px-2.5 rounded-full bg-white border border-[#E4E1D2] shadow-lg flex items-center justify-center gap-1 text-ink hover:bg-cream-deep transition cursor-pointer text-[11px] font-bold"
+          >
+            <MoveHorizontal className="w-4 h-4" />
+            <span>{sidebarWidth >= SIDEBAR_WIDE - 20 ? 'Narrow' : 'Wide'}</span>
+          </button>
           <button
             onClick={() => setCollapsedPersist(true)}
             title="Close side panel"
@@ -797,44 +965,33 @@ const AppShell: React.FC = () => {
 
         {panel === 'data' && (
           <SidePanel
-            title="Demand Data"
-            meta={`${neighborhoods.length} nodes • ${summary.total_orders.toLocaleString()} daily orders`}
+            title="Data"
+            meta={`${neighborhoods.length} orders • ${vehicles.length} vehicles • ${warehouses.length} warehouses`}
           >
-            <FileUploader
-              onDataLoaded={handleDataLoaded}
-              onOpenSyntheticModal={() => setIsSyntheticModalOpen(true)}
-              onOpenCensusModal={() => setIsCensusModalOpen(true)}
-            />
-            {neighborhoods.length === 0 && (
-              <div className="card p-5 text-center border-dashed">
-                <p className="font-bold text-sm text-ink">No demand data yet</p>
-                <p className="text-[12.5px] text-ink-soft mt-1">
-                  Upload a CSV above, generate a synthetic city, or start from the Hyderabad sample.
-                </p>
-                <div className="flex items-center justify-center gap-2 mt-3 flex-wrap">
-                  <button
-                    onClick={() => setIsSyntheticModalOpen(true)}
-                    className="px-4 py-2 rounded-full bg-[#14424E] text-white text-xs font-bold hover:opacity-90 transition cursor-pointer"
-                  >
-                    Generate synthetic data
-                  </button>
-                  <button
-                    onClick={handleLoadSample}
-                    className="px-4 py-2 rounded-full bg-cream-deep text-ink text-xs font-bold hover:bg-gold-100 transition cursor-pointer"
-                  >
-                    Load Hyderabad sample
-                  </button>
-                </div>
-              </div>
-            )}
-            <DataTable neighborhoods={neighborhoods} errors={validation.errors} onChange={setNeighborhoods} externalQuery="" />
-            <ZoneLegendEditor
+            <DataTab
               neighborhoods={neighborhoods}
+              vehicles={vehicles}
+              warehouses={warehouses}
+              ordersValidation={validation}
+              vehiclesValidation={vehiclesValidation}
+              warehousesValidation={warehousesValidation}
+              summary={summary}
+              center={datasetCenter(neighborhoods)}
               zoneColors={zoneColors}
+              onOrdersChange={(updated) => {
+                setNeighborhoods(updated);
+                triggerValidation(updated);
+              }}
+              onVehiclesChange={setVehicles}
+              onWarehousesChange={setWarehouses}
+              onOrdersLoaded={handleDataLoaded}
+              onVehiclesLoaded={handleVehiclesLoaded}
+              onWarehousesLoaded={handleWarehousesLoaded}
+              onOpenCensus={() => setIsCensusModalOpen(true)}
+              onLoadSample={handleLoadSample}
               onZoneColorChange={setZoneColor}
               onResetZoneColors={resetZoneColors}
               onApplyZones={handleApplyZones}
-              compact
             />
           </SidePanel>
         )}
@@ -913,8 +1070,8 @@ const AppShell: React.FC = () => {
           </SidePanel>
         )}
         {/* Resize grip: proper 6-dot handle docked inside the panel's
-            right gutter (double-click resets). The aside reserves pr-5 so
-            panel content never slides under it. */}
+            right gutter (drags 280–1100px, double-click resets). The aside
+            reserves pr-5 so panel content never slides under it. */}
         <div
           onPointerDown={startSidebarResize}
           onDoubleClick={resetSidebarWidth}
@@ -1079,13 +1236,6 @@ const AppShell: React.FC = () => {
           </div>
         )}
       </main>
-
-      <SyntheticModal
-        isOpen={isSyntheticModalOpen}
-        onClose={() => setIsSyntheticModalOpen(false)}
-        onGenerated={handleSyntheticGenerated}
-        onOpenCensus={() => setIsCensusModalOpen(true)}
-      />
 
       <CensusModal
         isOpen={isCensusModalOpen}

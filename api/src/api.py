@@ -44,6 +44,7 @@ from .synthetic import (generate_synthetic_dataset, generate_synthetic_vehicles,
 from .optimization import run_optimization
 from .mapping import prepare_map_layer_data, compute_map_bounds
 from . import auth as auth_module
+from . import userdata as userdata_module
 
 app = FastAPI(
     title="GridPoint API",
@@ -853,6 +854,19 @@ def auth_login(payload: LoginRequest):
 
 @app.get("/api/auth/me")
 def auth_me(request: Request):
+    return auth_module.public_user(_require_user(request))
+
+
+class UserWorkspacePayload(BaseModel):
+    neighborhoods: Optional[List[Dict[str, Any]]] = None
+    vehicles: Optional[List[Dict[str, Any]]] = None
+    warehouses: Optional[List[Dict[str, Any]]] = None
+    config: Optional[Dict[str, Any]] = None
+    updated_at: Optional[float] = None
+
+
+def _require_user(request: Request) -> Dict[str, Any]:
+    """Current user from `Authorization: Bearer <token>` (401 otherwise)."""
     token = _bearer_token(request.headers.get("authorization"))
     if not token:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing bearer token")
@@ -862,7 +876,25 @@ def auth_me(request: Request):
     user = auth_module.get_user(payload.get("email") or "")
     if not user:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User no longer exists")
-    return auth_module.public_user(user)
+    return user
+
+
+@app.get("/api/user/data")
+def get_user_data(request: Request):
+    """Server-side workspace for the logged-in user (warehouses, vehicles,
+    demand nodes, optimizer config). Empty workspace when nothing saved yet."""
+    user = _require_user(request)
+    return userdata_module.get_workspace(user["id"])
+
+
+@app.put("/api/user/data")
+def put_user_data(payload: UserWorkspacePayload, request: Request):
+    """Upsert the logged-in user's workspace (partial payloads merge)."""
+    user = _require_user(request)
+    ws, err = userdata_module.save_workspace(user["id"], payload.model_dump())
+    if err:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=err)
+    return {"saved": True, **ws}
 
 
 @app.post("/api/scenarios/tradeoff")

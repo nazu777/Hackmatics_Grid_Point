@@ -105,6 +105,33 @@ function nsKey(key: string): string {
 const NEIGHBORHOODS_KEY = 'gridpoint_neighborhoods';
 const VEHICLES_KEY = 'gridpoint_vehicles';
 const WAREHOUSES_KEY = 'gridpoint_warehouses';
+const WORKSPACE_UPDATED_KEY = 'gridpoint_workspace_updated';
+export const WORKSPACE_CHANGED_EVENT = 'gridpoint-workspace-changed';
+
+/** Unix seconds of the last local workspace mutation (per account). */
+export function getWorkspaceUpdatedAt(): number {
+  try {
+    return Number(localStorage.getItem(nsKey(WORKSPACE_UPDATED_KEY))) || 0;
+  } catch {
+    return 0;
+  }
+}
+
+export function setWorkspaceUpdatedAt(ts: number) {
+  try {
+    localStorage.setItem(nsKey(WORKSPACE_UPDATED_KEY), String(Number(ts) || 0));
+  } catch { /* ignore */ }
+}
+
+/** Mark the workspace dirty + notify subscribers (debounced server push). */
+export function touchWorkspace(): number {
+  const now = Date.now() / 1000;
+  setWorkspaceUpdatedAt(now);
+  try {
+    window.dispatchEvent(new CustomEvent(WORKSPACE_CHANGED_EVENT));
+  } catch { /* ignore */ }
+  return now;
+}
 
 export function getStoredNeighborhoods(): Neighborhood[] {
   return read<Neighborhood>(NEIGHBORHOODS_KEY);
@@ -112,6 +139,7 @@ export function getStoredNeighborhoods(): Neighborhood[] {
 
 export function setStoredNeighborhoods(rows: Neighborhood[]) {
   write(NEIGHBORHOODS_KEY, rows);
+  touchWorkspace();
 }
 
 export function getStoredVehicles(): VehicleType[] {
@@ -120,6 +148,7 @@ export function getStoredVehicles(): VehicleType[] {
 
 export function setStoredVehicles(rows: VehicleType[]) {
   write(VEHICLES_KEY, rows);
+  touchWorkspace();
 }
 
 export function getStoredWarehouses(): Warehouse[] {
@@ -128,6 +157,7 @@ export function getStoredWarehouses(): Warehouse[] {
 
 export function setStoredWarehouses(rows: Warehouse[]) {
   write(WAREHOUSES_KEY, rows);
+  touchWorkspace();
 }
 
 export interface OnboardingStatus {

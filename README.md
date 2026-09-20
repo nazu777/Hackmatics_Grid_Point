@@ -58,6 +58,7 @@ Hackmatics_Grid_Point/
 │   │   ├── census.py              # US Census ACS demand seeder (tract populations → daily_orders)
 │   │   ├── expansion.py           # Incremental warehouse expansion (add K without moving existing sites)
 │   │   ├── auth.py                # JWT auth (PBKDF2 passwords, HS256 tokens, file-backed store)
+│   │   ├── userdata.py            # Per-user workspace persistence (warehouses/vehicles/demand/config)
 │   │   └── api.py                 # FastAPI application & REST endpoints (39 routes, § API Reference)
 │   ├── tests/                     # 159 automated unit, integration & acceptance tests (25 files)
 │   ├── requirements.txt           # Python dependencies (FastAPI, PuLP, scikit-learn, etc.)
@@ -285,6 +286,7 @@ Beyond the 8 bonuses, the repo also ships: real road-network optimization (`dist
 | POST | `/api/overview` | Overview aggregate (vehicles/fuel/infra/orders/costs/alerts) |
 | POST | `/api/auth/signup` / `/api/auth/login` | PBKDF2 signup + HS256 login (24h TTL) |
 | GET | `/api/auth/me` | Current user from `Authorization: Bearer <token>` |
+| GET / PUT | `/api/user/data` | Per-user workspace (warehouses/vehicles/demand/config) persisted across sessions (JWT required) |
 
 The frontend (`frontend/src/services/api.ts`) uses `VITE_API_URL || '/api'` and ships offline fallbacks (`localValidate`, `localOptimizeNetwork`, synthetic/CSV builders) so the UI still works without the backend. After editing `backend/src/*`, run `make sync-api` so Vercel's `api/src/` mirror stays in sync.
 

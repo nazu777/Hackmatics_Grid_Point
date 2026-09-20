@@ -771,6 +771,79 @@ export async function fetchWarehouseFocus(
   return computeWarehouseFocus(warehouseId, neighborhoods, warehouses, assignments);
 }
 
+// --------------------------------------------------------------------------
+// Server-side per-user workspace (warehouses, vehicles, demand, config).
+// Persists across sessions/devices/restarts via GET+PUT /api/user/data.
+// Both helpers never throw: null = logged out, offline, or server fallback.
+// --------------------------------------------------------------------------
+
+export interface UserWorkspace {
+  updated_at: number;
+  neighborhoods: Neighborhood[];
+  vehicles: VehicleType[];
+  warehouses: Warehouse[];
+  config: OptimizationConfig | null;
+}
+
+export function isWorkspaceEmpty(ws: UserWorkspace | null | undefined): boolean {
+  if (!ws) return true;
+  return (
+    (ws.neighborhoods?.length ?? 0) === 0 &&
+    (ws.vehicles?.length ?? 0) === 0 &&
+    (ws.warehouses?.length ?? 0) === 0 &&
+    !ws.config
+  );
+}
+
+/** Pull the logged-in user's server workspace (null when unavailable). */
+export async function fetchUserWorkspace(): Promise<UserWorkspace | null> {
+  if (!getAuthToken()) return null;
+  try {
+    const res = await fetch(`${API_BASE}/user/data`, { headers: authHeaders() });
+    if (!res.ok) return null;
+    const body = (await res.json()) as Partial<UserWorkspace>;
+    return {
+      updated_at: Number(body.updated_at) || 0,
+      neighborhoods: Array.isArray(body.neighborhoods) ? body.neighborhoods as Neighborhood[] : [],
+      vehicles: Array.isArray(body.vehicles) ? body.vehicles as VehicleType[] : [],
+      warehouses: Array.isArray(body.warehouses) ? body.warehouses as Warehouse[] : [],
+      config: body.config && typeof body.config === 'object' ? body.config as OptimizationConfig : null
+    };
+  } catch {
+    return null;
+  }
+}
+
+/** Push workspace rows + config (partial ok). Returns server state or null. */
+export async function saveUserWorkspace(ws: {
+  neighborhoods?: Neighborhood[];
+  vehicles?: VehicleType[];
+  warehouses?: Warehouse[];
+  config?: OptimizationConfig | null;
+  updated_at?: number;
+}): Promise<UserWorkspace | null> {
+  if (!getAuthToken()) return null;
+  try {
+    const res = await fetch(`${API_BASE}/user/data`, {
+      method: 'PUT',
+      headers: authHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify(ws)
+    });
+    if (!res.ok) return null;
+    const body = (await res.json()) as Partial<UserWorkspace> & { saved?: boolean };
+    if (!body || body.saved === false) return null;
+    return {
+      updated_at: Number(body.updated_at) || Date.now() / 1000,
+      neighborhoods: Array.isArray(body.neighborhoods) ? body.neighborhoods as Neighborhood[] : [],
+      vehicles: Array.isArray(body.vehicles) ? body.vehicles as VehicleType[] : [],
+      warehouses: Array.isArray(body.warehouses) ? body.warehouses as Warehouse[] : [],
+      config: body.config && typeof body.config === 'object' ? body.config as OptimizationConfig : null
+    };
+  } catch {
+    return null;
+  }
+}
+
 export interface IsoFeature {
   type: 'Feature';
   properties: { contour?: number; [k: string]: unknown };
