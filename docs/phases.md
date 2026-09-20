@@ -1,6 +1,6 @@
 # GridPoint: Development Phases & Sprint Plan
 
-> Source: user-provided 14-item backlog (Sept 2026), recorded verbatim in §0. Phases A, D, E are SHIPPED (Sept 20 2026: onboarding trio, per-order cost truth + elbow, expansion policy with abandon/sell). Phases B, C, F remain planned.
+> Source: user-provided 14-item backlog (Sept 2026), recorded verbatim in §0. Phases A–F are ALL SHIPPED (Sept 20 2026: A onboarding trio, B map focus + heatmap + roads fix, C traffic-aware routing, D per-order cost truth + elbow, E expansion policy with abandon/sell, F realtime automation + Overview).
 > Pipeline still holds: `Neighborhood Data` → `Location Visualization` → `Warehouse Optimization` → `Neighborhood Assignment` → `Delivery Cost Comparison`, plus new Overview + Realtime Automation layers.
 
 ---
@@ -35,7 +35,7 @@ To keep overlap minimal, every phase builds against these frozen contracts and M
 - `VehicleType {vehicle_type, capacity, cost_per_km, fuel_type, avg_speed_kmph, mileage_kmpl}` (#4).
 - `Assignment {neighborhood_id → warehouse_id, distance_km, weighted_distance, cost, fuel_cost, congestion_pct?, travel_time_min?, within_radius, is_feasible}` (#6–#9).
 - `Metrics {total_unweighted_distance_km, total_weighted_distance_km_orders, total_cost, total_fuel_cost, fuel_live, avg_congestion_pct, avg_distance_per_order_km, feasibility_ratio, ...}` — the three fields in #7 MUST be populated, never empty.
-- `OptimizationConfig` gains (planned): `use_live_traffic_for_routing: bool`, `traffic_aware_reroute: bool`, `simulation_mode: off|realtime`, `expansion_policy {allow_abandon_infra, allow_sell_vehicles, horizon_months, revenue_per_order}` (#5, #9, #11–#13).
+- `OptimizationConfig` gains (ALL SHIPPED Sept 20 2026): `use_live_traffic_for_routing: bool`, `traffic_aware_reroute: bool`, `simulation_mode: off|realtime`, `expansion_policy {allow_abandon_infra, allow_sell_vehicles, horizon_months, revenue_per_order}` (#5, #9, #11–#13).
 - Route geometry contract fix (#3): backend `POST /api/routes/geometry` currently validates `pairs[]` as `{frm:{lat,lon}, to:{lat,lon}}` while the frontend sends `{from:{lat,lon}, to:{lat,lon}}` — the fix is to accept BOTH spellings and never surface the raw `Pair #0…` validator string to the map UI (map to a friendly "Road path unavailable — showing straight line" notice).
 
 ---
@@ -43,7 +43,7 @@ To keep overlap minimal, every phase builds against these frozen contracts and M
 ## Phase A — Onboarding Trio & Data Foundation (items #4, #6, #8) ✅ SHIPPED Sept 20 2026
 
 **Goal**: a brand-new account starts EMPTY and the user enters all three inputs — order neighborhoods, owned vehicles, existing warehouses — each with a synthetic demo seeder.
-**Owns**: `schema.md` §2.1/§2.2/§2.3 + §2.8 seeds, `prd.md` §5.1, onboarding/empty-state UI, `POST /api/upload`, `GET /api/synthetic`, vehicle + warehouse CRUD endpoints (planned), per-user namespaced storage.
+**Owns**: `schema.md` §2.1/§2.2/§2.3 + §2.8 seeds, `prd.md` §5.1, onboarding/empty-state UI, `POST /api/upload`, `GET /api/synthetic`, vehicle + warehouse CRUD endpoints (SHIPPED: `POST /api/vehicles/validate`, `POST /api/warehouses/validate`, `GET /api/synthetic/vehicles|warehouses`, `POST /api/export/vehicles|warehouses`), per-user namespaced storage.
 **Does NOT touch**: map rendering, routing engine, cost math, expansion recommendations, overview aggregation (consumes only the frozen interfaces above).
 - Tasks:
   1. Neighborhood orders input (exists — keep): CSV/JSON upload, manual table, validation, alias mapping.
@@ -55,10 +55,10 @@ To keep overlap minimal, every phase builds against these frozen contracts and M
 - **Acceptance**: fresh account shows 0/0/0 with seeders; invalid rows flagged; seeds are deterministic.
 - **Trace**: #4, #6, #8.
 
-## Phase B — Map Interaction & Coverage UX (items #1, #2, #3 + display half of #5)
+## Phase B — Map Interaction & Coverage UX (items #1, #2, #3 + display half of #5) ✅ SHIPPED Sept 20 2026
 
 **Goal**: click-to-focus warehouse zones, proximity heatmap, traffic overlay display, and the roads-error fix.
-**Owns**: `MapView.tsx`, `mapThemes.ts`, `MapChrome.tsx`, `POST /api/routes/geometry` contract + client error mapping, `POST /api/map/summary`.
+**Owns**: `MapView.tsx`, `mapThemes.ts`, `MapChrome.tsx`, `POST /api/routes/geometry` contract + client error mapping, `POST /api/map/summary` (+ SHIPPED `POST /api/map/coverage`, `POST /api/map/warehouse-focus`).
 **Does NOT touch**: routing optimization math, cost engine, expansion logic, simulation loop (reads their outputs only).
 - Tasks:
   1. Warehouse click-to-focus (#1): detail card (zone id, center, `assigned_orders = Σ daily_orders`, utilization, capacity/radius/infra, full assigned-node list with per-node `daily_orders` + distance); dim/hide non-selected zones; highlight selected zone boundary + members; clear-focus control.
@@ -69,16 +69,16 @@ To keep overlap minimal, every phase builds against these frozen contracts and M
 - **Acceptance**: clicking Wk isolates its zone with full node table; heatmap gradient renders; switching displacement→roads never shows `Pair #0…`.
 - **Trace**: #1, #2, #3, #5 (display).
 
-## Phase C — Traffic-Aware Routing Engine (items #5-opt, #9, plus engine half of #12)
+## Phase C — Traffic-Aware Routing Engine (items #5-opt, #9, plus engine half of #12) ✅ SHIPPED Sept 20 2026
 
 **Goal**: roads-derived corridor traffic feeds live routing decisions; optimization can run on current traffic; routes re-optimize for time + money.
-**Owns**: `backend/src/routing.py`, `traffic.py`, `optimization.py` (`nearest_labels_for_metric`, `evaluate_network_layout`, `run_optimization`), `POST /api/routes/geometry`, `GET /api/traffic/flow|history`, OptimizationPanel traffic controls.
+**Owns**: `backend/src/routing.py`, `traffic.py`, `optimization.py` (`nearest_labels_for_metric`, `evaluate_network_layout`, `run_optimization`), `POST /api/routes/geometry`, `GET /api/traffic/flow|history` (+ SHIPPED `POST /api/traffic/corridors`, `POST /api/routes/reroute`), OptimizationPanel traffic controls.
 **Does NOT touch**: onboarding forms, comparison cards, expansion advisor, overview tab (exposes `congestion_pct`, `travel_time_min`, `routing_note`, `traffic_note` for them).
 - Tasks:
   1. Corridor traffic from road geometries (#5): aggregate traced-road segments into per-corridor congestion; persist to rolling history; serve via traffic endpoints.
   2. "Optimize on current traffic" option (#5-opt): explicit toggle in the Optimization section (`use_live_traffic_for_routing`); when on, matrices + assignment use live corridor speeds; result carries `traffic_note`/`routing_note` provenance.
   3. Dynamic reroute (#9): `traffic_aware_reroute` mode re-evaluates assignment as corridor conditions change, optimizing `α·cost + β·time`; surfaces changed assignments + saved minutes/₹.
-  4. Engine half of automated Fleet ETA (#12): ETA math reads live fuel/traffic/population feeds (no manual sliders in the engine path); UI sliders remain only as offline overrides until Phase F removes them.
+  4. Engine half of automated Fleet ETA (#12): ETA math reads live fuel/traffic/population feeds (no manual sliders in the engine path); UI sliders remain only as offline overrides (Phase F shipped them as collapsed overrides).
 - **Deliverable**: traffic-aware optimize + reroute path with provenance notes and corridor congestion outputs.
 - **Acceptance**: same dataset optimizes differently under congested vs free-flow corridors; reroute improves time and/or cost; no slider required in the engine path.
 - **Trace**: #5, #9, #12 (engine).
@@ -111,10 +111,12 @@ To keep overlap minimal, every phase builds against these frozen contracts and M
 - **Acceptance**: same state yields different recommended plans when abandon/sell toggles flip; recommendation cites infra, fuel, delivery, and revenue figures that reconcile to Phase D.
 - **Trace**: #11 (uses #10 tradeoff + #7 fuel costing).
 
-## Phase F — Realtime Automation & Overview (items #12-ui, #13, #14)
+## Phase F — Realtime Automation & Overview (items #12-ui, #13, #14) ✅ SHIPPED Sept 20 2026
+
+> Status: SHIPPED. Engine `backend/src/simulation.py` + routes `POST /api/simulation/tick|live`, `POST /api/overview` (6 tests in `backend/tests/test_simulation.py`); UI `ScenariosPanel.tsx` realtime card + `OverviewTab.tsx` + rail `overview` tab (`/app/overview`); `simulation_mode` + `SpilloverEvent`/`ActiveSpill`/`OverviewAggregate` in `schema.py`/`types`. Manual sliders are collapsed offline overrides; the tick is the default path in realtime mode.
 
 **Goal**: flip simulation from manual sliders to live-data automation, add congestion-triggered reassignment, and ship the single Overview tab.
-**Owns**: `ScenariosPanel.tsx` (Fleet ETA + Demand Surge sections), simulation orchestrator (planned), Overview tab (planned), `simulation_mode` config.
+**Owns**: `ScenariosPanel.tsx` (Fleet ETA + Demand Surge sections), simulation orchestrator (`backend/src/simulation.py` SHIPPED), Overview tab (`OverviewTab.tsx` SHIPPED), `simulation_mode` config.
 **Does NOT touch**: onboarding forms, map interaction internals, routing/cost/expansion math (orchestrates them only).
 - Tasks:
   1. Automated Fleet ETA (#12-ui): "Traffic Congestion & Fleet ETA" reads live fuel + traffic + population feeds and refreshes on a poll tick; manual sliders become collapsed offline overrides (removed from the default path).
@@ -144,7 +146,7 @@ Rule: phases share ONLY the §1 interfaces. Map (B), engine (C), costs (D), expa
 
 ## Appendix A: Traceability Matrix (backlog → phase)
 
-| Backlog # | Phase | Artefact (planned) |
+| Backlog # | Phase | Artefact (all SHIPPED Sept 20 2026) |
 | :--- | :--- | :--- |
 | 1 warehouse click-to-focus | B | Warehouse detail card + zone isolate/highlight |
 | 2 coverage heatmap | B | Green→red proximity gradient layer + legend |
@@ -163,17 +165,17 @@ Rule: phases share ONLY the §1 interfaces. Map (B), engine (C), costs (D), expa
 
 ---
 
-## Appendix B: File Structure (A/D/E shipped Sept 20 2026; B/C/F planned)
+## Appendix B: File Structure (A–F ALL SHIPPED Sept 20 2026)
 
 ```
 Hackmatics_Grid_Point/
-├── backend/src/            # SHIPPED A/D/E: validation + ingestion + synthetic for vehicles/warehouses, per-order cost truth, expansion policy; planned: simulation orchestrator; {frm|from} tolerance
-├── backend/tests/          # SHIPPED: onboarding seeds, per-order fuel costing, expansion policy tests (130 tests); + planned: heatmap/focus contracts, traffic-aware routing, simulation spillover tests
-├── frontend/src/           # SHIPPED A/D/E: vehicle + warehouse onboarding, per-node comparison tables,
-│                           #   tradeoff view, expansion advisor; + planned B/C/F: warehouse focus card, heatmap +
+├── backend/src/            # SHIPPED A–F: validation + ingestion + synthetic for vehicles/warehouses, per-order cost truth, expansion policy, focus/heatmap ({frm|from} tolerance), traffic-aware routing, simulation orchestrator + Overview aggregate
+├── backend/tests/          # SHIPPED: onboarding seeds, per-order fuel costing, expansion policy, heatmap/focus contracts, traffic-aware routing, simulation spillover tests (159 tests, 25 files)
+├── frontend/src/           # SHIPPED A–F: vehicle + warehouse onboarding, per-node comparison tables,
+│                           #   tradeoff view, expansion advisor, warehouse focus card, heatmap +
 │                           #   traffic layers, optimize-on-traffic toggle, automated ETA/surge panels, Overview tab
 ├── api/                    # unchanged shape (make sync-api still applies; 32 routes as of Sept 20 2026)
-├── data/samples/           # SHIPPED: vehicle + warehouse sample/seed files (11 files); + planned: none
+├── data/samples/           # SHIPPED: vehicle + warehouse sample/seed files (11 files)
 ├── docs/                   # problem_statement (frozen), prd, schema, phases (this plan), demo_script, prompt
 └── README.md / AGENTS.md
 ```

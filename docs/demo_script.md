@@ -3,7 +3,7 @@
 > **Hackathon Submission**: Hack-A-Matics  
 > **Topic**: Where Should the Warehouse Go? (Multi-facility location & assignment optimization)  
 > **Mandatory Pipeline Order**: `Neighborhood Data` → `Location Visualization` → `Warehouse Optimization` → `Neighborhood Assignment` → `Delivery Cost Comparison` → `Bonus Scenarios` → `Overview`
-> **Backlog note (Sept 20 2026)**: beats below cover user items #1–#14 (see `phases.md` §0). Phases A, D, E are SHIPPED and demoable; B, C, F beats remain planned.  
+> **Backlog note (Sept 20 2026)**: beats below cover user items #1–#14 (see `phases.md` §0). Phases A–F are ALL SHIPPED and demoable (Person 1: A/D/E; Person 2: B/C/F).  
 > **Live Production URL**: [https://hackmatics-grid-point.vercel.app](https://hackmatics-grid-point.vercel.app)
 
 ---
@@ -42,7 +42,7 @@
 - **Visual**:
   - Open **Optimize**.
   - Set warehouse count slider $K = 2$, choose **Haversine** great-circle distance metric (Euclidean / Manhattan / **Road** also available — Road re-optimizes on real driving distances).
-  - Show capacity ($C_{\max}$), service radius ($R_{\max}$), live fuel, and live traffic toggles (ON by default) PLUS the planned **Optimize on current traffic** switch (#5-opt) and **traffic-aware reroute** for time + money (#9).
+  - Show capacity ($C_{\max}$), service radius ($R_{\max}$), live fuel, and live traffic toggles (ON by default) PLUS the SHIPPED **Optimize on current traffic** switch (#5-opt) and **traffic-aware reroute** for time + money (#9).
   - Click **Run Network Optimization**.
   - Show the instant result banner: "Optimization Successful". Optionally demo **WarehouseExpansion** (add a warehouse without moving existing sites, before-after slider).
 - **Speaker**:
@@ -89,9 +89,9 @@
 ---
 
 ### [2:45 – 3:00] 8. Overview + Conclusion (Phase F, #14)
-- **Visual**: Open the **Overview tab**: vehicle count + mix, current fuel price(s) + provenance, infra price(s), warehouse count + utilization, order totals, distance/cost/fuel/congestion/feasibility summaries, pending simulation/expansion alerts — each figure linking back to its source tab. Then show the live URL `https://hackmatics-grid-point.vercel.app` and GitHub repository. Mention `make test` (115 tests, 20 files) and `make sync-api` (Vercel bundle hygiene).
+- **Visual**: Open the **Overview tab**: vehicle count + mix, current fuel price(s) + provenance, infra price(s), warehouse count + utilization, order totals, distance/cost/fuel/congestion/feasibility summaries, pending simulation/expansion alerts — each figure linking back to its source tab. Then show the live URL `https://hackmatics-grid-point.vercel.app` and GitHub repository. Mention `make test` (159 tests, 25 files) and `make sync-api` (Vercel bundle hygiene).
 - **Speaker**:
-  > *"And the Overview tab ties it together — every vehicle, fuel price, infra cost, warehouse, and order in one audited screen. GRIDPOINT is fully open-source, deployable on Vercel with live fuel/traffic/Census integrations, JWT auth with per-account workspaces, and backed by a comprehensive 115-test suite. Thank you!"*
+  > *"And the Overview tab ties it together — every vehicle, fuel price, infra cost, warehouse, and order in one audited screen. GRIDPOINT is fully open-source, deployable on Vercel with live fuel/traffic/Census integrations, JWT auth with per-account workspaces, and backed by a comprehensive 159-test suite. Thank you!"*
 
 ---
 

@@ -100,10 +100,10 @@ Output of optimization; also used for baseline/current locations AND for user-en
 | `use_live_traffic` | boolean | No | `false` | — | Use live TomTom corridor speeds for congestion. (UI default is ON.) |
 | `traffic_hour` | integer | No | `None` (now) | `0–23` | Hour-of-day for traffic history lookup. |
 | `vehicle_fleet` | VehicleType[] | No | `[]` | Owned fleet mix (onboarding input #4); if provided, cost uses fleet-weighted avg. |
-| `use_live_traffic_for_routing` | boolean | No | `false` | Planned (#5): optimize matrices + assignment on current corridor traffic. |
-| `traffic_aware_reroute` | boolean | No | `false` | Planned (#9): re-evaluate assignment as corridors change (`α·cost + β·time`). |
-| `simulation_mode` | enum | No | `off` | Planned (#12, #13): `off\|realtime` — live fuel/traffic/demand loop + congestion spillover. |
-| `expansion_policy` | object | No | `None` | SHIPPED Sept 20 2026 (#11): `{allow_abandon_infra, allow_sell_vehicles, demolition_cost, salvage_value, resale_value, horizon_months, revenue_per_order}`. |
+| `use_live_traffic_for_routing` | boolean | No | `false` | SHIPPED Phase C Sept 20 2026 (#5): optimize matrices + assignment on current corridor traffic. |
+| `traffic_aware_reroute` | boolean | No | `false` | SHIPPED Phase C Sept 20 2026 (#9): re-evaluate assignment as corridors change (`α·cost + β·time`). |
+| `simulation_mode` | enum | No | `off` | SHIPPED Phase F Sept 20 2026 (#12, #13): `off\|realtime` — live fuel/traffic/demand loop + congestion spillover. |
+| `expansion_policy` | object | No | `None` | SHIPPED Phase E Sept 20 2026 (#11): `{allow_abandon_infra, allow_sell_vehicles, demolition_cost, salvage_value, resale_value, horizon_months, revenue_per_order}`. |
 | `random_seed` | integer | No | `42` | — | Seed for K-Means & synthetic data reproducibility. |
 | `baseline_mode` | enum | No | `centroid` | `centroid\|mean\|single_center\|custom` | How to compute baseline warehouse(s). |
 | `custom_baseline_warehouses` | Warehouse[] | If `custom` | — | Valid lat/lon | User-provided original locations. |
@@ -184,7 +184,7 @@ Covers all three onboarding datasets — SHIPPED Sept 20 2026 (backlog #4): neig
 | `orders_min`, `orders_max` | integer | `10, 200` | Range for `daily_orders`. |
 | `seed` | integer | `42` | RNG seed. |
 
-### 2.9 Overview Aggregate (planned — backlog #14, Overview tab)
+### 2.9 Overview Aggregate (shipped — backlog #14, Overview tab; `POST /api/overview`)
 
 Single rollup the Overview tab renders; every figure deep-links to its source tab. All three #7 fields (`total_fuel_cost`, `avg_congestion_pct`, `feasibility_ratio`) MUST be populated here.
 
@@ -337,6 +337,10 @@ Dataset / metrics-table / assignment-table exports.
 
 Request: `{ neighborhoods }` → `{ bounds, center, zoom, bubbles }` for the Mapbox layer.
 
+### `POST /api/map/coverage` · `POST /api/map/warehouse-focus`
+
+SHIPPED Phase B Sept 20 2026 (#1, #2): green→red proximity heatmap cells + legend recomputed from active assignment distances; isolated zone payload for a clicked warehouse (`warehouse_focus_summary`: center, `assigned_orders = Σ daily_orders`, utilization, capacity/radius/infra, full assigned-node list).
+
 ### `GET /api/fuel/rates?state=` · `GET /api/fuel/price`
 
 Live India fuel prices (RapidAPI, 12h TTL) with static fallback (`{petrol:105, diesel:92, cng:90, autogas:40}`) and `live` flag.
@@ -345,10 +349,14 @@ Live India fuel prices (RapidAPI, 12h TTL) with static fallback (`{petrol:105, d
 
 Live TomTom segment speeds (5-min TTL) + rolling corridor history (`data/traffic_history.json`).
 
+### `POST /api/traffic/corridors` · `POST /api/routes/reroute`
+
+SHIPPED Phase C Sept 20 2026 (#5, #9): corridor congestion aggregated from traced road geometries into rolling history; `traffic_aware_reroute` re-evaluates assignment as corridors change (`α·cost + β·time`), returning changed assignments + saved minutes/₹ with `traffic_note`/`routing_note` provenance.
+
 ### `POST /api/routes/geometry`
 
 Traced road polylines for assignment pairs (chunked, progressive in the UI).
-Contract fix (backlog #3, docs-only plan): request items MUST accept BOTH `{frm:{lat,lon}, to:{lat,lon}}` and `{from:{lat,lon}, to:{lat,lon}}` spellings (the current 400 `Pair #0: expected {frm:{lat,lon}, to:{lat,lon}}` fires because the client sends `from`); the map UI MUST map any geometry failure to a friendly "Road path unavailable — showing straight line" notice and never render the raw validator string.
+Contract fix SHIPPED Phase B Sept 20 2026 (backlog #3): request items accept BOTH `{frm:{lat,lon}, to:{lat,lon}}` and `{from:{lat,lon}, to:{lat,lon}}` spellings (`backend/src/api.py` `_parse_route_pair`); the map UI maps any geometry failure to a friendly "Road path unavailable — showing straight line" notice with a traced/total counter and never renders the raw validator string.
 
 ### `POST /api/scenarios/tradeoff` · `/demand-shift` · `/eta` · `/diagnostics`
 
@@ -357,6 +365,10 @@ Multi-K elbow curve; demand scaling (`w_i' = w_i × (1+Δ%)`); fleet + traffic E
 ### `POST /api/expand`
 
 Incrementally add warehouses without moving existing sites (`MAX_WAREHOUSES=10`). SHIPPED Sept 20 2026: accepts `policy` + `owned_vehicles` and returns ranked NPV `recommendation` (keep vs abandon/demolish vs sell).
+
+### `POST /api/simulation/tick` · `POST /api/simulation/live` · `POST /api/overview`
+
+Phase F realtime loop (shipped — #12–#14): one poll tick scales `w_i` from the demand signal, reads corridor congestion per warehouse, and spills nodes off congested warehouses (threshold + hysteresis + cooldown, stateless via `active_spills`); live snapshot returns fuel + traffic + demand feeds; overview returns the `OverviewAggregate` (§2.9). All three degrade to seeded/offline fallbacks with `live=false` notes when providers are unreachable.
 
 ### `POST /api/auth/signup` · `POST /api/auth/login` · `GET /api/auth/me`
 

@@ -4,7 +4,7 @@
 **GRIDPOINT** answers: *Where Should the Warehouse Go?* An e-commerce company serves multiple neighborhoods, each with distinct geographic coordinates and daily order volumes. GRIDPOINT is a decision-support platform that ingests neighborhood demand data, visualizes it spatially, computes optimal warehouse location(s), assigns neighborhoods to warehouses, and quantifies delivery effort saved versus the original arrangement. The objective function is **weighted delivery cost minimization**: neighborhoods with higher `daily_orders` contribute proportionally more to total cost.
 
 > Pipeline: `Neighborhood Data` → `Location Visualization` → `Warehouse Optimization` → `Neighborhood Assignment` → `Delivery Cost Comparison` → `Overview`
-> Status (Sept 20 2026): Phases A, D, E SHIPPED (onboarding trio, per-order cost truth + elbow, expansion policy). Phases B, C, F remain planned. Daily orders live on nodes and flow into warehouses via assignment (#6, #8).
+> Status (Sept 20 2026): Phases A–F ALL SHIPPED (A onboarding trio, B map focus + heatmap + roads fix, C traffic-aware routing, D per-order cost truth + elbow, E expansion policy, F realtime automation + Overview). Daily orders live on nodes and flow into warehouses via assignment (#6, #8).
 
 ## 2. Background & Problem Context
 - E-commerce demand is spatially dispersed and non-uniform; each neighborhood `i` has position `(lat_i, lon_i)` and weight `w_i = daily_orders_i`.
@@ -108,12 +108,13 @@ Directly derived from `problem_statement.md`:
 - Policy inputs: `allow_abandon_infra` (keep vs abandon/change/demolish + demolition cost + salvage), `allow_sell_vehicles` (keep vs sell + resale), `horizon_months`, `revenue_per_order`.
 - Candidates (new sites + added vehicles) scored on dynamic infra-vs-fuel-vs-delivery economics over the horizon; ONE recommended plan ranked by net benefit (delivery savings + future revenue − capex − abandon/sell frictions) with costed rationale + before/after map + apply-to-main-map.
 
-### 5.10 Realtime Automation (planned — #12, #13)
-- `simulation_mode: off|realtime` master switch. When ON: "Traffic Congestion & Fleet ETA" and "Demand Surge & Contraction Simulator" read live fuel + traffic + population feeds on a poll tick — NO manual sliders in the default path (sliders survive only as collapsed offline overrides).
-- Congestion spillover: sustained congestion near a warehouse (threshold + hysteresis + cooldown) reassigns nodes to the next-best warehouse until the surge clears; event log records spill start/end, moved nodes, recovered savings.
+### 5.10 Realtime Automation (shipped — #12, #13)
+- `simulation_mode: off|realtime` master switch (`OptimizationConfig`; default `off`). When ON: "Traffic Congestion & Fleet ETA" and "Demand Surge & Contraction Simulator" read live fuel + traffic + population feeds on a 15s poll tick — NO manual sliders in the default path (sliders survive only as collapsed offline overrides).
+- Congestion spillover: sustained congestion near a warehouse (threshold + hysteresis + cooldown, all configurable on `OptimizationConfig`) reassigns nodes to the next-best warehouse until the surge clears; event log records spill start/end, moved nodes, recovered savings.
+- Engine: `backend/src/simulation.py` (orchestrates `cost`/`traffic`/`fuel` only); routes `POST /api/simulation/tick`, `POST /api/simulation/live`; offline degrades to seeded demand wave + static fallbacks with `live=false` notes.
 
-### 5.11 Overview Tab (planned — #14)
-- Single screen aggregating: vehicle count + mix, current fuel price(s) + `fuel_live` provenance, infra price(s), warehouse count + utilization, order totals, distance/cost/fuel/congestion/feasibility summaries, pending simulation/expansion alerts — every figure deep-links to its source tab.
+### 5.11 Overview Tab (shipped — #14)
+- Single screen (`/app/overview`, rail tab `overview`) aggregating: vehicle count + mix, current fuel price(s) + `fuel_live` provenance, infra price(s), warehouse count + utilization, order totals, distance/cost/fuel/congestion/feasibility summaries, pending simulation/expansion alerts — every figure deep-links to its source tab. Served by `POST /api/overview` (`OverviewAggregate`, `schema.md` §2.9); offline fallback computes the same shape client-side.
 
 ### 5.8 Constraints & Bonus Feature Modeling
 | Bonus Feature (problem_statement) | Implementation Approach |
@@ -141,7 +142,7 @@ Shipped extensions beyond the 8 bonuses: road-network optimization (`distance_me
 | Live data | TomTom Traffic/Matrix, RapidAPI India fuel, US Census ACS | Congestion, road distances, fuel prices, real demand |
 | Auth | JWT (PBKDF2 + HS256, 24h TTL; in-memory store, Neon `users` table = production path) | Login/signup, per-account workspaces |
 
-Repo structure (actual): `backend/src/*.py` (17 modules) + `backend/tests/` (115 tests), `frontend/src/` (App router, services/api, context/AuthContext, data/sample, 30+ components), `api/index.py` + `api/src/` mirror (Vercel), `data/samples/` (7 files + census cache), `docs/`, `Makefile` (`setup/test/run-backend/run-frontend/build-frontend/sync-api`), root + frontend `package.json`, `vercel.json`, `pnpm-workspace.yaml`.
+Repo structure (actual): `backend/src/*.py` (18 modules incl. `simulation.py`) + `backend/tests/` (159 tests, 25 files), `frontend/src/` (App router, services/api, context/AuthContext, data/sample, 30+ components incl. `OverviewTab`, `WarehouseFocusCard`), `api/index.py` + `api/src/` mirror (Vercel), `data/samples/` (11 files + census cache), `docs/`, `Makefile` (`setup/test/run-backend/run-frontend/build-frontend/sync-api`), root + frontend `package.json`, `vercel.json`, `pnpm-workspace.yaml`.
 
 ## 7. Non-Functional Requirements
 - **Performance**: Optimize N=1,000 within 5s (straight-line metrics); map renders <2s; road mode is provider-bound and renders progressively.
