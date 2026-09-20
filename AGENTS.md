@@ -12,59 +12,73 @@ E-commerce delivery optimization: each `Neighborhood` has `(latitude, longitude,
 min Σ w_i * d(n_i, w_assigned)      // docs/prd.md:4, docs/schema.md:135
 ```
 
-**5-Step Pipeline (must stay demonstrable, `docs/phases.md:2`):**
+**5-Step Pipeline (shipped, must stay demonstrable):**
 ```
-Neighborhood Data (Phase 1) → Location Visualization (Phase 2) → Warehouse Optimization (Phase 3)
-                                                            → Neighborhood Assignment (Phase 3)
-                                                            → Delivery Cost Comparison (Phase 4)
-Bonus + Polish → Phase 5
+Neighborhood Data → Location Visualization → Warehouse Optimization
+                                              → Neighborhood Assignment
+                                              → Delivery Cost Comparison
+Bonus + Polish (shipped) + Overview (PLANNED, docs-only — see below)
 ```
 
-Live prod URL (if deployed): `https://hackmatics-grid-point.vercel.app` (`README.md:7`). DB: Neon Postgres (`README.md:8`, `.env.example:3`).
+> **Docs-vs-code status (Sept 2026, read first):** `docs/phases.md` was REPLACED by a docs-only concurrent plan — **Phases A–F** covering user backlog #1–#14 (`phases.md` §0). **No feature code was built for A–F.** Shipped reality is still: onboarding = neighborhoods only (vehicles + existing-warehouse CRUD are planned), no warehouse click-to-focus, no coverage heatmap, no Overview tab, Fleet ETA / demand-surge are slider-driven (live-feed automation is planned), expansion has no abandon/sell/revenue policy. `docs/prd.md` §§5.9–5.11, `docs/schema.md` §§2.8–2.10 + new config fields, and `docs/demo_script.md` carry the matching planned spec. `docs/problem_statement.md` requirements are frozen — its addendum is a pointer only.
+
+Live prod URL (if deployed): `https://hackmatics-grid-point.vercel.app` (`README.md:7`). Auth store is in-memory (Neon `users` table = documented TODO in `backend/src/auth.py`); `DATABASE_URL`/`NEON_*` are env-plumbed via `.env.example:3`.
 
 ## 2. Repo Structure (Monorepo)
 
 ```
 Hackmatics_Grid_Point/
 ├── docs/
-│   ├── problem_statement.md  # 9 core req + 8 bonus (§Bonus Features)
-│   ├── prd.md                # PRD §5.1-5.8, pipeline traceability
-│   ├── schema.md             # SINGLE SOURCE OF TRUTH for entities, validation, API contracts
-│   ├── phases.md             # Sprint plan Phases 1-5, Appendix A traceability
-│   └── prompt.md             # Phase 1 implementation prompt
+│   ├── problem_statement.md  # 9 core req + 8 bonus (FROZEN) + Sept-2026 backlog pointer addendum
+│   ├── prd.md                # PRD §5.1-5.11 (§§5.9-5.11 = PLANNED: expansion advisor, realtime automation, Overview tab)
+│   ├── schema.md             # SINGLE SOURCE OF TRUTH for entities, validation, API contracts (§§2.9-2.10 = PLANNED: Overview aggregate, ExpansionRecommendation)
+│   ├── phases.md             # ⚠️ REPLACED Sept 2026: docs-only concurrent plan Phases A–F for backlog #1–#14 (NOT built); Appendix A = traceability matrix
+│   └── prompt.md             # Phase 1 implementation prompt (archival) + backlog pointer
 ├── backend/                  # Python 3.10+ FastAPI shared core
-│   ├── src/
+│   ├── src/                  # 17 modules (mirror into api/src/ via `make sync-api`)
 │   │   ├── schema.py         # Pydantic v2 models (Neighborhood, Warehouse, OptimizationConfig, Metrics, Comparison) — mirrors schema.md §2
 │   │   ├── validation.py     # Strict validation engine (schema.md §4)
 │   │   ├── data_ingestion.py # CSV/JSON parsers with alias mapping + export
 │   │   ├── synthetic.py      # Seedable generator (schema.md §2.8: clustered/uniform/gaussian)
-│   │   ├── distance.py       # Vectorized Haversine/Euclidean/Manhattan matrices (schema.md §5) — NEW Phase 3
-│   │   ├── optimization.py   # Weiszfeld (K=1), Weighted K-Means (K>1), PuLP MILP CFLP, evaluate & run_optimization (PRD §5.4) — NEW Phase 3
-│   │   └── api.py            # FastAPI app `app` (schema.md §6) — now includes POST /api/optimize
-│   ├── tests/                # 50+ tests: schema, validation, ingestion, synthetic, distance, optimization, api, acceptance+perf (N=1000 <5s, 1000-node MILP <10s)
-│   ├── requirements.txt      # FastAPI/Uvicorn/Pydantic/Pandas/NumPy/SciPy/sklearn/PuLP/Geopy/pytest + httpx
-│   ├── pyproject.toml        # pytest config, pythonpath="."
+│   │   ├── distance.py       # Vectorized Haversine/Euclidean/Manhattan matrices (schema.md §5); road lives in routing.py
+│   │   ├── optimization.py   # Weiszfeld (K=1), Weighted K-Means (K>1), PuLP MILP CFLP, road-aware assignment, evaluate & run_optimization (PRD §5.4)
+│   │   ├── cost.py           # Cost engine incl. live fuel + congestion (schema.md §2.6, PRD §5.6)
+│   │   ├── mapping.py        # Map bounds, bubble sizing, layer data (Phase 2)
+│   │   ├── scenarios.py      # Trade-off elbow, demand shift, fleet ETA, diagnostics (Phase 5)
+│   │   ├── routing.py        # Road provider: TomTom Matrix v2 → OSRM → Haversine (MAX_ROUTE_PAIRS=60, 15-min cache)
+│   │   ├── traffic.py        # Live TomTom flow + corridor history JSON (5-min TTL)
+│   │   ├── fuel.py           # Live India fuel via RapidAPI (12h TTL + static fallback)
+│   │   ├── census.py         # US Census ACS seeder (tract pop → daily_orders, data/census_cache/)
+│   │   ├── expansion.py      # Incremental expansion (MAX_WAREHOUSES=10)
+│   │   ├── auth.py           # JWT (PBKDF2 + HS256, 24h TTL, in-memory store; Neon TODO)
+│   │   └── api.py            # FastAPI app `app` (schema.md §6) — 26 routes (optimize, expand, scenarios, fuel, traffic, census, routes, auth…)
+│   ├── tests/                # 115 tests in 20 files: schema, validation, ingestion, synthetic, distance, optimization, cost, mapping, scenarios, expansion, routing, fuel, traffic, census, auth, api, acceptance phase1/2/3/5 + perf (N=1000 <5s)
+│   ├── requirements.txt      # Floating deps (FastAPI/Uvicorn/Pydantic/Pandas/NumPy/SciPy/sklearn/PuLP/Geopy/pytest + httpx)
+│   ├── pyproject.toml        # pytest config, pythonpath=".", testpaths=["tests"]
 │   └── pytest.ini
-├── frontend/                 # React 18 + Vite + TypeScript + Tailwind
+├── frontend/                 # React 18 + Vite + TypeScript + Tailwind + Mapbox GL + React Router 7
 │   ├── src/
-│   │   ├── App.tsx           # Phase-state shell, localStorage, now integrates OptimizationPanel (Phase 3)
-│   │   ├── types/index.ts    # TS contracts (must mirror backend/src/schema.py) — now includes OptimizationConfig/Result, Metrics, WarehouseMetric
-│   │   ├── services/api.ts   # API client, fallback localValidate + localOptimizeNetwork (Weiszfeld/K-Means JS), VITE_API_URL support, POST /api/optimize
-│   │   └── components/       # Header, SummaryCards, FileUploader, DataTable, SyntheticModal, ErrorDrawer, OptimizationPanel (NEW Phase 3)
-│   ├── vite.config.ts        # dev proxy /api → 127.0.0.1:8000
-│   └── vercel.json           # SPA fallback (standalone frontend deploy)
+│   │   ├── App.tsx           # Router (/, /login, /signup, /app/:tab) + per-user shell, Mapbox MapView, rail panels
+│   │   ├── types/index.ts    # TS contracts (must mirror backend/src/schema.py) — incl. road metric, live fuel/traffic, fuel/congestion fields
+│   │   ├── services/api.ts   # API client (VITE_API_URL || '/api', JWT headers) + offline fallbacks: localValidate, localOptimizeNetwork, synthetic/CSV builders
+│   │   ├── context/AuthContext.tsx # JWT session (login/signup/logout, /api/auth/me, localStorage token)
+│   │   ├── data/sample.ts    # Opt-in 10-node Hyderabad sample; accounts start EMPTY
+│   │   └── components/       # GmapsRail (ask/saved/optimize/compare/data/lab/export/settings/help), AskPanel, LandingPage, AuthPages, ProtectedRoute, Header, Topbar, Sidebar, SideCards, Dashboard, SectionOverview, SummaryCards, FileUploader, DataTable, SyntheticModal, CensusModal, MapView, MapChrome, OptimizationPanel, OptimizationControls, WarehouseExpansion, ComparisonDashboard, ScenariosPanel, FuelCard, TrafficCard, SavedPanel, ExportView, SettingsView, DetailCard, UsageDonut, ZoneLegendEditor, ErrorDrawer, mapThemes (Mapbox styles/token), panelStore (per-user storage, CSV builders, smartDefaults)
+│   ├── vite.config.ts        # port 3000, dev proxy /api → 127.0.0.1:8000
+│   └── package.json          # gridpoint-frontend (mapbox-gl, react-router-dom, lucide-react, vite, tailwind)
 ├── api/
-│   ├── index.py              # ⚠️ Vercel adapter only — re-exports backend/src/api.py `app` (see §7)
-│   └── requirements.txt      # -r ../backend/requirements.txt + mangum
-├── data/samples/             # hyderabad_demand.csv, neighborhoods_*.json, large_1000_nodes.csv (perf benchmark), sample_with_errors.csv
-├── vercel.json               # Root Vercel monorepo config (frontend + backend, see §7)
-├── pnpm-workspace.yaml       # pnpm workspace: frontend + allowBuilds.esbuild
-├── package.json              # Monorepo scripts: build, dev:backend/frontend, test
-├── requirements.txt          # Root: -r backend/requirements.txt
-└── Makefile                  # setup, test, run-backend/frontend, build-frontend
+│   ├── index.py              # ⚠️ 23-line Vercel ASGI adapter — re-exports api/src api.app (see §7)
+│   ├── requirements.txt      # Pinned serverless deps (no uvicorn/pytest/httpx/mangum)
+│   └── src/                  # Mirror of backend/src/* — DO NOT hand-edit; regenerate with `make sync-api`
+├── data/samples/             # 7 files: hyderabad_demand.csv (20 rows), neighborhoods_canonical/aliased/sample/synthetic_3clusters JSON, sample_with_errors.csv, large_1000_nodes.csv (+ data/census_cache/ Clark County NV)
+├── vercel.json               # Root monorepo config: pnpm build → frontend/dist, /api/(.*) → api/index.py, SPA fallback, CORS (see §7)
+├── pnpm-workspace.yaml       # packages: ['frontend'] + allowBuilds.esbuild
+├── package.json              # Monorepo scripts: build, dev:backend/frontend, build:frontend, test:backend, test
+├── requirements.txt          # Pointer stub only (see api/ + backend/ requirements)
+└── Makefile                  # setup, test, run-backend/frontend, build-frontend, sync-api (cp backend/src/*.py api/src/)
 ```
 
-**Do NOT duplicate logic** between `backend/` and `api/`. `api/index.py` is a 30-line wrapper.
+**Do NOT duplicate logic** between `backend/` and `api/`. `api/index.py` is a 23-line adapter; `api/src/` is a generated mirror — regenerate with `make sync-api`, never hand-edit.
 
 ## 3. Canonical Schemas — MUST Match Exactly (`docs/schema.md:3`)
 
@@ -84,10 +98,11 @@ Aliases on ingest (`backend/src/data_ingestion.py`): `id→neighborhood_id`, `la
 `warehouse_id (W1..WK), latitude, longitude, capacity? (C_max), radius_km? (R_max), infra_cost?, assigned_orders (derived), utilization_pct (derived)` (`docs/schema.md:57`)
 
 ### OptimizationConfig
-`K: 1-10 (default 2), distance_metric: haversine|euclidean|manhattan (default haversine), capacity_enabled, C_max, radius_enabled, R_max_km, cost_per_km (1.0), fuel_cost_per_km, infra_cost_per_warehouse, traffic_factor, vehicle_fleet[], random_seed (42), baseline_mode, custom_baseline_warehouses` (`docs/schema.md:82`)
+`K: 1-10 (default 2), distance_metric: haversine|euclidean|manhattan|road (default haversine), capacity_enabled, C_max, radius_enabled, R_max_km, cost_per_km (1.0), fuel_cost_per_km, infra_cost_per_warehouse, traffic_factor, use_live_fuel, fuel_state (Karnataka), fuel_city, use_live_traffic, traffic_hour, vehicle_fleet[], random_seed (42), baseline_mode, custom_baseline_warehouses` (`docs/schema.md:82`, `backend/src/schema.py:47`)
+> PLANNED (in `docs/schema.md` + `phases.md` §1, NOT in code): `use_live_traffic_for_routing`, `traffic_aware_reroute`, `simulation_mode: off|realtime`, `expansion_policy {allow_abandon_infra, allow_sell_vehicles, horizon_months, revenue_per_order}`. Do NOT reference these as implemented.
 
 ### Assignment / Metrics / Comparison
-See `docs/schema.md:101` — `distance_km (km), weighted_distance=w_i*d, cost, within_radius, is_feasible`. Metrics: `total_unweighted_distance_km=Σd_i`, `total_weighted_distance=Σw_i*d_i`, `total_cost=Σw_i*d_i*cost_per_km+Σinfra`, `avg_distance_per_order`, `feasibility_ratio` (`docs/schema.md:130`).
+See `docs/schema.md:101` — `distance_km (km), weighted_distance=w_i*d, cost, fuel_cost, congestion_pct, travel_time_min (road), within_radius, is_feasible`. Metrics: `total_unweighted_distance_km=Σd_i`, `total_weighted_distance=Σw_i*d_i`, `total_cost=Σw_i*d_i*cost_per_km+Σinfra`, `total_fuel_cost`, `fuel_live`, `avg_congestion_pct`, `avg_distance_per_order`, `feasibility_ratio` (`docs/schema.md:130`, `backend/src/schema.py:130`). `OptimizationResult` also carries `fuel_note/traffic_note/routing_note`.
 
 ## 4. Validation Rules (`docs/schema.md:208`, `backend/src/validation.py`)
 
@@ -105,17 +120,36 @@ Error shape: `{"row":3,"field":"latitude","value":120.5,"error":"...","code":"OU
 
 Client fallback `frontend/src/services/api.ts:88 localValidate()` must stay in sync with `backend/src/validation.py`.
 
-## 5. API Contracts (`docs/schema.md:244`, `backend/src/api.py`)
+## 5. API Contracts (`docs/schema.md:244`, `backend/src/api.py` — 26 routes)
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
 | `/api/health` | GET | `{status, service, version}` |
-| `/api/validate` | POST `{neighborhoods:[]}` | `ValidationResult` (`backend/src/api.py:64`) |
-| `/api/optimize` | POST `{neighborhoods: Neighborhood[], config?: OptimizationConfig}` | `OptimizationResult` — Weiszfeld/K-Means or PuLP MILP, returns `{warehouses, assignments, metrics, comparison, is_feasible}` (`backend/src/api.py:71`, `backend/src/optimization.py:409`) |
+| `/api/validate` | POST `{neighborhoods:[]}` | `ValidationResult` |
+| `/api/config/validate` | POST `{config, neighborhoods}` | Config-vs-data feasibility check |
+| `/api/optimize` | POST `{neighborhoods: Neighborhood[], config?: OptimizationConfig}` | `OptimizationResult` — Weiszfeld/K-Means or PuLP MILP (+ road mode), returns `{warehouses, assignments, metrics, comparison, is_feasible, fuel_note/traffic_note/routing_note}` |
+| `/api/expand` | POST | Incremental expansion without moving existing sites |
 | `/api/synthetic?N=&lat_center=&lon_center=&spread_km=&distribution=&num_clusters=&orders_min=&orders_max=&seed=` | GET | `Neighborhood[]` |
+| `/api/census/cities` | GET | Supported Census city presets |
+| `/api/census/demand?city=&orders_per_1000=` | GET | Real ACS tract demand → `Neighborhood[]` |
 | `/api/upload` | POST multipart `file` | `{filename, validation, neighborhoods, summary}` — auto CSV/JSON detection |
 | `/api/export/csv` | POST `{neighborhoods}` | CSV text |
 | `/api/export/json` | POST `{neighborhoods}` | JSON text |
+| `/api/export/metrics` | POST | Metrics table export |
+| `/api/export/assignments` | POST | Assignment table export |
+| `/api/map/summary` | POST `{neighborhoods}` | Bounds, center, zoom + bubble styling |
+| `/api/fuel/rates?state=` | GET | Live India fuel rates + fallback (`live` flag) |
+| `/api/fuel/price` | GET | Single fuel price lookup |
+| `/api/traffic/flow` | GET | Live TomTom segment speed |
+| `/api/traffic/history` | GET | Rolling corridor history |
+| `/api/routes/geometry` | POST | Traced road polylines (TomTom → OSRM → fallback). ⚠️ KNOWN CONTRACT BUG: backend validates `pairs[]` as `{frm:{lat,lon}, to:{lat,lon}}` (`backend/src/api.py` `_parse_route_pair`) but frontend sends `{from:{lat,lon}, to:{lat,lon}}` — this is what surfaces the raw `Pair #0: expected {frm:{lat,lon}, to:{lat,lon}}` 400 when switching displacement→roads. Planned fix (docs-only, `phases.md` Phase B): accept BOTH spellings + map failures to a friendly notice. |
+| `/api/scenarios/tradeoff` | POST | Multi-K elbow curve |
+| `/api/scenarios/demand-shift` | POST | Scale $w_i$ by Δ% and re-evaluate |
+| `/api/scenarios/eta` | POST | Fleet + traffic ETA |
+| `/api/scenarios/diagnostics` | POST | Capacity + $R_{\max}$ audit |
+| `/api/auth/signup` | POST | PBKDF2 signup → JWT (24h TTL) |
+| `/api/auth/login` | POST | Login → JWT |
+| `/api/auth/me` | GET | Current user via `Authorization: Bearer` |
 
 Always keep CORS `allow_origins=["*"]` (`backend/src/api.py:35`) for Vercel proxy.
 
@@ -125,27 +159,28 @@ Always keep CORS `allow_origins=["*"]` (`backend/src/api.py:35`) for Vercel prox
 make setup              # backend/.venv + pnpm install
 make run-backend        # FastAPI: backend/.venv/bin/uvicorn src.api:app --reload --port 8000 --app-dir backend → http://localhost:8000/docs
 make run-frontend       # Vite: pnpm --prefix frontend dev → http://localhost:3000 (proxy /api → 8000)
-make test               # pytest: backend/.venv/bin/pytest -c backend/pyproject.toml backend/tests -v  (50+ tests, includes distance, optimization, acceptance_phase3)
-pnpm --prefix frontend build   # tsc && vite build → frontend/dist (verified <18s, gzip ~56kB)
+make test               # pytest: backend/.venv/bin/pytest -c backend/pyproject.toml backend/tests -v  (115 tests: distance, optimization, cost, routing, fuel, traffic, census, auth, acceptance)
+make sync-api           # cp backend/src/*.py api/src/ — required after any backend/src change (Vercel serves api/src)
+pnpm --prefix frontend build   # tsc && vite build → frontend/dist
 # Quick backend smoke: python -c "from src.api import app; print([r.path for r in app.routes])" --app-dir backend
 # Optimize smoke: curl -X POST http://localhost:8000/api/optimize -H "Content-Type: application/json" -d '{"neighborhoods":[...], "config":{"K":2}}'
 ```
 
-Local dev needs 2 terminals (backend + frontend).
+Local dev needs 2 terminals (backend + frontend) plus `VITE_MAPBOX_TOKEN` in `frontend/.env.local` (Mapbox GL is required even locally).
 
-Env: copy `.env.example` → `.env` (Neon `DATABASE_URL`, `NEON_PROJECT_ID`) — never commit `.env` (`.gitignore:48`).
+Env: copy `.env.example` → `.env` (Neon `DATABASE_URL`, `NEON_PROJECT_ID`, plus server-only `RAPIDAPI_KEY`, `TOMTOM_KEY`, `CENSUS_KEY`) — never commit `.env` (`.gitignore:48`). Without live keys the API serves static fallbacks with `live=false`.
 
 ## 7. Vercel Hosting — Frontend + Backend
 
 ### Current Config (Monorepo Single Domain)
-- **Root `vercel.json:1`** builds `frontend/dist` (`pnpm run build`), routes `/api/(.*)` → `api/index.py` (Python 3.11), SPA fallback `/(.*)` → `/index.html`, CORS headers for `/api/*`.
-- **`api/index.py:1`** is *adapter*, not new backend: injects `backend/` into `sys.path` and `from src.api import app`. Vercel native ASGI; `mangum` optional compat (`api/index.py:30`).
-- **`api/requirements.txt:1`** pins `-r ../backend/requirements.txt` + `mangum` so function has same deps as root `requirements.txt:2`.
-- **Frontend `frontend/src/services/api.ts:4`** uses `VITE_API_URL || '/api'` — same-origin for monorepo, or absolute backend URL for split deploy.
+- **Root `vercel.json:1`** installs with pnpm, builds `frontend/dist` (`pnpm run build`), bundles `api/src/**` into the Python function, routes `/api/(.*)` → `api/index.py`, SPA fallback `/(.*)` → `/index.html`, CORS headers for `/api/*`.
+- **`api/index.py:1`** is *adapter*, not new backend: inserts `api/` into `sys.path` and `from src.api import app` (serves the `api/src/` mirror). Vercel native ASGI; `mangum` optional compat.
+- **`api/requirements.txt:1`** pins serverless deps (`fastapi==`, `pydantic==`, `pandas==`, `numpy==`, `scipy==`, `scikit-learn==`, `pulp==`, `geopy==`) — intentionally separate from floating `backend/requirements.txt` (which adds `uvicorn`, `pytest`, `httpx`). After any `backend/src` change run `make sync-api`.
+- **Frontend `frontend/src/services/api.ts:24`** uses `VITE_API_URL || '/api'` + JWT `Authorization` headers — same-origin for monorepo, or absolute backend URL for split deploy. Ships offline fallbacks (`localValidate`, `localOptimizeNetwork`, synthetic/CSV builders).
 - **`pnpm-workspace.yaml:3`** `allowBuilds: esbuild=true` required for Vite on Vercel (otherwise ERR_PNPM_IGNORED_BUILDS).
 
 ### Why Not Just `backend/`?
-Vercel only discovers Python functions in `api/*.py` at repo root. Keeping `backend/` clean avoids mixing build toolchains; `api/index.py` stays ≤35 lines.
+Vercel only discovers Python functions in `api/*.py` at repo root. Keeping `backend/` clean avoids mixing build toolchains; `api/index.py` stays a 23-line adapter over the generated `api/src/` mirror.
 
 ### Alternative (Split Deploy, no `api/` folder)
 If deleting `api/`: deploy `frontend/` as one Vercel project and `backend/` as standalone Python project, then set `VITE_API_URL=https://<backend>.vercel.app` in frontend env. Requires separate `vercel link --cwd backend`.
@@ -157,29 +192,35 @@ vercel link --yes               # or vercel link --project hackmatics-grid-point
 vercel --prod --yes             # deploys monorepo
 vercel ls / vercel project ls   # verify
 ```
-`frontend/vercel.json:1` is fallback for frontend-only deploys; root `vercel.json` takes precedence on `vercel --cwd .`
+`frontend/vercel.json` does not exist — only the root `vercel.json` is used. There is no standalone frontend deploy config in the repo.
 
-## 8. Phase Progress & Next Steps
+## 8. Implementation Status vs Planned Phases (SYNCED Sept 2026)
 
-- **Phase 1 ✅ DONE** (`docs/phases.md:8`, `1b09bc4`): ingestion, validation, synthetic, export, tests (1000 nodes <0.2s, 31 passing). Deliverable: validated DataFrame/session.
-- **Phase 2 ✅ DONE** (`frontend/src/components/MapView.tsx:1`, `backend/src/mapping.py:1`): Leaflet map (OSM tiles), bubbles ∝√orders (`mapping.py:32 bubble_radius`, `MapView.tsx:62`), cluster colors per warehouse (`warehouse_color`), auto-fit bounds + single-point guard (`fit_bounds`), polylines neighborhood→warehouse (`assignment_lines`), R_max circles, layer legend. K/metric/constraint panel lives in OptimizationPanel (Phase 3).
-- **Phase 3 ✅ DONE** (`1b09bc4 feat(phase3)` `backend/src/distance.py:1`, `backend/src/optimization.py:1`): distance matrix (Haversine `backend/src/distance.py:11`, Euclidean `45`, Manhattan `70` + `*111km`), Weiszfeld K=1 `backend/src/optimization.py:26`, weighted K-Means K>1 `78` with k-means++ & Weiszfeld refine, MILP CFLP `122` PuLP `y_k,x_{i,k}` + infra cost + capacity `191` + radius `199`, assignment via `evaluate_network_layout:245`, baseline `compute_baseline_layout:367`, main `run_optimization:409` (<5s for N=1000, N≤500 MILP cutoff). Frontend fallback `frontend/src/services/api.ts:280 localOptimizeNetwork` mirrors logic in JS. Tests: `backend/tests/test_distance.py`, `test_optimization.py`, `test_acceptance_phase3.py`.
-- **Phase 4 ✅ DONE** (`backend/src/cost.py:1`, `backend/src/mapping.py:1`): cost engine `effective_rate/effective_distance/assignment_cost/compute_metrics/compute_comparison/distance_histogram/metrics_table_rows` (traffic `d*(1+traffic_factor)` + fleet-weighted rate + infra); `optimization.py:245 evaluate_network_layout` delegates to it; new `POST /api/export/metrics` + `/api/export/assignments` (`backend/src/api.py:179`); frontend `MapView.tsx` + `ComparisonDashboard.tsx` (cards, table, histogram, CSV exports) wired to App Phase 2/4; tests `backend/tests/test_cost.py` (3 hand-calcs).
-- **Phase 5 TODO** (`docs/phases.md:65`): bonus toggles (vehicles/fuel/traffic/demand/infra trade-off chart), polish, README, 2-3min demo video script (pipeline order).
+**Shipped (do not regress):**
+- **Ingestion ✅** — neighborhoods only (CSV/JSON upload, manual table, synthetic + Census ACS + opt-in Hyderabad sample, per-account EMPTY storage, JWT-gated). Vehicles + existing-warehouse CRUD/seeders are PLANNED (`phases.md` Phase A).
+- **Map ✅** — Mapbox GL (Standard/Light/Dark), bubbles ∝√orders, displacement/road lines, R_max circles + road isochrones, layer chips, Gmaps rail (`ask/saved/optimize/compare/data/lab/export/settings/help`). Click-to-focus, coverage heatmap, traffic overlay are PLANNED (Phase B).
+- **Optimization ✅** — Haversine/Euclidean/Manhattan + road mode, Weiszfeld K=1, weighted K-Means K>1, PuLP MILP CFLP, road-aware assignment, incremental expansion (`POST /api/expand`). Optimize-on-current-traffic + `traffic_aware_reroute` are PLANNED (Phase C).
+- **Cost/compare ✅** — traffic/fleet/live-fuel cost engine, baseline-vs-optimized dashboard, fuel-reduction graph, CSV exports. Per-order road+fuel truth, populated Fuel-portion/Avg-congestion/Feasibility fields, annotated infra-vs-delivery elbow are PLANNED hardening (Phase D).
+- **Scenarios ✅ (slider-driven)** — elbow trade-off, demand-shift slider, fleet ETA sliders, diagnostics + Fuel/Traffic cards. Live-feed automation + congestion spillover + keep/abandon/sell expansion policy + Overview tab are PLANNED (Phases E–F).
 
-Traceability: `docs/phases.md:86` + `docs/prd.md:22`.
+**Planned docs-only Phases A–F (`docs/phases.md`, minimal-overlap concurrency):** A Onboarding Trio (#4, #6, #8) · B Map UX (#1–#3, #5-display) · C Traffic-aware routing (#5-opt, #9, #12-engine) · D Cost truth (#7, #10) · E Expansion advisor (#11) · F Realtime automation + Overview (#12-UI, #13, #14). Shared frozen interfaces in `phases.md` §1; traceability in Appendix A.
+
+Next (code): fix the routes `{frm|from}` contract bug → vehicle + existing-warehouse onboarding → traffic-aware routing → per-order cost hardening → expansion policy → realtime loop + Overview tab. Plus standing items: Neon-backed `users` table, production secrets via `vercel env add … production`, demo video refresh (see `docs/demo_script.md`).
+
+Traceability: `docs/phases.md` Appendix A + `docs/prd.md` §4.
 
 ## 9. Coding Standards for Agents
 
 - **Production-ready, modular, no pseudocode** (`docs/prompt.md:45`). Type-safe (Pydantic v2 + TS), fully runnable.
 - **Validate all inputs**, user-friendly inline errors, no crash on 10-1000 rows.
 - **Seeded RNG** for K-Means + synthetic (`random_seed` / `seed`).
-- **Units**: WGS84 degrees in, km out (Geopy Haversine), cost INR.
-- **File naming**: keep `backend/src/*.py`, `frontend/src/components/*.tsx` pattern; follow Appendix B (`docs/phases.md:100`).
+- **Units**: WGS84 degrees in, km out (Haversine), cost INR (live fuel in ₹/L via RapidAPI India).
+- **File naming**: keep `backend/src/*.py`, `frontend/src/components/*.tsx` pattern; follow `docs/phases.md` Appendix B. Never hand-edit `api/src/*` — run `make sync-api`.
 - **No magic strings**: reuse schema field names; use `backend/src/schema.py` as import source.
-- **Perf**: N=1000 <5s optimize, map <2s.
-- **Testing**: add pytest for new logic under `backend/tests/`, keep `make test` green before commit.
-- **Docs**: update `README.md` Architecture tree if adding modules; never edit `docs/*.md` unless task says so.
+- **Perf**: N=1000 <5s optimize, map <2s. Road mode is provider-bound: batch ≤12-pair chunks with progressive rendering.
+- **Testing**: add pytest for new logic under `backend/tests/`, keep `make test` green (115 tests) before commit.
+- **Docs**: update `README.md` Architecture tree if adding modules; `docs/*.md` may be edited to stay in sync (`problem_statement.md` requirements are frozen — its addendum is a pointer only; `phases.md` A–F is docs-only until built — don't claim A–F items as shipped).
+- **Frontend**: Mapbox token required (`frontend/.env.local` → `VITE_MAPBOX_TOKEN`); accounts start EMPTY — never auto-load sample data; keep per-user `localStorage` namespacing (`gridpoint_*_<uid>`); keep offline fallbacks in `services/api.ts` in sync with backend.
 - **Git**: `git@github.com:nazu777/Hackmatics_Grid_Point.git` — remote uses `https://` locally (SSH publickey denied); `main` branch.
 
 ## 10. Do / Don't
@@ -188,17 +229,17 @@ Traceability: `docs/phases.md:86` + `docs/prd.md:22`.
 |----|-------|
 | Run `pnpm approve-builds --all` if Vite build fails on esbuild | Bypass pnpm supply-chain policy silently |
 | Check `frontend/dist` build + `python -c "from src.api import app"` after changes | Assume backend works without import test |
-| Keep `frontend/src/services/api.ts:4` VITE_API_URL fallback | Hardcode localhost URLs for prod |
+| Keep `frontend/src/services/api.ts:24` VITE_API_URL fallback | Hardcode localhost URLs for prod |
 | Add `allowBuilds.esbuild` in pnpm-workspace for Vercel | Commit `.env`, `.vercel/`, `node_modules/`, `dist/` |
 | Handle infeasible MILP with `ΣC_max≥Σw_i` pre-check + greedy fallback | Silently assign infeasible warehouses |
 
 ## 11. Quick Agent Checklist (Before PR)
 
-1. `make test` passes (50+ tests, `test_optimization.py:1` covers Weiszfeld/K-Means/MILP) + `pnpm --prefix frontend build` succeeds ?
-2. Schemas still match `docs/schema.md` (field names, ranges, alias mapping)? Check `backend/src/schema.py:112 WarehouseMetric`, `121 Metrics`, `156 OptimizationResult`.
-3. `api/index.py` still ≤35 lines and only wraps `backend/src/api.py`? Check `backend/src/api.py:71` optimize route.
+1. `make test` passes (115 tests: `test_optimization.py` covers Weiszfeld/K-Means/MILP, plus routing/fuel/traffic/census/auth) + `pnpm --prefix frontend build` succeeds ?
+2. Schemas still match `docs/schema.md` (field names, ranges, alias mapping)? Check `backend/src/schema.py:121 WarehouseMetric`, `130 Metrics`, `168 OptimizationResult`.
+3. `api/index.py` still a 23-line adapter and `api/src/` matches `backend/src/` (`make sync-api` run)? Check `backend/src/api.py` optimize + expand routes.
 4. `vercel.json` rewrites preserve `/api/*` before SPA catch-all? Test `curl /api/health` + `/api/optimize`.
-5. Updated `README.md` if architecture changed? No secrets committed (`git status`)? Distance `backend/src/distance.py:94 compute_distance_matrix` dispatcher covers haversine|euclidean|manhattan.
+5. Updated `README.md` if architecture changed? No secrets committed (`git status`)? Distance `backend/src/distance.py` dispatcher covers haversine|euclidean|manhattan (road lives in `routing.py`).
 
 ---
 

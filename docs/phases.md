@@ -1,127 +1,193 @@
 # GridPoint: Development Phases & Sprint Plan
-> Aligned to `problem_statement.md` pipeline: `Neighborhood Data` → `Location Visualization` → `Warehouse Optimization` → `Neighborhood Assignment` → `Delivery Cost Comparison`
 
-Hackathon window: 24 hours. Phases are sequential with overlap allowed; each phase has entry criteria, tasks, and exit deliverable with acceptance checks.
-
----
-
-## Phase 1: Data Ingestion & Environment Setup
-**Goal**: Establish codebase, data contracts (`schema.md`), and neighborhood data entry layer — fulfilling *“Allow users to upload or enter neighborhood data including location and daily orders”*.
-
-- **Tasks**:
-  1. Initialize repo structure & `requirements.txt` (Python 3.10+, React, Pandas, NumPy, scikit-learn, PuLP/OR-Tools, Leaflet/Mapbox, Geopy).
-  2. Define schemas (see `schema.md`) for `Neighborhood`, `Warehouse`, `Assignment`, `OptimizationConfig`.
-  3. Implement CSV and JSON parsers (`id`, `latitude`, `longitude`, `daily_orders`, optional `name`) with header auto-detection.
-  4. Build manual tabular entry form (add/edit/delete rows, inline validation, duplicate ID guard).
-  5. Build synthetic dataset generator (uniform/clustered distributions, seedable, realistic order volumes) for rapid demo/testing.
-  6. Implement validation layer: `lat ∈ [-90,90]`, `lon ∈ [-180,180]`, `orders ≥0` integer, non-null checks, client+server feedback.
-  7. Add import/export + session persistence.
-- **Deliverable**: Functional ingestion UI that loads datasets into validated DataFrame/session state.
-- **Acceptance**: Upload sample CSV/JSON (10–1,000 rows) → no crash; invalid rows flagged; synthetic generator yields mappable data.
-
-## Phase 2: Location Visualization & Spatial Mapping
-**Goal**: Render geography and user controls — fulfilling *“Visualize all neighborhood locations on a map”* and *“Allow user to select number of warehouses”*.
-
-- **Tasks**:
-  1. Integrate interactive map (Leaflet / Mapbox — per tech stack).
-  2. Plot neighborhood nodes as circle markers; radius ∝ `daily_orders`; tooltip with ID/orders/coords; color scale by order volume.
-  3. Implement warehouse count selector `K` (1–10) + distance metric toggle (Haversine default, Euclidean, Manhattan) with helper text.
-  4. Implement constraint control panel (toggles for `C_max`, `R_max`, vehicle/fuel params — wired but optional).
-  5. Auto-fit map bounds to dataset bounding box; handle single-point and antipodal edge cases.
-  6. Add layer controls: show/hide demand bubbles, base map style switch.
-- **Deliverable**: Interactive map displaying all demand nodes with dynamic UI controls for K and metrics.
-- **Acceptance**: Changing K/metric updates UI state; map centers correctly; 1,000 nodes render <2s.
-
-## Phase 3: Core Optimization Engine & Assignment Logic
-**Goal**: Compute optimal warehouse locations and neighborhood assignments — fulfilling *“Run optimization to determine suitable warehouse locations”* and *“Assign each neighborhood to its nearest or optimal warehouse”* + capacity/radius consideration.
-
-- **Tasks**:
-  1. Build distance matrix module: Haversine (Geopy/formula), Euclidean, Manhattan; unit = km; vectorized via NumPy.
-  2. Implement **Weiszfeld algorithm** for `K=1` weighted geometric median.
-  3. Implement **Weighted K-Means** for `K>1` unconstrained (weights=`daily_orders`, k-means++ init, multiple restarts).
-  4. Implement **MILP CFLP solver** (PuLP / OR-Tools) for constrained mode: variables `y_k`, `x_{i,k}`; objective `min Σ w_i·d_{i,k}·x_{i,k}` (+ infra cost if enabled); constraints: single assignment, capacity `Σ w_i·x_{i,k} ≤ C_max`, radius `d_{i,k}·x_{i,k} ≤ R_max`.
-  5. Build assignment logic: nearest-warehouse (unconstrained) vs MILP-optimal (constrained); greedy fallback + infeasibility explanation if no feasible solution.
-  6. Expose config: `OptimizationConfig` (K, metric, constraints, infra cost, traffic factor) → `OptimizationResult` (warehouse coords, assignments).
-  7. Unit test against synthetic grids; benchmark N=1,000 <5s.
-- **Deliverable**: Pipeline outputting `warehouses: [{warehouse_id, lat, lon}]` and `assignments: [{neighborhood_id, warehouse_id, distance_km}]`.
-- **Acceptance**: For known clusters, warehouses converge near weighted centroids; constrained run respects C_max/R_max or reports violation.
-
-## Phase 4: Cost Calculation & Comparative Evaluation
-**Goal**: Quantify delivery effort and compare layouts — fulfilling *“Calculate total delivery distance and cost”*, *“Display optimized warehouse locations and assignments”*, and *“Compare original vs optimized arrangement”*.
-
-- **Tasks**:
-  1. Build cost engine:
-     - `Total Unweighted Distance = Σ d_i`
-     - `Total Weighted Distance = Σ w_i·d_i`
-     - `Total Cost = Σ w_i·d_i·cost_per_km + Σ infra_cost_k` (vehicle/fuel/infra aware)
-     - `Avg per Order`, `Capacity Utilization %` per warehouse.
-  2. Define **baseline (original)**: bounding-box centroid / unweighted mean / single-warehouse mode / user-provided location; compute baseline metrics with same distance metric.
-  3. Build comparison UI: side-by-side metric cards (Baseline vs Optimized), % savings, distance saved, cost delta; bar/chart of distance distribution.
-  4. Overlay assignments on map: colored clusters, polylines neighborhood→warehouse, warehouse icons, `R_max` radius circles when enabled.
-  5. Add export: metrics table to CSV/JSON, map snapshot.
-- **Deliverable**: Evaluation dashboard with delta metrics and assignment overlays.
-- **Acceptance**: Baseline vs optimized numbers differ correctly; map lines match assignment table; cost formula verified on 3 hand-calculated examples.
-
-## Phase 5: Advanced Constraints, Bonus Features, Polish & Submission
-**Goal**: Integrate bonus scoring features, UI polish, and hackathon deliverables.
-
-- **Tasks**:
-  1. **Bonus integrations** (each behind toggle, per `problem_statement.md` Bonus Features):
-     - Tight `C_max` + utilization gauges & overflow warnings.
-     - `R_max` enforcement + violation list.
-     - Vehicle fleet table (`vehicle_type`, `capacity`, `cost_per_km`, `fuel_type`) linked to cost engine.
-     - Fuel cost `$/km` parameter.
-     - Traffic-dependent time: `time = d/speed × (1+traffic_factor)`; display ETA.
-     - Demand shift simulator: slider `w_i' = w_i × (1+Δ%)` and re-optimize button.
-     - Infrastructure vs delivery trade-off: `infra_cost_per_warehouse` slider + chart of `Total Cost vs K` (elbow analysis).
-  2. Polish: responsive layout, dark/light theme, tooltips, loading spinners for optimization, error toasts for infeasibility.
-   3. Docs: comprehensive `README.md` (problem recap, architecture diagram, pipeline gif, setup `pnpm install` + `make setup`, AI tools disclosure, library list, schema reference).
-  4. Demo video (2–3 min) script: (0:00) Problem intro → (0:20) Upload/edit neighborhoods → (0:45) Map visualization → (1:05) Select K & run optimization → (1:30) Show assignments & warehouses → (1:50) Cost comparison original vs optimized → (2:20) Bonus constraints toggle → (2:45) Close + repo link.
-  5. Final QA: test with N=10, 100, 1,000; verify <5s, no console errors, public GitHub push.
-- **Deliverable**: Polished prototype, public repo, demo video ready for submission. Covers full pipeline `Neighborhood Data → Location Visualization → Warehouse Optimization → Neighborhood Assignment → Delivery Cost Comparison`.
-- **Acceptance**: All 8 core requirements demonstrable end-to-end; at least 3 bonus features toggled live in demo.
+> Source: user-provided 14-item backlog (Sept 2026), recorded verbatim in §0. No feature code is built in this change — this file only divides the work into concurrently-executable phases.
+> Pipeline still holds: `Neighborhood Data` → `Location Visualization` → `Warehouse Optimization` → `Neighborhood Assignment` → `Delivery Cost Comparison`, plus new Overview + Realtime Automation layers.
 
 ---
 
-## Appendix A: Traceability Matrix (Problem Statement → Phase)
-| Problem Requirement | Phase | Artefact |
+## §0. Backlog as received (verbatim, numbered for traceability)
+
+1. clicking the warehouse should show all the necessary details about the warehouse zone and its nodes assigned, it should hide the other zones for better clarity and highlight the zone user clicks.
+2. heatmap of the coverage by the warehouses, close the proximity to the warehouse from a node in a particular location, greener the area, and opposite can be given with red, and fill the remaining with the color gradient.
+3. remove the "Pair #0: expected {frm:{lat,lon}, to:{lat,lon}}." this is appearing once i select the road instead of displacement option.
+4. user must enter data about orders from different neighbourhoods (already there), which vehicles they have and warehouse details of warehouses they already have, when a new account is created everything is empty, so the user has to enter these data, for demo purposes we shall have a synthetic data addition feature for each of them (it already exists for the neighbourhood orders)
+5. Use the roads generated by the roads option in the maps to get the traffic of that particular area and display it in the map and use this data to optimise the routes dynamically. Give an option to optimise the warehouse routing based on current traffic conditions in the optimisation section.
+6. daily orders — clarified: the daily orders are from the nodes and based on the nodes location they will be assigned to a particular warehouse.
+7. give the delivery distance and cost, using the fuel api key, for each order using the road distance, give a comparision of the optimised avg cost per order in each node and overall vs the same details but for the older way of warehouse. The data fields in the following locations are empty, change it to its required values: Fuel cost portion ($), Avg corridor congestion, Feasibility ratio
+8. warehouse — interpreted with #6: each warehouse aggregates the daily_orders of its assigned nodes (assigned_orders / utilization); warehouse CRUD + detail view covered in Phase A/B.
+9. The warehouse routing should dynamically update by considering the current traffic conditions in the nearby areas optimising time and money.
+10. Show the clear difference of tradeoff between infrastructure cost and delivery cost.
+11. also infra cost vs fuel cost while determining warehouse locations for expansion and vehicles to be added should also be dynamic, basically user enters their current data about where they have warehouses, which neighbourhoods their orders come from and which vehicles they have, lets say now they want to expand, we should find the best cost effective way for them to scale their operations based on their choice of whether or not they are okay with abandoning/changing/demolishing their current warehouse infra or selling already owned vehicles, even that should have a recommended approach, taking cost and future revenue into calculations
+12. fuel data we are collecting/generating separately, same with traffic data and population data, so the "Traffic Congestion & Fleet ETA" section in scenario lab should be integrated via those data, not sliders, it should be kinda realtime and automated
+13. "Demand Surge & Contraction Simulator" can also be automated and simulated once simulation is turned on for real time demand, traffic and fuel prices, let's say there is a lot of congestion near a warehouse in that case some nodes will get assigned to a different warehouse until surge goes away
+14. we need an overview tab that shows all cost and detail overview such as number of vehicles, fuel price, infra price, etc., add these to all the files in /docs, add these features into phases.md by replacing the existing ones, with minimal overlap between each phase for concurrent execution.
+
+> Items 6 and 8 arrived as single words ("daily orders", "warehouse"); interpretation above follows the user's clarification that daily orders live on nodes and flow into warehouses via assignment.
+
+---
+
+## §1. Shared frozen interfaces (do first, ~30 min, unblocks all phases)
+
+To keep overlap minimal, every phase builds against these frozen contracts and MUST NOT change them without a docs amendment:
+
+- `Neighborhood {neighborhood_id, name?, latitude, longitude, daily_orders (= w_i), zone?}` — daily orders live ONLY on nodes (#6); warehouses derive `assigned_orders = Σ w_i` via assignment (#8).
+- `Warehouse {warehouse_id (W1..WK), latitude, longitude, capacity?, radius_km?, infra_cost?, assigned_orders (derived), utilization_pct (derived)}` — covers both optimized sites and user-entered existing sites (#4, #8).
+- `VehicleType {vehicle_type, capacity, cost_per_km, fuel_type, avg_speed_kmph, mileage_kmpl}` (#4).
+- `Assignment {neighborhood_id → warehouse_id, distance_km, weighted_distance, cost, fuel_cost, congestion_pct?, travel_time_min?, within_radius, is_feasible}` (#6–#9).
+- `Metrics {total_unweighted_distance_km, total_weighted_distance_km_orders, total_cost, total_fuel_cost, fuel_live, avg_congestion_pct, avg_distance_per_order_km, feasibility_ratio, ...}` — the three fields in #7 MUST be populated, never empty.
+- `OptimizationConfig` gains (planned): `use_live_traffic_for_routing: bool`, `traffic_aware_reroute: bool`, `simulation_mode: off|realtime`, `expansion_policy {allow_abandon_infra, allow_sell_vehicles, horizon_months, revenue_per_order}` (#5, #9, #11–#13).
+- Route geometry contract fix (#3): backend `POST /api/routes/geometry` currently validates `pairs[]` as `{frm:{lat,lon}, to:{lat,lon}}` while the frontend sends `{from:{lat,lon}, to:{lat,lon}}` — the fix is to accept BOTH spellings and never surface the raw `Pair #0…` validator string to the map UI (map to a friendly "Road path unavailable — showing straight line" notice).
+
+---
+
+## Phase A — Onboarding Trio & Data Foundation (items #4, #6, #8)
+
+**Goal**: a brand-new account starts EMPTY and the user enters all three inputs — order neighborhoods, owned vehicles, existing warehouses — each with a synthetic demo seeder.
+**Owns**: `schema.md` §2.1/§2.2/§2.3 + §2.8 seeds, `prd.md` §5.1, onboarding/empty-state UI, `POST /api/upload`, `GET /api/synthetic`, vehicle + warehouse CRUD endpoints (planned), per-user namespaced storage.
+**Does NOT touch**: map rendering, routing engine, cost math, expansion recommendations, overview aggregation (consumes only the frozen interfaces above).
+- Tasks:
+  1. Neighborhood orders input (exists — keep): CSV/JSON upload, manual table, validation, alias mapping.
+  2. Owned-vehicle input (new): fleet table create/edit/delete (`vehicle_type, capacity, cost_per_km, fuel_type, avg_speed_kmph, mileage_kmpl`) + validation + persistence.
+  3. Existing-warehouse input (new): warehouse table create/edit/delete (`warehouse_id, lat/lon, capacity, radius_km, infra_cost`) + validation + persistence; these double as the "older way" baseline in Phase D and the keep/abandon set in Phase E.
+  4. Synthetic seeders for ALL THREE (neighborhoods exists — add vehicles + warehouses seeders with fixed seeds for demo reproducibility).
+  5. Empty-account UX: first-run checklist (1. add orders → 2. add vehicles → 3. add warehouses → 4. optimize); no auto-loaded sample.
+- **Deliverable**: three validated, persisted, per-user datasets loadable independently of any map/optimization work.
+- **Acceptance**: fresh account shows 0/0/0 with seeders; invalid rows flagged; seeds are deterministic.
+- **Trace**: #4, #6, #8.
+
+## Phase B — Map Interaction & Coverage UX (items #1, #2, #3 + display half of #5)
+
+**Goal**: click-to-focus warehouse zones, proximity heatmap, traffic overlay display, and the roads-error fix.
+**Owns**: `MapView.tsx`, `mapThemes.ts`, `MapChrome.tsx`, `POST /api/routes/geometry` contract + client error mapping, `POST /api/map/summary`.
+**Does NOT touch**: routing optimization math, cost engine, expansion logic, simulation loop (reads their outputs only).
+- Tasks:
+  1. Warehouse click-to-focus (#1): detail card (zone id, center, `assigned_orders = Σ daily_orders`, utilization, capacity/radius/infra, full assigned-node list with per-node `daily_orders` + distance); dim/hide non-selected zones; highlight selected zone boundary + members; clear-focus control.
+  2. Coverage heatmap (#2): green (near warehouse) → red (far) continuous gradient layer over the service area, blended under bubbles/routes; legend + toggle; recomputed from active assignment distances.
+  3. Roads error fix (#3): accept `{frm|from}` spellings server-side; client maps ANY geometry failure to a friendly inline notice (never the raw `Pair #0…` string); missing entries fall back to straight lines with a traced/total counter.
+  4. Traffic-on-map display (display half of #5): render corridor congestion from road geometries (color segments green→amber→red); layer toggle; no optimization changes in this phase.
+- **Deliverable**: focus + heatmap + traffic overlay + silent-error road toggle, all behind layer flags.
+- **Acceptance**: clicking Wk isolates its zone with full node table; heatmap gradient renders; switching displacement→roads never shows `Pair #0…`.
+- **Trace**: #1, #2, #3, #5 (display).
+
+## Phase C — Traffic-Aware Routing Engine (items #5-opt, #9, plus engine half of #12)
+
+**Goal**: roads-derived corridor traffic feeds live routing decisions; optimization can run on current traffic; routes re-optimize for time + money.
+**Owns**: `backend/src/routing.py`, `traffic.py`, `optimization.py` (`nearest_labels_for_metric`, `evaluate_network_layout`, `run_optimization`), `POST /api/routes/geometry`, `GET /api/traffic/flow|history`, OptimizationPanel traffic controls.
+**Does NOT touch**: onboarding forms, comparison cards, expansion advisor, overview tab (exposes `congestion_pct`, `travel_time_min`, `routing_note`, `traffic_note` for them).
+- Tasks:
+  1. Corridor traffic from road geometries (#5): aggregate traced-road segments into per-corridor congestion; persist to rolling history; serve via traffic endpoints.
+  2. "Optimize on current traffic" option (#5-opt): explicit toggle in the Optimization section (`use_live_traffic_for_routing`); when on, matrices + assignment use live corridor speeds; result carries `traffic_note`/`routing_note` provenance.
+  3. Dynamic reroute (#9): `traffic_aware_reroute` mode re-evaluates assignment as corridor conditions change, optimizing `α·cost + β·time`; surfaces changed assignments + saved minutes/₹.
+  4. Engine half of automated Fleet ETA (#12): ETA math reads live fuel/traffic/population feeds (no manual sliders in the engine path); UI sliders remain only as offline overrides until Phase F removes them.
+- **Deliverable**: traffic-aware optimize + reroute path with provenance notes and corridor congestion outputs.
+- **Acceptance**: same dataset optimizes differently under congested vs free-flow corridors; reroute improves time and/or cost; no slider required in the engine path.
+- **Trace**: #5, #9, #12 (engine).
+
+## Phase D — Cost Truth & Comparison (items #7, #10)
+
+**Goal**: every order priced on road distance + live fuel; node-level and overall optimized-vs-baseline comparison; the three empty fields populated; infra-vs-delivery tradeoff made unmissable.
+**Owns**: `cost.py`, `fuel.py`, `ComparisonDashboard.tsx`, tradeoff chart, `POST /api/export/metrics|assignments`, `Metrics`/`Comparison` contracts.
+**Does NOT touch**: onboarding forms, map interaction, routing engine internals, expansion recommendations, simulation loop (consumes their outputs).
+- Tasks:
+  1. Per-order road + fuel costing (#7): `distance_km` (road), `fuel_cost` (fuel API price / mileage), `cost`, per-node `avg cost per order`; roll up to overall averages.
+  2. Optimized vs older-way comparison (#7): baseline = user's existing warehouses from Phase A (fallback: centroid); side-by-side per-node table + overall cards (distance, cost, fuel, avg/order, % saved).
+  3. Empty-field fix (#7): `Fuel cost portion ($)`, `Avg corridor congestion`, `Feasibility ratio` MUST render from `total_fuel_cost`, `avg_congestion_pct`, `feasibility_ratio` with `—` + tooltip only when inputs are genuinely absent (never blank from a mapping bug).
+  4. Infra-vs-delivery tradeoff clarity (#10): dedicated elbow view — delivery-cost curve vs infra-cost line vs combined total across K, with the cost-minimizing K annotated and a plain-language "why" caption.
+- **Deliverable**: per-node + overall cost comparison and tradeoff chart with zero empty metric slots.
+- **Acceptance**: every assignment row shows road km + fuel + cost; baseline-vs-optimized deltas reconcile to the map lines; the three named fields always show a value or an explained `—`.
+- **Trace**: #7, #10.
+
+## Phase E — Expansion & Scale Advisor (item #11 + infra-vs-fuel dynamics)
+
+**Goal**: cost-effective scaling advice over the user's REAL current state, with keep vs abandon/demolish/change infra and keep vs sell vehicles as first-class choices, plus a revenue-aware recommendation.
+**Owns**: `expansion.py`, `POST /api/expand`, `WarehouseExpansion.tsx`, `ScenariosPanel.tsx` tradeoff/diagnostics sections, expansion policy schema.
+**Does NOT touch**: onboarding forms, map interaction, routing engine, realtime simulation loop (reads costs + assignments only).
+- Tasks:
+  1. Current-state input contract: existing warehouses + order neighborhoods + owned vehicles (from Phase A) as the expansion baseline.
+  2. Policy toggles: `allow_abandon_infra` (keep vs abandon/change/demolish, with demolition/abandonment cost + infra salvage), `allow_sell_vehicles` (keep vs sell with resale value), `horizon_months`, `revenue_per_order`.
+  3. Candidate evaluation: new sites + added vehicles scored on infra cost vs fuel cost vs delivery savings over the horizon; dynamic vehicle/infra pricing (not static sliders).
+  4. Recommended approach: rank options by net present benefit (delivery savings + future revenue − infra/fuel/vehicle capex − abandon/sell frictions) and return ONE recommended plan with a costed rationale + before/after map + apply-to-main-map.
+- **Deliverable**: policy-driven expansion recommendation with keep/abandon/sell economics and revenue math.
+- **Acceptance**: same state yields different recommended plans when abandon/sell toggles flip; recommendation cites infra, fuel, delivery, and revenue figures that reconcile to Phase D.
+- **Trace**: #11 (uses #10 tradeoff + #7 fuel costing).
+
+## Phase F — Realtime Automation & Overview (items #12-ui, #13, #14)
+
+**Goal**: flip simulation from manual sliders to live-data automation, add congestion-triggered reassignment, and ship the single Overview tab.
+**Owns**: `ScenariosPanel.tsx` (Fleet ETA + Demand Surge sections), simulation orchestrator (planned), Overview tab (planned), `simulation_mode` config.
+**Does NOT touch**: onboarding forms, map interaction internals, routing/cost/expansion math (orchestrates them only).
+- Tasks:
+  1. Automated Fleet ETA (#12-ui): "Traffic Congestion & Fleet ETA" reads live fuel + traffic + population feeds and refreshes on a poll tick; manual sliders become collapsed offline overrides (removed from the default path).
+  2. Automated demand simulation (#13): `simulation_mode=realtime` scales `w_i` from live demand signals and re-optimizes on tick; congestion near a warehouse (threshold + hysteresis) spills nodes to the next-best warehouse until the surge clears, with an event log (spill start/end, moved nodes, recovered savings).
+  3. Overview tab (#14): one screen aggregating vehicle count + mix, current fuel price(s) + `fuel_live` provenance, infra price(s), warehouse count + utilization, order totals, distance/cost/fuel/congestion/feasibility summaries, and pending simulation/expansion alerts — every figure links to its source tab.
+  4. Docs + demo refresh: this phases.md, `prd.md`, `schema.md`, `demo_script.md` updated; demo script walks Overview last.
+- **Deliverable**: realtime simulation loop + spillover reassignment + Overview tab; sliders decommissioned from the default path.
+- **Acceptance**: with simulation ON, a congestion spike moves nodes across warehouses and moves them back after clearing; Overview figures match source tabs exactly.
+- **Trace**: #12, #13, #14.
+
+---
+
+## Concurrency map (minimal overlap)
+
+| Phase | Can start when | Parallel-safe with | Shared touchpoints (read-only unless noted) |
+| :--- | :--- | :--- | :--- |
+| A — Onboarding | immediately (§1 frozen) | B shell, F tab shell | writes schemas + seeders + storage |
+| B — Map UX | immediately (mock assignments/routes OK) | A, D copy, F shell | reads Assignment/Route shapes; writes map layers only |
+| C — Routing engine | immediately (mock corridors OK) | A, D copy, E scaffolding | writes routing/traffic/optimization; B reads its outputs |
+| D — Cost & comparison | after §1 (mock distances OK) | B, C, E scaffolding | writes cost/fuel/comparison; reads A + C outputs |
+| E — Expansion advisor | after §1 + Phase A contract (mock costs OK) | C, D, F | reads A + D; writes expansion only |
+| F — Automation + Overview | after §1 (shell immediately; loop after C + D) | A–E | orchestrates only; writes simulation loop + Overview |
+
+Rule: phases share ONLY the §1 interfaces. Map (B), engine (C), costs (D), expansion (E), and automation (F) never edit each other's files in the same change — integration happens through `Assignment`/`Metrics`/`OptimizationResult` + the three provenance notes.
+
+---
+
+## Appendix A: Traceability Matrix (backlog → phase)
+
+| Backlog # | Phase | Artefact (planned) |
 | :--- | :--- | :--- |
-| Upload/enter data | 1 | `src/data_ingestion.py`, `schema.md` |
-| Visualize on map | 2 | `src/mapping.py` |
-| Select K | 2 | Control panel |
-| Run optimization | 3 | `src/optimization.py` |
-| Assign neighborhoods | 3 | Assignment logic |
-| Calculate distance & cost | 4 | `src/cost.py` |
-| Display warehouses & assignments | 4 | Map overlays |
-| Compare original vs optimized | 4 | Comparison dashboard |
-| Capacity & radius | 3,5 | MILP + UI toggles |
-| Bonus: vehicles, fuel, traffic, demand, infra | 5 | Extended cost & scenario modules |
+| 1 warehouse click-to-focus | B | Warehouse detail card + zone isolate/highlight |
+| 2 coverage heatmap | B | Green→red proximity gradient layer + legend |
+| 3 roads `Pair #0` error | B | `{frm\|from}` acceptance + friendly fallback notice |
+| 4 onboarding + synthetic seeds | A | Vehicle + warehouse CRUD + all-three seeders; empty-account checklist |
+| 5 roads→traffic + optimize-on-traffic | B (display) + C (engine) | Traffic overlay + `use_live_traffic_for_routing` toggle |
+| 6 daily orders on nodes | A (+ §1) | `daily_orders = w_i` on `Neighborhood`; summed into warehouses via assignment |
+| 7 per-order road+fuel cost + fix 3 fields | D | Per-node/overall tables; `total_fuel_cost`, `avg_congestion_pct`, `feasibility_ratio` populated |
+| 8 warehouse aggregation | A (+ §1) | `assigned_orders`/`utilization_pct` derived; CRUD + detail |
+| 9 dynamic traffic reroute | C | `traffic_aware_reroute` (α·cost + β·time) |
+| 10 infra-vs-delivery tradeoff | D | Annotated elbow view + plain-language caption |
+| 11 expansion advisor (abandon/sell + revenue) | E | Policy toggles + ranked recommendation + before/after map |
+| 12 automated Fleet ETA | C (engine) + F (UI) | Live-feed ETA; sliders → collapsed overrides |
+| 13 automated demand simulation + spillover | F | `simulation_mode=realtime` + congestion spillover + event log |
+| 14 overview tab + docs | F (+ this file) | Overview tab aggregating vehicles/fuel/infra/orders/costs |
 
-## Appendix B: Suggested File Structure
+---
+
+## Appendix B: File Structure (target, docs-only plan — NOT yet built)
+
 ```
-app.py
-src/
-  data_ingestion.py
-  validation.py
-  optimization.py
-  cost.py
-  mapping.py
-  utils.py
-data/
-  samples/
-docs/
-  problem_statement.md
-  prd.md
-  phases.md
-  prompt.md
-  schema.md
-requirements.txt
-README.md
+Hackmatics_Grid_Point/
+├── backend/src/            # + planned: simulation orchestrator; expansion policy; {frm|from} tolerance
+├── backend/tests/          # + planned: onboarding seeds, heatmap/focus contracts, traffic-aware routing,
+│                           #   per-order fuel costing, expansion policy, simulation spillover tests
+├── frontend/src/           # + planned: vehicle + warehouse onboarding, warehouse focus card, heatmap +
+│                           #   traffic layers, optimize-on-traffic toggle, per-node comparison tables,
+│                           #   tradeoff view, expansion advisor, automated ETA/surge panels, Overview tab
+├── api/                    # unchanged shape (make sync-api still applies)
+├── data/samples/           # + planned: vehicle + warehouse sample/seed files
+├── docs/                   # problem_statement (frozen), prd, schema, phases (this plan), demo_script, prompt
+└── README.md / AGENTS.md
 ```
 
 ## Appendix C: Risk Log
+
 | Risk | Phase Impact | Mitigation |
 | :--- | :--- | :--- |
-| MILP infeasible (capacity < demand) | 3,4 | Pre-check ΣC_max ≥ Σw_i; suggest increase K/C_max |
-| Slow optimization for N>500 with MILP | 3 | Chunking; cap constrained MILP to N≤500 else weighted K-Means |
-| Map library mismatch | 2 | Abstract mapping layer; choose one stack early |
+| Frontend sends `{from}` / backend expects `{frm}` (#3) | B, C | Accept both spellings; add contract test; friendly fallback in UI |
+| Live provider outage/keys missing | C, D, F | Static fallbacks + `live=false` + provenance notes; simulation pauses with banner |
+| Congestion spillover flapping (#13) | F | Threshold + hysteresis + cooldown; event log |
+| Expansion advice distrust (#11) | E | Show full costed rationale (infra, fuel, delivery, revenue, frictions); reconcile to Phase D |
+| Phase overlap drift | all | §1 interfaces frozen; cross-phase edits only via docs amendment |
+| MILP infeasible (capacity < demand) | C, E | Pre-check ΣC_max ≥ Σw_i; suggest K/C_max; greedy fallback |
+| Slow optimization for N>500 with MILP | C | Cap constrained MILP to N≤500 else K-Means; progressive road rendering |
+| Vercel bundle drift (`api/src/` stale) | all | `make sync-api` after every `backend/src` change |
