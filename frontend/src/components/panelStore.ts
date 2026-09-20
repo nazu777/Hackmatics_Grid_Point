@@ -95,7 +95,6 @@ export function setStoreUser(userId: string | null) {
 function nsKey(key: string): string {
   return storeUserId ? `${key}_${storeUserId}` : key;
 }
-}
 
 /** Baseline-vs-optimized metrics table CSV (Phase 4 comparison). */
 export function buildMetricsCsv(result: OptimizationResult): string {
