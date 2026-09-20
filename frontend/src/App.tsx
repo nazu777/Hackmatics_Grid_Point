@@ -388,7 +388,7 @@ const AppShell: React.FC = () => {
     colorBy: 'warehouse'
   });
 
-  const { zoneColors, setZoneColor, resetZoneColors } = useZoneColors(ns('gridpoint_zone_colors'));
+  const { zoneColors, resetZoneColors } = useZoneColors(ns('gridpoint_zone_colors'));
 
   useEffect(() => {
     document.documentElement.classList.toggle('dark', theme === 'dark');
@@ -977,7 +977,6 @@ const AppShell: React.FC = () => {
               warehousesValidation={warehousesValidation}
               summary={summary}
               center={datasetCenter(neighborhoods)}
-              zoneColors={zoneColors}
               onOrdersChange={(updated) => {
                 setNeighborhoods(updated);
                 triggerValidation(updated);
@@ -989,9 +988,6 @@ const AppShell: React.FC = () => {
               onWarehousesLoaded={handleWarehousesLoaded}
               onOpenCensus={() => setIsCensusModalOpen(true)}
               onLoadSample={handleLoadSample}
-              onZoneColorChange={setZoneColor}
-              onResetZoneColors={resetZoneColors}
-              onApplyZones={handleApplyZones}
             />
           </SidePanel>
         )}
