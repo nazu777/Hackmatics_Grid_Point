@@ -333,7 +333,7 @@ Real US demand from ACS tract populations (`B01003_001E × orders_per_1000 / 100
 
 ### `POST /api/upload` (multipart `file`)
 
-Response: `{ filename, validation, neighborhoods, summary }` — CSV/JSON auto-detection with alias mapping. SHIPPED Sept 20 2026: `?dataset=neighborhoods|vehicles|warehouses` selects the onboarding dataset; plus `POST /api/vehicles/validate`, `POST /api/warehouses/validate`, `GET /api/synthetic/vehicles`, `GET /api/synthetic/warehouses`, `POST /api/export/vehicles`, `POST /api/export/warehouses`.
+Response: `{ filename, validation, neighborhoods, summary }` — CSV/JSON auto-detection with alias mapping. SHIPPED Sept 20 2026: `?dataset=neighborhoods|vehicles|warehouses` selects the onboarding dataset; plus `POST /api/vehicles/validate`, `POST /api/warehouses/validate`, `GET /api/synthetic/vehicles`, `GET /api/synthetic/warehouses`, `POST /api/export/vehicles`, `POST /api/export/warehouses`. Imported assignments: `?dataset=assignments` (canonical `neighborhood_id,warehouse_id[,distance_km]`, one node → one warehouse, unknown ids warn) + `POST /api/assignments/validate` (accepts known node/warehouse ids for reference checks) + `POST /api/export/assignments-imported`.
 
 ### `POST /api/export/csv` · `POST /api/export/json` · `POST /api/export/metrics` · `POST /api/export/assignments`
 
@@ -388,7 +388,7 @@ PBKDF2-HMAC-SHA256 passwords, HS256 JWTs. FIXED Sept 20 2026 (login persistence)
 
 ### `GET /api/user/data` · `PUT /api/user/data` (auth required)
 
-Server-side per-user workspace: `{updated_at, neighborhoods[], vehicles[], warehouses[], config{}}`. PUT merges partial payloads (sanity caps: 5000 nodes / 500 / 64; rows must be objects, config an object). The frontend pulls on login (last-write-wins by `updated_at`, empty side yields) and pushes debounced on every change; localStorage stays as offline cache. Store: `GRIDPOINT_DATA_FILE` (default `backend/data/user_data.json`, git-ignored; Vercel: `/tmp/gridpoint_user_data.json`); Neon workspace table is the production path (see `backend/src/userdata.py`).
+Server-side per-user workspace: `{updated_at, neighborhoods[], vehicles[], warehouses[], assignments[], config{}}`. PUT merges partial payloads (sanity caps: 5000 nodes / 500 / 64 / 5000 assignments; rows must be objects, config an object). The frontend pulls on login (last-write-wins by `updated_at`, empty side yields) and pushes debounced on every change; localStorage stays as offline cache. Store: `GRIDPOINT_DATA_FILE` (default `backend/data/user_data.json`, git-ignored; Vercel: `/tmp/gridpoint_user_data.json`); Neon workspace table is the production path (see `backend/src/userdata.py`).
 
 ---
 

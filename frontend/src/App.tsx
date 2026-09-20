@@ -29,9 +29,11 @@ import {
   downloadFile,
   getStoredVehicles,
   getStoredWarehouses,
+  getStoredAssignments,
   pushRecent,
   setStoredVehicles,
   setStoredWarehouses,
+  setStoredAssignments,
   setStoreUser,
   smartDefaults,
   getWorkspaceUpdatedAt,
@@ -41,8 +43,8 @@ import {
 import { SEARCH_CATEGORIES, searchAll, type SearchCategory } from './components/searchIndex';
 import { SeedResultsPanel } from './components/SeedResultsPanel';
 import { HYDERABAD_SAMPLE } from './data/sample';
-import { Neighborhood, ValidationResult, DatasetSummary, OptimizationConfig, OptimizationResult, MapLayerOptions, BasemapStyle, OverviewAggregate, VehicleType, Warehouse, OrderMove, TrafficZone } from './types';
-import { validateData, localValidate, optimizeNetwork, exportCsv, validateVehicles, validateWarehouses, localValidateVehicles, localValidateWarehouses, fetchRouteGeometries, fetchIsochrones, fetchCoverage as fetchCoverageGrid, fetchWarehouseFocus, fetchOverview, fetchTrafficZones, fetchUserWorkspace, saveUserWorkspace, isWorkspaceEmpty, type IsoFeature, type CoverageBounds, type CoverageCell, type WarehouseFocus } from './services/api';
+import { Neighborhood, ValidationResult, DatasetSummary, OptimizationConfig, OptimizationResult, MapLayerOptions, BasemapStyle, OverviewAggregate, VehicleType, Warehouse, OrderMove, TrafficZone, Assignment } from './types';
+import { validateData, localValidate, optimizeNetwork, exportCsv, validateVehicles, validateWarehouses, validateAssignments, enrichImportedAssignments, localValidateVehicles, localValidateWarehouses, fetchRouteGeometries, fetchIsochrones, fetchCoverage as fetchCoverageGrid, fetchWarehouseFocus, fetchOverview, fetchTrafficZones, fetchUserWorkspace, saveUserWorkspace, isWorkspaceEmpty, type ImportedAssignment, type IsoFeature, type CoverageBounds, type CoverageCell, type WarehouseFocus } from './services/api';
 import { WarehouseFocusCard } from './components/WarehouseFocusCard';
 
 const DEFAULT_CONFIG: OptimizationConfig = {
@@ -119,6 +121,10 @@ const AppShell: React.FC = () => {
   const [warehouses, setWarehousesState] = useState<Warehouse[]>(() => getStoredWarehouses());
   const [vehiclesValidation, setVehiclesValidation] = useState<ValidationResult>(() => localValidateVehicles(getStoredVehicles()));
   const [warehousesValidation, setWarehousesValidation] = useState<ValidationResult>(() => localValidateWarehouses(getStoredWarehouses()));
+  // Imported assignments: user-supplied neighborhood → warehouse plan, drawn
+  // on the map until an optimization replaces them.
+  const [importedAssignments, setImportedAssignmentsState] = useState<Assignment[]>(() => getStoredAssignments());
+  const [assignmentsValidation, setAssignmentsValidation] = useState<ValidationResult>(() => ({ valid: true, errors: [], warnings: [], total_rows: 0, valid_rows: 0 }));
   const [optimizationResult, setOptimizationResult] = useState<OptimizationResult | null>(null);
   const [isCensusModalOpen, setIsCensusModalOpen] = useState(false);
   const [isErrorDrawerOpen, setIsErrorDrawerOpen] = useState(false);
@@ -523,6 +529,14 @@ const AppShell: React.FC = () => {
     setStoredWarehouses(rows);
     validateWarehouses(rows).then(setWarehousesValidation);
   }, []);
+  const refreshAssignmentsValidation = useCallback((rows: ImportedAssignment[]) => {
+    validateAssignments(rows, neighborhoods, warehouses).then(setAssignmentsValidation);
+  }, [neighborhoods, warehouses]);
+  const setImportedAssignments = useCallback((rows: Assignment[]) => {
+    setImportedAssignmentsState(rows);
+    setStoredAssignments(rows);
+    refreshAssignmentsValidation(rows.map((r) => ({ neighborhood_id: r.neighborhood_id, warehouse_id: r.warehouse_id })));
+  }, [refreshAssignmentsValidation]);
   useEffect(() => {
     validateVehicles(vehicles).then(setVehiclesValidation);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -565,6 +579,7 @@ const AppShell: React.FC = () => {
         neighborhoods,
         vehicles: getStoredVehicles(),
         warehouses: getStoredWarehouses(),
+        assignments: getStoredAssignments(),
         config: optimizationConfig as OptimizationConfig
       };
       const localEmpty = isWorkspaceEmpty({ ...local, updated_at: localTs });
@@ -585,13 +600,16 @@ const AppShell: React.FC = () => {
         } catch { /* ignore */ }
         setStoredVehicles(server.vehicles);
         setStoredWarehouses(server.warehouses);
+        setStoredAssignments(server.assignments);
         setWorkspaceUpdatedAt(server.updated_at);
         setNeighborhoods(server.neighborhoods);
         // Data-tab trio state follows the adopted server copy.
         setVehiclesState(server.vehicles);
         setWarehousesState(server.warehouses);
+        setImportedAssignmentsState(server.assignments);
         validateVehicles(server.vehicles).then(setVehiclesValidation);
         validateWarehouses(server.warehouses).then(setWarehousesValidation);
+        refreshAssignmentsValidation(server.assignments.map((r) => ({ neighborhood_id: r.neighborhood_id, warehouse_id: r.warehouse_id })));
         triggerValidation(server.neighborhoods);
         if (server.config) setOptimizationConfig(server.config);
         finish();
@@ -621,6 +639,7 @@ const AppShell: React.FC = () => {
         neighborhoods,
         vehicles: getStoredVehicles(),
         warehouses: getStoredWarehouses(),
+        assignments: getStoredAssignments(),
         config: optimizationConfig as OptimizationConfig,
         updated_at: localTs || Date.now() / 1000
       };
@@ -677,6 +696,18 @@ const AppShell: React.FC = () => {
       warehouses: rows,
       at: Date.now()
     }));
+  };
+
+  const handleAssignmentsLoaded = (rows: ImportedAssignment[], valResult: ValidationResult) => {
+    // Enrich pairs into drawable rows (haversine node→warehouse distances);
+    // unresolvable rows are skipped so the map only shows real lines.
+    const enriched = enrichImportedAssignments(rows, neighborhoods, warehouses);
+    setImportedAssignmentsState(enriched);
+    setStoredAssignments(enriched);
+    setAssignmentsValidation(valResult.valid
+      ? { ...valResult, warnings: valResult.warnings ?? [] }
+      : valResult);
+    refreshAssignmentsValidation(rows);
   };
 
   const handleApplyZones = (updated: Neighborhood[]) => {
@@ -953,7 +984,10 @@ const AppShell: React.FC = () => {
   // Stable refs for the map — `?? []` inline would create a new array every
   // render and retrigger the map overlay effect (resetting the user's zoom).
   const mapWarehouses = useMemo(() => optimizationResult?.warehouses ?? [], [optimizationResult]);
-  const mapAssignments = useMemo(() => optimizationResult?.assignments ?? [], [optimizationResult]);
+  const mapAssignments = useMemo(
+    () => optimizationResult?.assignments ?? (importedAssignments.length > 0 ? importedAssignments : []),
+    [optimizationResult, importedAssignments]
+  );
 
   const railTab: RailTab =
     panel === 'results' || panel === 'detail' ? urlTab : (panel as RailTab);
@@ -967,6 +1001,12 @@ const AppShell: React.FC = () => {
   const goTab = useCallback((t: RailTab) => {
     navigate(`/app/${t}`);
   }, [navigate]);
+
+  /** Open the Data tab on a specific sub-tab (orders/vehicles/warehouses). */
+  const openDataSubtab = useCallback((t: 'orders' | 'vehicles' | 'warehouses' | 'assignments') => {
+    try { localStorage.setItem('gridpoint_data_subtab', t); } catch { /* ignore */ }
+    goTab('data');
+  }, [goTab]);
 
   // Clicking the already-open tab toggles the panel; switching tabs reveals it.
   const handleRailTab = useCallback((t: RailTab) => {
@@ -1040,8 +1080,13 @@ const AppShell: React.FC = () => {
         {panel === 'ask' && (
           <AskPanel
             neighborhoods={neighborhoods}
+            vehicles={vehicles}
+            warehouses={warehouses}
             config={optimizationConfig}
             result={optimizationResult}
+            validation={validation}
+            vehiclesValidation={vehiclesValidation}
+            warehousesValidation={warehousesValidation}
             onOptimize={runOptimize}
             onOpenCompare={() => goTab('compare')}
             onApplyZones={handleApplyZones}
@@ -1054,6 +1099,8 @@ const AppShell: React.FC = () => {
               setPanel('results');
             }}
             onOpenCensus={() => setIsCensusModalOpen(true)}
+            onOpenDataTab={openDataSubtab}
+            onOpenOverview={() => goTab('overview')}
           />
         )}
 
@@ -1178,9 +1225,11 @@ const AppShell: React.FC = () => {
               neighborhoods={neighborhoods}
               vehicles={vehicles}
               warehouses={warehouses}
+              assignments={importedAssignments}
               ordersValidation={validation}
               vehiclesValidation={vehiclesValidation}
               warehousesValidation={warehousesValidation}
+              assignmentsValidation={assignmentsValidation}
               summary={summary}
               center={datasetCenter(neighborhoods)}
               onOrdersChange={(updated) => {
@@ -1189,9 +1238,11 @@ const AppShell: React.FC = () => {
               }}
               onVehiclesChange={setVehicles}
               onWarehousesChange={setWarehouses}
+              onAssignmentsChange={setImportedAssignments}
               onOrdersLoaded={handleDataLoaded}
               onVehiclesLoaded={handleVehiclesLoaded}
               onWarehousesLoaded={handleWarehousesLoaded}
+              onAssignmentsLoaded={handleAssignmentsLoaded}
               onOpenCensus={() => setIsCensusModalOpen(true)}
               onLoadSample={handleLoadSample}
             />

@@ -455,6 +455,102 @@ def validate_warehouses(data: Union[List[Dict[str, Any]], pd.DataFrame]) -> Tupl
                             warnings=[], total_rows=len(records), valid_rows=len(clean)), clean
 
 
+def validate_assignment_row(row: Dict[str, Any], row_idx: Optional[int] = None) -> List[ValidationErrorItem]:
+    """Validate a single imported assignment record (neighborhood → warehouse)."""
+    errors: List[ValidationErrorItem] = []
+
+    for field in ("neighborhood_id", "warehouse_id"):
+        val = row.get(field)
+        if val is None or str(val).strip() == "" or (isinstance(val, float) and np.isnan(val)):
+            errors.append(ValidationErrorItem(
+                row=row_idx, field=field, value=val,
+                error=f"{field} is required and non-empty",
+                code="NULL_OR_EMPTY"))
+
+    dist = row.get("distance_km")
+    if dist is not None and not (isinstance(dist, float) and np.isnan(dist)) and str(dist).strip() != "":
+        try:
+            if float(dist) < 0:
+                errors.append(ValidationErrorItem(
+                    row=row_idx, field="distance_km", value=dist,
+                    error="distance_km must be >= 0 when set", code="OUT_OF_RANGE"))
+        except (ValueError, TypeError):
+            errors.append(ValidationErrorItem(
+                row=row_idx, field="distance_km", value=dist,
+                error=f"distance_km '{dist}' is not a valid number", code="INVALID_TYPE"))
+
+    return errors
+
+
+def validate_assignments(
+    data: Union[List[Dict[str, Any]], pd.DataFrame],
+    known_neighborhoods: Optional[List[str]] = None,
+    known_warehouses: Optional[List[str]] = None,
+) -> Tuple[ValidationResult, List[Dict[str, Any]]]:
+    """Validate an imported assignment dataset. Returns (ValidationResult, clean records).
+
+    Unknown neighborhood/warehouse references are WARNINGS (rows still import;
+    unresolvable rows are skipped when rendering). Duplicate neighborhood_ids
+    are ERRORS (one node maps to exactly one warehouse).
+    """
+    if isinstance(data, pd.DataFrame):
+        records = data.to_dict(orient="records")
+    else:
+        records = list(data)
+
+    if len(records) == 0:
+        empty_err = ValidationErrorItem(
+            row=None, field="dataset", value=0,
+            error="Assignment dataset is empty. Import at least 1 neighborhood → warehouse mapping.",
+            code="EMPTY_DATASET")
+        return ValidationResult(valid=False, errors=[empty_err], warnings=[], total_rows=0, valid_rows=0), []
+
+    known_nb = {str(x).strip() for x in (known_neighborhoods or []) if str(x).strip() != ""}
+    known_wh = {str(x).strip() for x in (known_warehouses or []) if str(x).strip() != ""}
+
+    all_errors: List[ValidationErrorItem] = []
+    warnings: List[ValidationErrorItem] = []
+    seen: Dict[str, int] = {}
+    clean: List[Dict[str, Any]] = []
+
+    for idx, row in enumerate(records):
+        row_num = idx + 1
+        row_errors = validate_assignment_row(row, row_idx=row_num)
+        nid = str(row.get("neighborhood_id", "")).strip() if row.get("neighborhood_id") is not None else ""
+        if nid:
+            if nid in seen:
+                row_errors.append(ValidationErrorItem(
+                    row=row_num, field="neighborhood_id", value=nid,
+                    error=f"Duplicate neighborhood_id '{nid}' (previously seen on row {seen[nid]}); one node maps to one warehouse",
+                    code="DUPLICATE_ID"))
+            else:
+                seen[nid] = row_num
+        if row_errors:
+            all_errors.extend(row_errors)
+            continue
+        wid = str(row.get("warehouse_id")).strip()
+        if known_nb and nid not in known_nb:
+            warnings.append(ValidationErrorItem(
+                row=row_num, field="neighborhood_id", value=nid,
+                error=f"neighborhood_id '{nid}' is not in the loaded demand data; row will be skipped on the map",
+                code="UNKNOWN_REFERENCE"))
+        if known_wh and wid not in known_wh:
+            warnings.append(ValidationErrorItem(
+                row=row_num, field="warehouse_id", value=wid,
+                error=f"warehouse_id '{wid}' is not in the loaded warehouses; row will be skipped on the map",
+                code="UNKNOWN_REFERENCE"))
+        dist = row.get("distance_km")
+        clean.append({
+            "neighborhood_id": nid,
+            "warehouse_id": wid,
+            "distance_km": float(dist) if dist not in (None, "") else None,
+        })
+
+    return ValidationResult(valid=len(all_errors) == 0, errors=all_errors,
+                            warnings=warnings, total_rows=len(records),
+                            valid_rows=len(clean)), clean
+
+
 def validate_optimization_config(
     config: OptimizationConfig,
     neighborhoods: List[Dict[str, Any]]
