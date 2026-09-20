@@ -47,15 +47,21 @@ Hackmatics_Grid_Point/
 │   │   ├── cost.py                # Cost engine, traffic factor, fleet weighting & metrics
 │   │   ├── mapping.py             # Geospatial bounds, bubble sizing & GeoJSON exports
 │   │   ├── scenarios.py           # Phase 5: Multi-K trade-off elbow, demand shift, fleet ETA
-│   │   └── api.py                 # FastAPI application & REST endpoints
-│   ├── tests/                     # 64 automated unit, integration & acceptance tests
+│   │   ├── auth.py                # JWT auth (PBKDF2 passwords, HS256 tokens, in-memory store)
+│   │   └── api.py                 # FastAPI application & REST endpoints (+ /api/auth/*)
+│   ├── tests/                     # 70+ automated unit, integration & acceptance tests
 │   ├── requirements.txt           # Python dependencies (FastAPI, PuLP, scikit-learn, etc.)
 │   └── pytest.ini
 ├── frontend/                      # React 18 + TypeScript + Vite + Tailwind CSS
 │   ├── src/
 │   │   ├── types/index.ts         # TypeScript interfaces matching schema.md
 │   │   ├── services/api.ts        # REST API client with full client-side solver fallbacks
-│   │   ├── components/
+│   │   ├── context/
+│   │   │   └── AuthContext.tsx      # JWT session provider (login/signup/logout, /api/auth/me)
+│   │   │   ├── components/
+│   │   │   │   ├── LandingPage.tsx      # Public marketing landing (/, redirects to /app/ask when logged in)
+│   │   │   │   ├── AuthPages.tsx        # Login (/login) & signup (/signup) forms
+│   │   │   │   ├── ProtectedRoute.tsx   # Guards /app/* — redirects to /login when logged out
 │   │   │   ├── Header.tsx         # Sticky navigation with 5 active pipeline stages
 │   │   │   ├── SummaryCards.tsx   # Top-level demand and data health metrics
 │   │   │   ├── FileUploader.tsx   # Drag-and-drop CSV/JSON ingestion with alias mapper
@@ -67,7 +73,7 @@ Hackmatics_Grid_Point/
 │   │   │   ├── ComparisonDashboard.tsx # Phase 4 side-by-side cost deltas & histogram
 │   │   │   ├── ScenariosPanel.tsx # Phase 5 What-If trade-offs, demand surge & fleet ETA
 │   │   │   └── ErrorDrawer.tsx    # Validation diagnostics drawer
-│   │   └── App.tsx                # Master pipeline shell
+│   │   └── App.tsx                # Router (/, /login, /signup, /app/:tab) + pipeline shell
 │   └── package.json
 ├── api/                           # Vercel serverless Python adapter & bundle sync
 ├── data/samples/                  # Hyderabad canonical CSV/JSON & 1,000-node benchmarks
