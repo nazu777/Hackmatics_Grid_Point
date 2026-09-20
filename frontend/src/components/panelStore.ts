@@ -1,4 +1,32 @@
-import type { Neighborhood, OptimizationResult } from '../types';
+import type { Neighborhood, OptimizationConfig, OptimizationResult } from '../types';
+
+/**
+ * Suggest a feasible per-warehouse capacity for a dataset: 1.5× fair share,
+ * rounded up to a neat number (min 100). Keeps the default demo feasible
+ * while showing real utilization gauges.
+ */
+export function suggestCapacity(neighborhoods: Neighborhood[], k: number): number {
+  const total = neighborhoods.reduce((s, n) => s + (Number(n.daily_orders) || 0), 0);
+  const fairShare = total / Math.max(1, k);
+  return Math.max(100, Math.ceil((fairShare * 1.5) / 50) * 50);
+}
+
+/**
+ * Factory defaults for a fresh optimizer setup: capacity, radius, live fuel
+ * and live traffic all ON, with capacity sized to the actual demand so the
+ * first run is feasible and utilization/radius/violation features light up.
+ */
+export function smartDefaults(neighborhoods: Neighborhood[], k: number): Partial<OptimizationConfig> {
+  return {
+    capacity_enabled: true,
+    C_max: suggestCapacity(neighborhoods, k),
+    radius_enabled: true,
+    R_max_km: 25,
+    use_live_fuel: true,
+    fuel_state: 'Karnataka',
+    use_live_traffic: true
+  };
+}
 
 /** Baseline-vs-optimized metrics table CSV (Phase 4 comparison). */
 export function buildMetricsCsv(result: OptimizationResult): string {

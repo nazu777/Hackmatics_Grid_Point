@@ -24,7 +24,8 @@ import {
   buildMetricsCsv,
   downloadFile,
   pushRecent,
-  searchNeighborhoods
+  searchNeighborhoods,
+  smartDefaults
 } from './components/panelStore';
 import { Neighborhood, ValidationResult, DatasetSummary, OptimizationConfig, OptimizationResult, MapLayerOptions, BasemapStyle } from './types';
 import { validateData, localValidate, optimizeNetwork, exportCsv, fetchRouteGeometries } from './services/api';
@@ -227,7 +228,9 @@ export const App: React.FC = () => {
     if (saved) {
       try { return JSON.parse(saved); } catch (e) { /* ignore */ }
     }
-    return DEFAULT_CONFIG;
+    // Fresh setup: capacity, radius, live fuel + live traffic ON, with
+    // capacity sized to the seeded demand so the first run is feasible.
+    return { ...DEFAULT_CONFIG, ...smartDefaults(neighborhoods, DEFAULT_CONFIG.K) };
   });
 
   const [mapLayerOptions, setMapLayerOptions] = useState<MapLayerOptions>({
@@ -331,7 +334,7 @@ export const App: React.FC = () => {
       try { localStorage.removeItem(k); } catch { /* ignore */ }
     });
     setNeighborhoods(INITIAL_DATASET);
-    setOptimizationConfig(DEFAULT_CONFIG);
+    setOptimizationConfig({ ...DEFAULT_CONFIG, ...smartDefaults(INITIAL_DATASET, DEFAULT_CONFIG.K) });
     setOptimizationResult(null);
     resetZoneColors();
   };

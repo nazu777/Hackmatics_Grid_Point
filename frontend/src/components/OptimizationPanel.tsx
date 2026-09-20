@@ -5,6 +5,7 @@ import { optimizeNetwork } from '../services/api';
 import { FuelCard } from './FuelCard';
 import { TrafficCard } from './TrafficCard';
 import { WarehouseExpansion } from './WarehouseExpansion';
+import { smartDefaults } from './panelStore';
 
 interface OptimizationPanelProps {
   neighborhoods: Neighborhood[];
@@ -19,7 +20,7 @@ export const OptimizationPanel: React.FC<OptimizationPanelProps> = ({
   lastResult,
   onGoToComparison
 }) => {
-  const [config, setConfig] = useState<OptimizationConfig>({
+  const [config, setConfig] = useState<OptimizationConfig>(() => ({
     K: 2,
     distance_metric: 'haversine',
     capacity_enabled: false,
@@ -30,10 +31,18 @@ export const OptimizationPanel: React.FC<OptimizationPanelProps> = ({
     fuel_cost_per_km: 0.0,
     infra_cost_per_warehouse: 0.0,
     traffic_factor: 0.0,
+    use_live_fuel: false,
+    fuel_state: 'Karnataka',
+    fuel_city: null,
+    use_live_traffic: false,
+    traffic_hour: null,
     vehicle_fleet: [],
     random_seed: 42,
-    baseline_mode: 'centroid'
-  });
+    baseline_mode: 'centroid',
+    // Fresh panel: capacity, radius, live fuel + live traffic ON by default,
+    // capacity sized to the loaded demand so the first run stays feasible.
+    ...smartDefaults(neighborhoods, 2)
+  }));
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
